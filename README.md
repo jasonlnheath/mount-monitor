@@ -1,6 +1,6 @@
 # Mount Monitor
 
-A simple visualizer of hd usage that monitors when space gets too high. At 98%
+A simple visualizer of disk usage that monitors when space gets too high. At 98%
 or above it throws a notification and glows red. Notifications are configured
 to go to your agent of choice with a skill that suggests files to prune /
 compress.
