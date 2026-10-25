@@ -24,6 +24,12 @@ BarWidget {
   // queued/active desktop alerts, fired one at a time so each stays clickable
   property var alertQueue: []
   property var activeAlert: null
+  // Whether this instance has taken its first reading. A rebuilt widget starts
+  // with empty bands, so the first reading is a baseline rather than a
+  // crossing: otherwise every config reload or shell restart re-notifies every
+  // mount that is already in a band. Critical is exempt, a full drive is never
+  // swallowed by the baseline.
+  property bool primed: false
   readonly property color alertRed: "#ff2d2d"
 
   function refresh(): void {
@@ -32,6 +38,11 @@ BarWidget {
 
   function refreshSelf(): void {
     if (!dfProc.running) dfProc.running = true
+  }
+
+  function wantedMounts(): var {
+    var wanted = root.setting("mounts", ["/"])
+    return Array.isArray(wanted) ? wanted : ["/"]
   }
 
   function bandFor(pct): int {
@@ -48,71 +59,137 @@ BarWidget {
 
   function runAgent(m): void {
     var cmd = root.setting("agentCommand", null)
-    if (cmd && cmd.length > 0) {
+    if (Array.isArray(cmd) && cmd.length > 0) {
       agentProc.command = cmd.concat([root.agentPrompt(m)])
     } else {
+      if (cmd !== null && cmd !== undefined && !Array.isArray(cmd))
+        console.warn("mount-monitor: agentCommand must be an argument list, using the default agent")
       agentProc.command = ["omarchy", "agent", "prompt", root.agentPrompt(m)]
     }
     agentProc.running = true
   }
 
-  function fireNextAlert(): void {
-    if (root.activeAlert !== null || root.alertQueue.length === 0) return
-    root.activeAlert = root.alertQueue.shift()
-    var m = root.activeAlert
-    var band = bandFor(m.pct)
-    notifyProc.command = [
-      "notify-send",
-      "-A", "default=Run cleanup analysis",
-      "-u", band === 3 ? "critical" : "normal",
-      "-t", band === 3 ? "0" : "6000",
-      "Mount Monitor — " + (band === 3 ? "CRITICAL" : "warning"),
-      m.target + " is " + m.pct + "% full — " + m.avail + " free. Click to have your agent find prune/compress candidates."
-    ]
-    notifyProc.running = true
+  function queueAlert(m, band): void {
+    for (var i = 0; i < root.alertQueue.length; i++) {
+      if (root.alertQueue[i].target !== m.target) continue
+      // One pending alert per mount, the more severe one: a mount that crosses
+      // again while its first alert is still queued behind another mount gets a
+      // single notification for the band it actually reached.
+      if (band > root.alertQueue[i].band)
+        root.alertQueue[i] = { target: m.target, pct: m.pct, avail: m.avail, band: band }
+      return
+    }
+    root.alertQueue.push({ target: m.target, pct: m.pct, avail: m.avail, band: band })
   }
 
-  function checkBands(list): void {
-    var next = ({})
-    for (var i = 0; i < list.length; i++) {
-      var m = list[i]
-      var band = bandFor(m.pct)
-      next[m.target] = band
-      var prev = root.bands[m.target]
-      // alert only when a mount crosses UP into a new band
-      if ((prev === undefined || band > prev) && band > 0) {
-        root.alertQueue.push(m)
-      }
+  // Band the latest reading reports for a mount, -1 when it is not mounted.
+  function bandOf(target): int {
+    for (var i = 0; i < root.mounts.length; i++)
+      if (root.mounts[i].target === target) return root.bandFor(root.mounts[i].pct)
+    return -1
+  }
+
+  function fireNextAlert(): void {
+    if (root.activeAlert !== null || root.alertQueue.length === 0) return
+    while (root.alertQueue.length > 0) {
+      var alert = root.alertQueue.shift()
+      var now = root.bandOf(alert.target)
+      // Drop anything the latest reading no longer supports: the mount went
+      // away, it is no longer configured, or its usage fell back below the
+      // band it was queued for.
+      if (now < alert.band) continue
+      alert.band = now
+      root.activeAlert = alert
+      notifyProc.alert = alert
+      notifyProc.lastOut = ""
+      notifyProc.didStart = false
+      notifyProc.command = [
+        "notify-send",
+        "-A", "default=Run cleanup analysis",
+        "-u", alert.band === 3 ? "critical" : "normal",
+        "-t", alert.band === 3 ? "0" : "6000",
+        "Mount Monitor — " + (alert.band === 3 ? "CRITICAL" : "warning"),
+        alert.target + " is " + alert.pct + "% full — " + alert.avail + " free. Click to have your agent find prune/compress candidates."
+      ]
+      notifyProc.running = true
+      return
     }
+  }
+
+  // notify-send blocks until its popup closes and a critical alert never
+  // expires, so a popup nobody dismisses must not hold the queue shut for the
+  // remaining mounts.
+  function releaseActiveAlert(reason): void {
+    if (root.activeAlert === null) return
+    console.warn("mount-monitor: releasing queued alert (" + reason + ")")
+    root.activeAlert = null
+    // This popup is abandoned: the exit its kill produces is not a click.
+    notifyProc.alert = null
+    if (notifyProc.running) notifyProc.signal(15)
+    root.fireNextAlert()
+  }
+
+  // A command that never started reports no exit at all, so running going
+  // false without a start is the only signal a missing binary produces.
+  function startFailed(proc): bool {
+    return !proc.running && !proc.didStart
+  }
+
+  function checkBands(list, wanted): void {
+    var byTarget = ({})
+    for (var i = 0; i < list.length; i++) byTarget[list[i].target] = list[i]
+
+    var next = ({})
+    for (var j = 0; j < wanted.length; j++) {
+      var target = wanted[j]
+      var m = byTarget[target]
+      // A configured mount that is not mounted keeps its last band, so
+      // remounting at the same usage is not read as a new crossing.
+      var band = m ? root.bandFor(m.pct)
+        : (root.bands[target] !== undefined ? root.bands[target] : 0)
+      next[target] = band
+
+      var prev = root.bands[target]
+      var crossedUp = prev !== undefined && band > prev
+      var firstSighting = prev === undefined && m !== undefined
+      if (band > 0 && (crossedUp || (firstSighting && (root.primed || band === 3))))
+        root.queueAlert(m, band)
+    }
+
     root.bands = next
+    root.primed = true
     root.fireNextAlert()
   }
 
   function parseDf(text): void {
-    var wanted = root.setting("mounts", ["/"])
-    if (wanted === null || wanted === undefined) wanted = ["/"]
-    var testOverride = root.setting("testPct", -1)
-    var seen = ({})
+    var wanted = root.wantedMounts()
+    var testOverride = Number(root.setting("testPct", -1))
     var byTarget = ({})
     var lines = String(text).split("\n")
     for (var i = 0; i < lines.length; i++) {
       var cols = lines[i].trim().split(/\s+/)
       if (cols.length < 5) continue
-      var dev = cols[0].split("[")[0]
-      if (seen[dev]) continue
-      seen[dev] = true
-      var pct = parseInt(cols[4], 10)
-      if (isNaN(pct)) continue
-      if (testOverride >= 0) pct = testOverride
-      byTarget[cols[1]] = { target: cols[1], used: cols[2], avail: cols[3], pct: pct }
+      var target = cols[1]
+      if (!target) continue
+      var pct = parseInt(String(cols[4]).replace("%", ""), 10)
+      if (!isFinite(pct) || pct < 0 || pct > 100) continue
+      // Two rows can report the same target (a subvolume and its parent); the
+      // first one wins. Deduplicating on the device instead drops every
+      // subvolume mount after the first one on the same drive.
+      if (byTarget[target]) continue
+      byTarget[target] = { target: target, used: cols[2], avail: cols[3], pct: pct }
     }
+
     var list = []
     for (var j = 0; j < wanted.length; j++) {
       var m = byTarget[wanted[j]]
-      if (m) list.push(m)
+      if (!m) continue
+      if (testOverride >= 0) m.pct = testOverride
+      list.push(m)
     }
+
     root.mounts = list
-    root.checkBands(list)
+    root.checkBands(list, wanted)
   }
 
   implicitWidth: row.implicitWidth
@@ -124,22 +201,40 @@ BarWidget {
     stdout: StdioCollector {
       onStreamFinished: root.parseDf(this.text)
     }
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: findmnt:", this.text.trim())
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) console.warn("mount-monitor: findmnt exited with code " + exitCode + ", keeping the last reading")
+    }
   }
 
   Process {
     id: notifyProc
     command: ["true"]
     property string lastOut: ""
+    property var alert: null
+    property bool didStart: false
     stdout: StdioCollector {
       onStreamFinished: notifyProc.lastOut = this.text
     }
-    onExited: function(exitCode) {
+    onStarted: notifyProc.didStart = true
+    onRunningChanged: {
+      // notify-send missing: the popup never existed, so the queue has to move
+      // on without waiting for an exit that cannot come.
+      if (root.startFailed(notifyProc))
+        root.releaseActiveAlert("notify-send could not start")
+    }
+    onExited: function(exitCode, exitStatus) {
+      var alert = notifyProc.alert
+      notifyProc.alert = null
+      if (root.activeAlert === alert) root.activeAlert = null
       // notify-send prints the action identifier ("default") only when the
       // popup's action was clicked before expiry
-      if (notifyProc.lastOut.indexOf("default") !== -1 && root.activeAlert) {
-        root.runAgent(root.activeAlert)
-      }
-      root.activeAlert = null
+      if (alert && exitCode === 0 && notifyProc.lastOut.trim() === "default")
+        root.runAgent(alert)
+      else if (alert && exitCode !== 0)
+        console.warn("mount-monitor: notify-send exited with code " + exitCode)
       root.fireNextAlert()
     }
   }
@@ -147,6 +242,23 @@ BarWidget {
   Process {
     id: agentProc
     command: ["true"]
+    property bool didStart: false
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: agent command:", this.text.trim())
+    }
+    onStarted: agentProc.didStart = true
+    onRunningChanged: if (root.startFailed(agentProc))
+      console.warn("mount-monitor: agent command could not start, check the agentCommand setting")
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) console.warn("mount-monitor: agent command exited with code " + exitCode)
+    }
+  }
+
+  Timer {
+    id: alertWatchdog
+    interval: 120000
+    running: root.activeAlert !== null
+    onTriggered: root.releaseActiveAlert("popup left open")
   }
 
   Timer {
@@ -169,7 +281,7 @@ BarWidget {
         id: ringButton
         required property var modelData
         readonly property int effPct: {
-          var t = root.setting("testPct", -1)
+          var t = Number(root.setting("testPct", -1))
           return t >= 0 ? t : modelData.pct
         }
         readonly property bool warn: effPct >= 80

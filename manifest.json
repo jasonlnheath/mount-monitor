@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.jasonlnheath.mount-monitor",
   "name": "Mount Monitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "jasonlnheath",
   "license": "MIT",
-  "description": "A simple visualizer of hd usage that monitors when space gets too high. When it exceeds 98%, it throws a notification and glows red. Notifications are configured to go to your agent of choice with a skill that suggests files to prune / compress.",
+  "description": "A simple visualizer of hd usage that monitors when space gets too high. At 98% or more it throws a notification and glows red. Notifications are configured to go to your agent of choice with a skill that suggests files to prune / compress.",
   "kinds": [
     "bar-widget"
   ],
@@ -17,6 +17,11 @@
     "description": "Usage ring per btrfs mount; alerts at 80/90/98%; click a notification to have your agent run a cleanup analysis.",
     "category": "System",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "mounts": [
+        "/"
+      ]
+    }
   }
 }
