@@ -3,21 +3,29 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "mounts.js" as Mounts
 
-// Mount Monitor — one ring per configured btrfs mount.
+// Mount Monitor — one ring per configured disk mount.
 // Bright arc = used, dim ring = available, percent inside, mount details on hover.
+// A ring is drawn for any block-device-backed filesystem you configure (btrfs,
+// NTFS, ext4, ...), including the read-only NTFS partition holding the models.
+// Virtual filesystems (tmpfs, proc, cgroup2, ...) never do. The mount filter
+// and the alert text live in mounts.js so they are tested without a running
+// shell.
 // Alerts at 80% and 90% (notification + emboldened ring), 98%+ (notification +
 // vibrant red ring pulsing at 0.5 Hz). Clicking a notification sends a cleanup
 // prompt to the configured agent (default: the omarchy default agent in a
 // terminal; override with the agentCommand setting, e.g. your fleet agent's
-// inbox). Configure mounts via the shell.json layout entry:
-//   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/srv/models"] }
+// inbox). A read-only mount is alerted about too, but honestly: nothing can be
+// pruned on it, so its alert asks the agent what to move off it instead.
+// Configure mounts via the shell.json layout entry:
+//   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/mnt/models"] }
 // Default when unconfigured: root only.
 BarWidget {
   id: root
   moduleName: "io.github.jasonlnheath.mount-monitor"
 
-  // [{ target, used, avail, pct }]
+  // [{ target, source, fstype, used, avail, pct, readonly }]
   property var mounts: []
   // last alert band per mount: 0 = below 80, 1 = 80s, 2 = 90s, 3 = 98+
   property var bands: ({})
@@ -46,15 +54,11 @@ BarWidget {
   }
 
   function bandFor(pct): int {
-    if (pct >= 98) return 3
-    if (pct >= 90) return 2
-    if (pct >= 80) return 1
-    return 0
+    return Mounts.bandFor(pct)
   }
 
   function agentPrompt(m): string {
-    return "Mount Monitor: " + m.target + " is " + m.pct + "% full. Run the disk-prune skill: scan " +
-           m.target + " for prune and compress candidates, then report ranked suggestions with sizes."
+    return Mounts.agentPrompt(m)
   }
 
   function runAgent(m): void {
@@ -76,10 +80,10 @@ BarWidget {
       // again while its first alert is still queued behind another mount gets a
       // single notification for the band it actually reached.
       if (band > root.alertQueue[i].band)
-        root.alertQueue[i] = { target: m.target, pct: m.pct, avail: m.avail, band: band }
+        root.alertQueue[i] = { target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band }
       return
     }
-    root.alertQueue.push({ target: m.target, pct: m.pct, avail: m.avail, band: band })
+    root.alertQueue.push({ target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band })
   }
 
   // Band the latest reading reports for a mount, -1 when it is not mounted.
@@ -105,11 +109,11 @@ BarWidget {
       notifyProc.didStart = false
       notifyProc.command = [
         "notify-send",
-        "-A", "default=Run cleanup analysis",
+        "-A", "default=" + Mounts.notifyAction(alert),
         "-u", alert.band === 3 ? "critical" : "normal",
         "-t", alert.band === 3 ? "0" : "6000",
         "Mount Monitor — " + (alert.band === 3 ? "CRITICAL" : "warning"),
-        alert.target + " is " + alert.pct + "% full — " + alert.avail + " free. Click to have your agent find prune/compress candidates."
+        Mounts.notifyBody(alert)
       ]
       notifyProc.running = true
       return
@@ -171,32 +175,10 @@ BarWidget {
   function parseDf(text): void {
     var wanted = root.wantedMounts()
     var testOverride = Number(root.setting("testPct", -1))
-    var byTarget = ({})
-    var lines = String(text).split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var cols = lines[i].trim().split(/\s+/)
-      if (cols.length < 5) continue
-      var target = cols[1]
-      if (!target) continue
-      var pct = parseInt(String(cols[4]).replace("%", ""), 10)
-      if (!isFinite(pct) || pct < 0 || pct > 100) continue
-      // Two rows can report the same target (a subvolume and its parent); the
-      // first one wins. Deduplicating on the device instead drops every
-      // subvolume mount after the first one on the same drive.
-      if (byTarget[target]) continue
-      byTarget[target] = { target: target, used: cols[2], avail: cols[3], pct: pct }
-    }
-
-    var list = []
-    for (var j = 0; j < wanted.length; j++) {
-      var m = byTarget[wanted[j]]
-      if (!m) continue
-      if (testOverride >= 0) m.pct = testOverride
-      list.push(m)
-    }
-
-    root.mounts = list
-    root.checkBands(list, wanted)
+    // Which mounts may draw a ring, and what their usage is, is mounts.js's
+    // decision; this only feeds it the reading and the configured list.
+    root.mounts = Mounts.selectMounts(text, wanted, testOverride)
+    root.checkBands(root.mounts, wanted)
   }
 
   implicitWidth: row.implicitWidth
@@ -204,7 +186,7 @@ BarWidget {
 
   Process {
     id: dfProc
-    command: ["findmnt", "-rn", "-t", "btrfs", "-o", "SOURCE,TARGET,USED,AVAIL,USE%"]
+    command: ["findmnt"].concat(Mounts.findmntArgs())
     stdout: StdioCollector {
       onStreamFinished: root.parseDf(this.text)
     }
@@ -295,8 +277,7 @@ BarWidget {
         readonly property bool critical: effPct >= 98
         bar: root.bar
         opticalSize: 22
-        tooltipText: modelData.target + " — " + effPct + "% used · " +
-                     modelData.used + " used · " + modelData.avail + " free"
+        tooltipText: Mounts.tooltip(modelData)
         iconComponent: ringComponent
 
         Component {

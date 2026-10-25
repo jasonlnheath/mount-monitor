@@ -8,9 +8,11 @@ compress.
 ![Mount Monitor in the Omarchy bar](preview.png)
 
 An [Omarchy](https://omarchy.org) bar plugin. One monochrome usage ring per
-btrfs mount: the percent sits inside the circle, the solid arc is what's used,
-the faint ring behind it is what's available. Hover any ring for the mount
-name and exact numbers.
+mount you configure, on any filesystem sitting on a real device — btrfs, NTFS,
+ext4, vfat, including a partition mounted read-only: the percent sits inside
+the circle, the solid arc is what's used, the faint ring behind it is what's
+available. Hover any ring for the mount name, filesystem, exact numbers, and
+whether it is read-only.
 
 ## Behavior
 
@@ -22,6 +24,11 @@ name and exact numbers.
   agent of choice, which runs the included `disk-prune` skill: a read-only
   scan that reports ranked prune/compress candidates with sizes. Nothing is
   ever deleted automatically.
+- A mount that is read-only (a Windows NTFS partition mounted `ro`, a mounted
+  ISO) is alerted about on the same 80/90/98 thresholds, but its alert and its
+  agent prompt say so up front and ask what to **move off** it instead: nothing
+  can be pruned or compressed on a read-only mount, and the plugin does not
+  pretend otherwise.
 
 Alerts go one at a time, so the one on screen stays clickable, and a queued
 alert is only dropped when the reading behind it stops holding — the mount
@@ -31,7 +38,9 @@ mount that is already in a band when the shell starts or reloads is not
 re-notified until it crosses again; 98% and above always notifies.
 
 Rings refresh once a minute and only mounts you configure are shown. A
-configured mount that is not currently mounted simply has no ring.
+configured mount that is not currently mounted simply has no ring. Virtual
+filesystems — tmpfs, proc, sysfs, cgroup2, overlay, and anything else without a
+device behind it — never draw a ring, even when configured.
 
 ## Requirements
 
@@ -86,14 +95,16 @@ All settings live on the widget's entry in `shell.json`:
 ```json
 {
   "id": "io.github.jasonlnheath.mount-monitor",
-  "mounts": ["/", "/srv/models"],
+  "mounts": ["/", "/srv/models", "/mnt/models"],
   "agentCommand": ["/path/to/your/agent/inbox", "note"]
 }
 ```
 
-- `mounts` — which btrfs mounts get rings. Default: `["/"]` (root only).
-  Tell your agent to add or remove entries here whenever you want a drive
-  watched.
+- `mounts` — which mounts get rings, in the order their rings appear. Any
+  fixed, block-device-backed mount counts, not only btrfs: a second internal
+  drive, an external disk, or a Windows partition mounted read-only at
+  `/mnt/models`. Default: `["/"]` (root only). Tell your agent to add or remove
+  entries here whenever you want a drive watched.
 - `agentCommand` — the command that receives the cleanup prompt when you
   click a notification. It is an argument list run directly, not a shell
   line, and the prompt is appended as the last argument. Default when unset:
@@ -106,7 +117,26 @@ All settings live on the widget's entry in `shell.json`:
 `skills/disk-prune/SKILL.md` is agent-agnostic: it tells any capable agent how
 to scan a mount for prune/compress candidates (package caches, journals, tool
 caches, 1G+ files, compressible trees, cold-storage moves) and report them
-ranked, sized, and read-only. Copy it wherever your agent loads skills from.
+ranked, sized, and read-only. On a read-only mount it reports the opposite
+instead: plainly that nothing there can be pruned or compressed, what the space
+is actually taken up by, and ranked candidates to move off to another drive.
+Copy it wherever your agent loads skills from.
+
+## Development
+
+The mount filter, the 80/90/98 bands, and the alert text live in `mounts.js`,
+which `MountMonitor.qml` imports and the tests load directly:
+
+```bash
+bash tests/run.sh
+```
+
+That runs `node --test tests/` against the fixtures in `tests/fixtures/` (plus
+a live `findmnt` check that skips when a mount is not present) and, when Qt's
+`qmllint` is installed, checks that `MountMonitor.qml` parses and its
+`mounts.js` import resolves. `testPct` is a setting for trying a band out:
+`{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }` reports every
+ring at 98% — display and alerts alike. Remove it when you are done.
 
 ## Feedback
 
