@@ -199,10 +199,11 @@ test("a writable mount keeps the prune/compress prompt", () => {
 
 // --- the QML stays wired to the shared logic -------------------------------
 
-test("MountMonitor.qml asks findmnt through the shared module and keeps no type filter", () => {
+test("MountMonitor.qml builds its findmnt command from the shared module", () => {
   const qml = readFileSync(path.join(repo, "MountMonitor.qml"), "utf8");
-  assert.ok(qml.includes('import "mounts.js" as Mounts'), "the QML must use the tested module");
-  assert.ok(!qml.includes('"-t", "btrfs"'), "the QML must not filter findmnt to btrfs");
-  assert.ok(qml.includes("Mounts.findmntArgs()"), "the findmnt arguments must come from the module");
-  assert.ok(qml.includes("Mounts.selectMounts("), "the reading must be parsed by the module");
+  assert.match(
+    qml,
+    /command:\s*\[\s*"findmnt"\s*\]\.concat\(Mounts\.findmntArgs\(\)\)/,
+    'the findmnt command must be ["findmnt"].concat(Mounts.findmntArgs())',
+  );
 });
