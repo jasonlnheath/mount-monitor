@@ -122,11 +122,18 @@ BarWidget {
   function releaseActiveAlert(reason): void {
     if (root.activeAlert === null) return
     console.warn("mount-monitor: releasing queued alert (" + reason + ")")
-    root.activeAlert = null
-    // This popup is abandoned: the exit its kill produces is not a click.
-    notifyProc.alert = null
-    if (notifyProc.running) notifyProc.signal(15)
-    root.fireNextAlert()
+    if (!notifyProc.running) {
+      // Nothing is live, so no exit will arrive: clear the markers here.
+      root.activeAlert = null
+      notifyProc.alert = null
+      root.fireNextAlert()
+      return
+    }
+    // The kill's exit has not arrived yet: the alert stays marked active so
+    // nothing else stages onto this process, and that exit — attributed to
+    // its own alert, with a non-zero code so it is not read as a click —
+    // advances the queue.
+    notifyProc.signal(15)
   }
 
   // A command that never started reports no exit at all, so running going

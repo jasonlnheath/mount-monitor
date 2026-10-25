@@ -17,11 +17,6 @@
     "description": "Usage ring per btrfs mount; alerts at 80/90/98%; click a notification to have your agent run a cleanup analysis.",
     "category": "System",
     "allowMultiple": false,
-    "defaultSection": "right",
-    "defaults": {
-      "mounts": [
-        "/"
-      ]
-    }
+    "defaultSection": "right"
   }
 }

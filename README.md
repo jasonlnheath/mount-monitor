@@ -43,8 +43,12 @@ omarchy restart shell
 
 `install.sh` copies the `disk-prune` skill into `~/.agents/skills/` and prints
 the bar wiring line. `omarchy plugin add
-https://github.com/jasonlnheath/mount-monitor --enable` is the equivalent if
-you want Omarchy to manage updates for you.
+https://github.com/jasonlnheath/mount-monitor --enable` also installs and
+enables the widget and manages updates for you, but it does not run
+`install.sh` and does not install the `disk-prune` skill — without also
+running `install.sh` (or copying `skills/disk-prune/` into
+`~/.agents/skills/` yourself), notifications still appear but clicking them
+sends your agent a cleanup prompt it has no skill to run.
 
 Then add it to the right side of your bar in `~/.config/omarchy/shell.json`:
 
