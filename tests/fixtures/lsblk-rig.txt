@@ -1,0 +1,25 @@
+# lsblk -P -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINT,SIZE,LABEL,PARTLABEL,PARTUUID,UUID,RM
+# A representative rig, captured from this machine, plus the rows a real rig
+# grows over time: a removable USB backup drive mounted at a mountpoint with a
+# space in it, a removable USB partition, a snap squashfs loop device, swap on
+# zram, an optical drive, an unformatted Microsoft reserved partition, and the
+# unmounted Windows slices on the second drive.
+# The btrfs system partition (nvme1n1p5) is mounted as several subvolumes; lsblk
+# reports it once, at whichever mountpoint it picked.
+NAME="sr0" PATH="/dev/sr0" TYPE="rom" FSTYPE="" MOUNTPOINT="" SIZE="1024M" LABEL="" PARTLABEL="" PARTUUID="" UUID="" RM="1"
+NAME="zram0" PATH="/dev/zram0" TYPE="disk" FSTYPE="swap" MOUNTPOINT="[SWAP]" SIZE="62.6G" LABEL="zram0" PARTLABEL="" PARTUUID="" UUID="7d660950-2ba7-43e1-99d7-19ccd99b3963" RM="0"
+NAME="nvme1n1" PATH="/dev/nvme1n1" TYPE="disk" FSTYPE="" MOUNTPOINT="" SIZE="1.8T" LABEL="" PARTLABEL="" PARTUUID="" UUID="" RM="0"
+NAME="nvme1n1p1" PATH="/dev/nvme1n1p1" TYPE="part" FSTYPE="" MOUNTPOINT="" SIZE="16M" LABEL="" PARTLABEL="Microsoft reserved partition" PARTUUID="03d874af-a8ef-4294-95b6-f78e88ca80cd" UUID="" RM="0"
+NAME="nvme1n1p2" PATH="/dev/nvme1n1p2" TYPE="part" FSTYPE="ntfs" MOUNTPOINT="/mnt/models" SIZE="1.3T" LABEL="DAW" PARTLABEL="Basic data partition" PARTUUID="724dba15-7bef-4968-8bc7-285f54e1f3ac" UUID="187C1C1B7C1BF1EC" RM="0"
+NAME="nvme1n1p3" PATH="/dev/nvme1n1p3" TYPE="part" FSTYPE="vfat" MOUNTPOINT="" SIZE="256M" LABEL="" PARTLABEL="" PARTUUID="e6809733-75f0-45b0-87a3-4d8d625c426a" UUID="C252-D60C" RM="0"
+NAME="nvme1n1p4" PATH="/dev/nvme1n1p4" TYPE="part" FSTYPE="vfat" MOUNTPOINT="/efi" SIZE="2G" LABEL="OMARCHY_EFI" PARTLABEL="OMARCHY_EFI" PARTUUID="e248549d-fa4f-4730-a156-5e5892fd4014" UUID="22A8-8E90" RM="0"
+NAME="nvme1n1p5" PATH="/dev/nvme1n1p5" TYPE="part" FSTYPE="btrfs" MOUNTPOINT="/var/log" SIZE="247.8G" LABEL="OMARCHY" PARTLABEL="OMARCHY_ROOT" PARTUUID="72e5618c-cab5-4e49-95db-bf73eebeb698" UUID="5999cbd8-c212-4f4c-835b-e7ae23760525" RM="0"
+NAME="nvme1n1p6" PATH="/dev/nvme1n1p6" TYPE="part" FSTYPE="btrfs" MOUNTPOINT="/srv/models" SIZE="250G" LABEL="models-native" PARTLABEL="models-native" PARTUUID="e8390136-b49e-4659-a640-6e0015aa4f3a" UUID="e75caee3-5037-4f6f-8d3e-22db37e4aa6e" RM="0"
+NAME="nvme0n1" PATH="/dev/nvme0n1" TYPE="disk" FSTYPE="" MOUNTPOINT="" SIZE="931.5G" LABEL="" PARTLABEL="" PARTUUID="" UUID="" RM="0"
+NAME="nvme0n1p1" PATH="/dev/nvme0n1p1" TYPE="part" FSTYPE="vfat" MOUNTPOINT="" SIZE="100M" LABEL="" PARTLABEL="EFI system partition" PARTUUID="184d9687-43cd-484d-8189-5d6cdb0f11cd" UUID="DEF4-AB3F" RM="0"
+NAME="nvme0n1p2" PATH="/dev/nvme0n1p2" TYPE="part" FSTYPE="" MOUNTPOINT="" SIZE="16M" LABEL="" PARTLABEL="Microsoft reserved partition" PARTUUID="41ae249d-9434-466e-8ca6-24570d5a0830" UUID="" RM="0"
+NAME="nvme0n1p3" PATH="/dev/nvme0n1p3" TYPE="part" FSTYPE="ntfs" MOUNTPOINT="" SIZE="930.6G" LABEL="" PARTLABEL="Basic data partition" PARTUUID="18a2593c-a9f2-419c-b99f-9f166d51c627" UUID="326CF5A86CF5674F" RM="0"
+NAME="nvme0n1p4" PATH="/dev/nvme0n1p4" TYPE="part" FSTYPE="ntfs" MOUNTPOINT="" SIZE="768M" LABEL="" PARTLABEL="" PARTUUID="54ac7a7f-7e7d-4e66-bbcf-eaf55768d8d9" UUID="A676E5E476E5B4E9" RM="0"
+NAME="loop0" PATH="/dev/loop0" TYPE="loop" FSTYPE="squashfs" MOUNTPOINT="/snap/core24/1234" SIZE="67M" LABEL="" PARTLABEL="" PARTUUID="" UUID="" RM="0"
+NAME="sdb" PATH="/dev/sdb" TYPE="disk" FSTYPE="exfat" MOUNTPOINT="/run/media/jason/Backup Drive" SIZE="1.8T" LABEL="Backup Drive" PARTLABEL="" PARTUUID="" UUID="4B4D-1A2B" RM="1"
+NAME="sdc1" PATH="/dev/sdc1" TYPE="part" FSTYPE="ext4" MOUNTPOINT="/run/media/jason/Archive" SIZE="4.0T" LABEL="Archive" PARTLABEL="Archive" PARTUUID="9a7b6c5d-1111-2222-3333-444455556666" UUID="b1c2d3e4-aaaa-bbbb-cccc-dddd11112222" RM="1"
