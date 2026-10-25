@@ -1,0 +1,19 @@
+# findmnt -rn -o SOURCE,TARGET,FSTYPE,USED,AVAIL,USE%,OPTIONS
+# A representative rig: one btrfs system drive mounted as several subvolumes, a
+# second btrfs data drive, an EFI partition, the read-only NTFS models
+# partition (the Windows drive holding the LLM models), tmpfs and pseudo
+# filesystems, and one row whose size columns are empty.
+/dev/nvme1n1p5[/@] / btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
+/dev/nvme1n1p5[/@home] /home btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=257,subvol=/@home
+/dev/nvme1n1p5[/@log] /var/log btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=258,subvol=/@log
+/dev/nvme1n1p5[/@pkg] /var/cache/pacman/pkg btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=259,subvol=/@pkg
+/dev/nvme1n1p6 /srv/models btrfs 178G 70.5G 71% rw,noatime,ssd,discard=async,space_cache=v2,subvolid=5,subvol=/
+/dev/nvme1n1p4 /efi vfat 1G 988M 52% rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro
+/dev/nvme1n1p2 /mnt/models ntfs3 1.1T 186.1G 86% ro,relatime,uid=1000,gid=1000,acl,iocharset=utf8,prealloc
+tmpfs /tmp tmpfs 254.4M 31G 1% rw,nosuid,nodev,size=32794644k,nr_inodes=1048576
+tmpfs /run/user/1000 tmpfs 62.9M 6.2G 1% rw,nosuid,nodev,relatime,size=6558928k,mode=700,uid=1000
+proc /proc proc 0 0 - rw,nosuid,nodev,noexec,relatime
+sys /sys sysfs 0 0 - rw,nosuid,nodev,noexec,relatime
+cgroup2 /sys/fs/cgroup cgroup2 0 0 - rw,nosuid,nodev,noexec,relatime,nsdelegate
+overlay /var/lib/docker/overlayfs/deadbeef overlay    rw,relatime,lowerdir=/a/b:/a/c,upperdir=/a/d,workdir=/a/w
+nsfs[net:[4026533306]] /run/docker/netns/deadbeef nsfs    rw

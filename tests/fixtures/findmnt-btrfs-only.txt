@@ -1,0 +1,8 @@
+# findmnt -rn -t btrfs -o SOURCE,TARGET,FSTYPE,USED,AVAIL,USE%,OPTIONS
+# What the plugin asked for before this change: the -t btrfs type filter hides
+# every other mount, including the read-only NTFS models partition.
+/dev/nvme1n1p5[/@] / btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
+/dev/nvme1n1p5[/@home] /home btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=257,subvol=/@home
+/dev/nvme1n1p5[/@log] /var/log btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=258,subvol=/@log
+/dev/nvme1n1p5[/@pkg] /var/cache/pacman/pkg btrfs 140.4G 105.2G 57% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=259,subvol=/@pkg
+/dev/nvme1n1p6 /srv/models btrfs 178G 70.5G 71% rw,noatime,ssd,discard=async,space_cache=v2,subvolid=5,subvol=/

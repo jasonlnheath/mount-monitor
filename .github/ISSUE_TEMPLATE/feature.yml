@@ -8,7 +8,7 @@ body:
     attributes:
       label: What you want
       description: The behavior you are after, and why.
-      placeholder: Rings for ext4 mounts too.
+      placeholder: Rings for network mounts too.
     validations:
       required: true
   - type: textarea
