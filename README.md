@@ -23,11 +23,12 @@ name and exact numbers.
   scan that reports ranked prune/compress candidates with sizes. Nothing is
   ever deleted automatically.
 
-Alerts go one at a time, so the one on screen stays clickable, and an alert is
-only dropped when the reading behind it stops holding — the mount went away or
-its usage fell back below the band it was queued for. A mount that is already
-in a band when the shell starts or reloads is not re-notified until it crosses
-again; 98% and above always notifies.
+Alerts go one at a time, so the one on screen stays clickable, and a queued
+alert is only dropped when the reading behind it stops holding — the mount
+went away or its usage fell back below the band it was queued for. A popup
+left unanswered is dismissed after two minutes so the queue keeps moving. A
+mount that is already in a band when the shell starts or reloads is not
+re-notified until it crosses again; 98% and above always notifies.
 
 Rings refresh once a minute and only mounts you configure are shown. A
 configured mount that is not currently mounted simply has no ring.
