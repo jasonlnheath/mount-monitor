@@ -91,6 +91,7 @@ BarWidget {
   function parseDf(text): void {
     var wanted = root.setting("mounts", ["/"])
     if (wanted === null || wanted === undefined) wanted = ["/"]
+    var testOverride = root.setting("testPct", -1)
     var seen = ({})
     var byTarget = ({})
     var lines = String(text).split("\n")
@@ -102,6 +103,7 @@ BarWidget {
       seen[dev] = true
       var pct = parseInt(cols[4], 10)
       if (isNaN(pct)) continue
+      if (testOverride >= 0) pct = testOverride
       byTarget[cols[1]] = { target: cols[1], used: cols[2], avail: cols[3], pct: pct }
     }
     var list = []
