@@ -1,0 +1,28 @@
+name: Bug report
+description: Something Mount Monitor is doing wrong.
+labels:
+  - bug
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what it did instead.
+      placeholder: The ring read 82% while df says 91%.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Which mounts you watch, how you installed, anything unusual.
+      value: |
+        mounts:
+        installed with: omarchy plugin add / git clone
+        omarchy version:
+  - type: textarea
+    id: logs
+    attributes:
+      label: Shell log
+      description: Any mount-monitor lines from the shell log, if you have them.
+      render: shell

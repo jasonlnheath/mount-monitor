@@ -1,6 +1,6 @@
 # Mount Monitor
 
-A simple visualizer of hd usage that monitors when space gets too high. At 98%
+A simple visualizer of disk usage that monitors when space gets too high. At 98%
 or above it throws a notification and glows red. Notifications are configured
 to go to your agent of choice with a skill that suggests files to prune /
 compress.
@@ -33,6 +33,12 @@ re-notified until it crosses again; 98% and above always notifies.
 Rings refresh once a minute and only mounts you configure are shown. A
 configured mount that is not currently mounted simply has no ring.
 
+## Requirements
+
+Omarchy Quattro (Quickshell) with third-party `schemaVersion: 1` bar widgets,
+`findmnt` from util-linux to read the mounts, and `notify-send` from libnotify
+for the alerts. Without `notify-send` the rings still draw, nothing alerts.
+
 ## Install
 
 ```bash
@@ -56,6 +62,22 @@ Then add it to the right side of your bar in `~/.config/omarchy/shell.json`:
 ```json
 { "id": "io.github.jasonlnheath.mount-monitor" }
 ```
+
+## Remove
+
+```bash
+omarchy plugin remove io.github.jasonlnheath.mount-monitor
+```
+
+If you installed by cloning, delete the plugin folder and the skill, drop the
+widget entry from `shell.json`, and restart the shell:
+
+```bash
+rm -rf ~/.config/omarchy/plugins/io.github.jasonlnheath.mount-monitor ~/.agents/skills/disk-prune
+omarchy restart shell
+```
+
+Mount Monitor writes nothing outside those two folders and your `shell.json`.
 
 ## Configuration
 
@@ -85,6 +107,11 @@ All settings live on the widget's entry in `shell.json`:
 to scan a mount for prune/compress candidates (package caches, journals, tool
 caches, 1G+ files, compressible trees, cold-storage moves) and report them
 ranked, sized, and read-only. Copy it wherever your agent loads skills from.
+
+## Feedback
+
+Bugs and suggestions: https://github.com/jasonlnheath/mount-monitor/issues —
+open one yourself, or tell your agent to.
 
 ## License
 
