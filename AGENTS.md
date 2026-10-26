@@ -142,9 +142,10 @@ captain on the rig.
   not hold a full-drive warning in the queue. Once a notice leaves the screen,
   Omarchy's notification history (`~/.local/state/omarchy/notifications/history/`,
   `qs-ipc notifications showHistory`) is what keeps it reachable.
-- `partition-onboarding` is present-first: the click prompt already carries the
-  watched count and every waiting candidate, so the skill reports them before
-  reading anything, takes exactly one
+- `partition-onboarding` is present-first: the first-run click prompt already
+  carries the watched count and every waiting candidate (a new-partition click
+  carries just that partition, no counts), so the skill reports what the prompt
+  brought before reading anything, takes exactly one
   verification read (the state file, for `key`, `monitored`, and `decisions`),
   and never re-runs `lsblk` or re-derives the filter. The direct scan lives only
   under its "no list in the prompt" fallback.
