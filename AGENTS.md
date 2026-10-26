@@ -8,11 +8,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   queue, the `findmnt` / `lsblk` / `notify-send` / agent `Process`es, the state
   `FileView`, and the ring drawing. It keeps state (bands, queues, `primed`, the
   last scan) and decides *when* to ask mounts.js; it holds no decisions itself.
-- `mounts.js` holds the pure decisions: which findmnt row may draw a ring, the
-  80/90/98 bands, the notification body, its action label, the agent prompt, the
-  tooltip, the partition candidate filter, the onboarding state file, and the
-  copy for every notification kind. Put filter, threshold, candidate, and
-  alert-wording changes there so they are covered by the tests.
+- `mounts.js` holds the pure decisions: how a plugin setting value becomes a
+  mount list, an argv, a flag, or a number, which findmnt row may draw a ring,
+  the 80/90/98 bands, the notification body, its action label, the agent prompt,
+  the tooltip, the partition candidate filter, the onboarding state file, and the
+  copy for every notification kind. Put filter, threshold, candidate, setting,
+  and alert-wording changes there so they are covered by the tests.
 - `mounts.js` is imported by QML (`import "mounts.js" as Mounts`) and loaded by
   the node tests through `node:vm`. It must stay plain top-level `function`
   declarations: no `export`, no `import`, no `.pragma library`, or one of the
@@ -31,12 +32,23 @@ syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
 forces every ring to a percentage, alerts included. There is no way to test a
-real desktop notification or a real click headlessly, and no test reads the QML
-— the tests cover the mounts.js decisions behind the notifications, and the
-wiring is verified by reading it and by the captain on the rig.
+real desktop notification or a real click headlessly. The tests cover the
+mounts.js decisions behind the notifications and the settings recovery; the one
+test that looks at `MountMonitor.qml` is a delegation guard (the widget builds
+its findmnt command through `Mounts.findmntArgs`). The rest of the wiring is
+verified by reading it and by the captain on the rig.
 
 ## Contracts worth not breaking
 
+- Every plugin setting is read through a `Mounts.normalize*` helper
+  (`normalizeMounts`, `normalizeAgentCommand`, `normalizeBool`, `normalizeNumber`).
+  The hand-off delivers a Qt list, not a JavaScript Array: `Array.isArray` on a
+  `setting()` value rejects a correctly configured array, which is how a bar with
+  three configured mounts drew one ring, offered the other two as unmonitored,
+  and refused its `agentCommand`. The JSON round-trip recovers it; a value that
+  is not a list at all falls back to the documented default (root only, no agent
+  override). An explicitly empty `mounts` list means no rings, not garbage.
+  Never judge a setting with a bare array check in QML again.
 - Only mounts listed in the widget's `mounts` setting draw rings, in that
   order. There is no auto-discovery on purpose: several btrfs subvolumes of one
   device would each draw an identical ring, and unconfigured partitions
@@ -56,13 +68,16 @@ wiring is verified by reading it and by the captain on the rig.
   still only appears for a target in `mounts`. Keep it that way — the
   no-auto-discovery rule above is what the onboarding skills exist to serve.
 - A candidate is a `lsblk` row with TYPE `part`, `disk`, or `crypt`, a FSTYPE
-  that is not `swap`, a MOUNTPOINT, and a path under `/dev/`. Pseudo filesystems
+  that is not `swap`, a MOUNTPOINT, a path under `/dev/`, and is not a boot slice
+  (`isBootSlice`: vfat under 1G, or labelled EFI/boot, or mounted at `/efi` or
+  under `/boot/`). Pseudo filesystems
   are absent because `lsblk` never lists them; an unmounted partition is not
   offered because it cannot have a ring. The `crypt` rule is what puts a LUKS
   install's mounted root on the list — the `crypto_LUKS` container partition
   stays out because it carries no MOUNTPOINT. Removable drives are candidates
   on purpose (backup and long-term storage), and `RM` is the only place that
-  flag comes from.
+  flag comes from. The EFI partition is noise, not storage: offering it is what
+  made a fresh scan report "1 partition found" next to three real drives.
 - Partition identity is `PARTUUID`, else `UUID`, else the device path — never
   the mountpoint and never the device name. That is what keeps a replugged USB
   drive from being "new" again, and what the state file keys on. A decrypted
@@ -89,8 +104,23 @@ wiring is verified by reading it and by the captain on the rig.
   from being offered next to a `/` ring on the same btrfs partition.
 - Every notification kind rides the same `notify-send` + agent plumbing and
   dispatches on `kind` through `promptFor`, `titleFor`, `actionFor`, `bodyFor`,
-  `urgencyFor`, `timeoutFor`. Band alerts drain from the queue before onboarding
-  notices, so a full drive never waits behind a question.
+  `urgencyFor`, `timeoutFor`. Band alerts send on `notifyProc` (one at a time,
+  watchdog-released after 120s so a stuck popup cannot hold the rest of the
+  mounts shut); onboarding and new-partition notices send on `noticeProc`, which
+  no timer ever releases. A notice that has to be answered is critical urgency
+  with timeout 0: Omarchy's own notification service returns 0 (never expires)
+  for critical only and clamps every other urgency to at most 30 seconds whatever
+  the sender asks for, so a normal-urgency notice vanishes before it can be
+  clicked. `notify-send` blocks while its action is live, which is why a
+  never-expiring notice needs its own process — a question nobody answers must
+  not hold a full-drive warning in the queue. Once a notice leaves the screen,
+  Omarchy's notification history (`~/.local/state/omarchy/notifications/history/`,
+  `qs-ipc notifications showHistory`) is what keeps it reachable.
+- `partition-onboarding` is present-first: the click prompt already carries every
+  candidate, so the skill reports them before reading anything, takes exactly one
+  verification read (the state file, for `key`, `monitored`, and `decisions`),
+  and never re-runs `lsblk` or re-derives the filter. The direct scan lives only
+  under its "no list in the prompt" fallback.
 - `partition-remove` changes the `mounts` setting and records a decline, and
   must never touch the partition: no delete, no unmount, no format.
 

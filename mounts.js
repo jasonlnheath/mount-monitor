@@ -1,10 +1,134 @@
 // Mount Monitor shared logic.
 //
 // Imported by MountMonitor.qml (import "mounts.js" as Mounts) and loaded by
-// tests/mounts.test.mjs and tests/onboarding.test.mjs, so the mount filter, the
-// alert bands, the alert text, the partition scan, and the once-only onboarding
-// memory are testable without a running shell. Pure functions only: no QML
-// objects, no state. The widget keeps the state (bands, alert queue, processes).
+// tests/mounts.test.mjs, tests/onboarding.test.mjs, and tests/settings.test.mjs,
+// so the plugin settings recovery, the mount filter, the alert bands, the alert
+// text, the partition scan, and the once-only onboarding memory are testable
+// without a running shell. Pure functions only: no QML objects, no state. The
+// widget keeps the state (bands, alert queue, processes) and decides when to ask.
+
+// --- plugin settings -------------------------------------------------------
+//
+// shell.json carries "mounts" and "agentCommand" as JSON arrays, but what the
+// plugin setting hand-off delivers is a Qt list, not a JavaScript Array:
+// Array.isArray rejects it, and a widget that trusts it silently drops to its
+// default - one root ring instead of three, configured mounts reported as
+// unmonitored, and a perfectly good agentCommand refused. Every setting is read
+// through the helpers below so the recovery is one tested place instead of a
+// per-setting guess in QML.
+
+// The elements of a list-shaped value, in order, or null when the value is not
+// a list at all. Three shapes are accepted: a real array; anything whose JSON
+// serialization is an array (the Qt list wrapper survives exactly this
+// round-trip); and a wrapper whose elements sit under their own index as
+// property names. A JSON string carrying the array is parsed. Entries must be
+// strings - a mount target and an argv element both are - and blanks are
+// dropped. `dropped` counts the entries that were unusable, so a caller that
+// cannot tolerate a hole (an argv) can refuse a half-built list.
+function recoverList(raw) {
+  var value = raw
+  if (typeof value === "string") {
+    var text = value.trim()
+    if (text.substring(0, 1) !== "[") return null
+    try { value = JSON.parse(text) } catch (e) { return null }
+  }
+
+  var items = null
+  if (Array.isArray(value)) {
+    items = value
+  } else {
+    try {
+      var round = JSON.parse(JSON.stringify(value))
+      if (Array.isArray(round)) items = round
+    } catch (e) { items = null }
+    if (items === null) items = indexKeyedItems(value)
+  }
+  if (items === null) return null
+
+  var out = []
+  var dropped = 0
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i]
+    if (typeof item !== "string") { dropped++; continue }
+    var entry = item.trim()
+    if (entry === "") { dropped++; continue }
+    out.push(entry)
+  }
+  return { items: out, dropped: dropped }
+}
+
+// The last-resort shape: a list wrapper that is neither an Array nor serializes
+// as one, so its elements are enumerable only as "0", "1", ...
+function indexKeyedItems(value) {
+  if (!value || typeof value !== "object") return null
+  var keys = []
+  for (var key in value)
+    if (/^[0-9]+$/.test(key)) keys.push(key)
+  if (keys.length === 0) return null
+  keys.sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10) })
+  var out = []
+  for (var i = 0; i < keys.length; i++) out.push(value[keys[i]])
+  return out
+}
+
+// The configured ring list. Absent, garbage, or a list with nothing usable in it
+// means the documented default: root only. An explicitly empty list is the
+// captain's own choice and means no rings - that is not the same as garbage.
+function normalizeMounts(raw) {
+  var list = recoverList(raw)
+  if (list === null || (list.items.length === 0 && list.dropped > 0)) return ["/"]
+  return list.items
+}
+
+// The agent override as an argv, or null for "no override, use the default
+// agent". A list with a hole in it is no override either: half an argument list
+// must never be run.
+function normalizeAgentCommand(raw) {
+  var list = recoverList(raw)
+  if (list === null || list.dropped > 0 || list.items.length === 0) return null
+  return list.items
+}
+
+function boolish(value) {
+  if (typeof value === "boolean") return value
+  if (typeof value === "number") return isFinite(value) ? (value !== 0) : null
+  if (typeof value === "string") {
+    var text = value.trim().toLowerCase()
+    if (text === "true" || text === "1" || text === "yes" || text === "on") return true
+    if (text === "false" || text === "0" || text === "no" || text === "off") return false
+    return null
+  }
+  return null
+}
+
+// A plugin flag. Unset or unusable reads as the documented fallback, so a
+// mangled value can never silently switch a feature off.
+function normalizeBool(raw, fallback) {
+  var value = boolish(raw)
+  if (value !== null) return value
+  try { value = boolish(JSON.parse(JSON.stringify(raw))) } catch (e) { return fallback }
+  return value === null ? fallback : value
+}
+
+function numberish(value) {
+  if (typeof value === "number") return isFinite(value) ? value : null
+  if (typeof value === "string") {
+    var text = value.trim()
+    if (text === "") return null
+    var n = Number(text)
+    return isFinite(n) ? n : null
+  }
+  return null
+}
+
+// A plugin number (testPct). Unset or unusable reads as the fallback, which for
+// testPct means "no override".
+function normalizeNumber(raw, fallback) {
+  var value = numberish(raw)
+  if (value !== null) return value
+  try { value = numberish(JSON.parse(JSON.stringify(raw))) } catch (e) { return fallback }
+  return value === null ? fallback : value
+}
 
 // The findmnt arguments the widget runs. There is no filesystem-type filter
 // here on purpose: the ring filter lives in isRingable(), so a fixed disk mount
@@ -162,13 +286,45 @@ function parseLsblkPairs(text) {
 //   - MOUNTPOINT present: a partition with no mount cannot draw a ring, so it is
 //     not offered. That is also what keeps the unmounted Windows recovery slices
 //     on a second drive from nagging.
+//   - not a boot slice: see isBootSlice(). An EFI system partition is noise, not
+//     storage.
 // tmpfs, proc, sysfs, cgroup2, overlay and nsfs need no deny-list: they are not
 // block devices, so lsblk never lists them.
 function isCandidate(row) {
   if (row.type !== "part" && row.type !== "disk" && row.type !== "crypt") return false
   if (!row.fstype || row.fstype === "swap") return false
   if (!row.mountpoint) return false
+  if (isBootSlice(row)) return false
   return String(row.path).indexOf("/dev/") === 0
+}
+
+// Bytes in an lsblk SIZE string. lsblk prints binary units, so 1T is 1024^4.
+// An empty or unparseable size reads as 0 - the small end, which is the safe
+// direction for the boot-slice filter below.
+function sizeBytes(size) {
+  var text = String(size === undefined || size === null ? "" : size).trim().toUpperCase()
+  var match = /^([0-9]+(?:\.[0-9]+)?)([KMGTPE])?$/.exec(text)
+  if (!match) return 0
+  var units = { K: 1024, M: 1048576, G: 1073741824, T: 1099511627776,
+                P: 1125899906842624, E: 1152921504606846976 }
+  return parseFloat(match[1]) * (match[2] ? units[match[2]] : 1)
+}
+
+// An EFI system partition or a boot slice is not storage: it has no usage worth
+// a ring and nothing to prune, and offering it is what made a fresh scan report
+// "1 partition found" next to three drives that already had rings. Only vfat is
+// judged this way - a formatted USB stick is vfat too, so the rule is size plus
+// what the slice is called or where it is mounted. A vfat big enough to hold
+// files, mounted like storage, stays a candidate.
+function isBootSlice(row) {
+  var fstype = String(row.fstype || "").toLowerCase()
+  if (fstype !== "vfat" && fstype !== "fat" && fstype !== "fat12" && fstype !== "fat16" && fstype !== "fat32")
+    return false
+  if (sizeBytes(row.size) < 1073741824) return true
+  var names = (String(row.label || "") + " " + String(row.partlabel || "")).toLowerCase()
+  if (names.indexOf("efi") >= 0 || names.indexOf("boot") >= 0) return true
+  var mountpoint = String(row.mountpoint || "")
+  return mountpoint === "/efi" || mountpoint === "/boot" || mountpoint.substring(0, 6) === "/boot/"
 }
 
 // A partition's identity. Device names move between plugs (/dev/sdb becomes
@@ -437,13 +593,25 @@ function bodyFor(alert) {
   return notifyBody(alert)
 }
 
+// Critical is the only urgency Omarchy's own notification service never clamps:
+// its durationFor() returns 0 - never expires - for critical and caps every
+// other urgency at 30 seconds whatever the sender asks for. A question that has
+// to be answered, with no other door to the flow, has to ride that flag; a
+// normal-urgency notice vanishes before it can be read.
 function urgencyFor(alert) {
-  return alert && alert.band === 3 ? "critical" : "normal"
+  if (!alert) return "normal"
+  return isPersistent(alert) ? "critical" : "normal"
 }
 
+// 0 is the never-expire flag, not a duration: the popup stays until the captain
+// reads it, acts on it, or dismisses it.
 function timeoutFor(alert) {
   if (!alert) return "6000"
-  if (alert.band === 3) return "0"
-  if (alert.kind === "onboarding" || alert.kind === "new-partition") return "12000"
-  return "6000"
+  return isPersistent(alert) ? "0" : "6000"
+}
+
+// A full drive and every onboarding question persist. A 80s or 90s warning is a
+// heads-up, not a decision that has to be answered.
+function isPersistent(alert) {
+  return alert.band === 3 || alert.kind === "onboarding" || alert.kind === "new-partition"
 }

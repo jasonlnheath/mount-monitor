@@ -25,9 +25,18 @@ import "mounts.js" as Mounts
 // has been offered, declined, or accepted lives in the state file at
 // Mounts.statePath, so the same partition is never offered twice. Set
 // "onboarding": false on the shell.json entry to skip the scan and its notices.
+// An onboarding notice never expires: it stays until it is read, clicked, or
+// dismissed, because the answer is the only door to the flow. It rides its own
+// notify-send process for that reason - a question nobody answers must not hold
+// a full-drive warning in the queue. Once it leaves the screen Omarchy's own
+// notification history keeps it.
 // Configure mounts via the shell.json layout entry:
 //   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/mnt/models"] }
-// Default when unconfigured: root only.
+// Default when unconfigured: root only. Every setting is read through the
+// Mounts.normalize* helpers: the value the plugin setting hand-off delivers is a
+// Qt list, not a JavaScript Array, and a plain array check rejects it - which is
+// how a correctly configured bar used to draw one ring and refuse its
+// agentCommand.
 BarWidget {
   id: root
   moduleName: "io.github.jasonlnheath.mount-monitor"
@@ -53,8 +62,10 @@ BarWidget {
   // What has already been offered, declined, or accepted, read from the state
   // file. This is the memory that keeps a partition from being offered twice.
   property var onboardingState: Mounts.parseState("")
-  // queued onboarding notices, drained only after the band alerts are done
+  // queued onboarding notices, on their own process slot so a notice that never
+  // expires cannot hold a band alert behind it
   property var noticeQueue: []
+  property var activeNotice: null
   // The scan is evaluated once all four inputs of a cycle have landed: the state
   // directory, the state file, the disk table, and the mount table (which says
   // what is already watched).
@@ -69,7 +80,8 @@ BarWidget {
   // The payload last written, so an unchanged scan does not rewrite the file.
   property string lastStateWrite: ""
   property bool stateWritten: false
-  readonly property bool onboardingEnabled: root.setting("onboarding", true) === true
+  readonly property bool onboardingEnabled:
+    Mounts.normalizeBool(root.setting("onboarding", true), true)
   readonly property string onboardingStatePath: Mounts.statePath(Quickshell.env("HOME"))
 
   function refresh(): void {
@@ -86,8 +98,9 @@ BarWidget {
   }
 
   function wantedMounts(): var {
-    var wanted = root.setting("mounts", ["/"])
-    return Array.isArray(wanted) ? wanted : ["/"]
+    // The default lives in mounts.js so "unconfigured" and "configured garbage"
+    // fall back the same way the tests say they do.
+    return Mounts.normalizeMounts(root.setting("mounts", null))
   }
 
   function bandFor(pct): int {
@@ -95,18 +108,25 @@ BarWidget {
   }
 
   function runAgent(alert): void {
-    var cmd = root.setting("agentCommand", null)
+    var cmd = Mounts.normalizeAgentCommand(root.setting("agentCommand", null))
     // The alert's kind decides the ask: a band alert asks for disk-prune, an
     // onboarding notice asks for partition-onboarding.
     var prompt = Mounts.promptFor(alert)
-    if (Array.isArray(cmd) && cmd.length > 0) {
+    if (cmd !== null) {
       agentProc.command = cmd.concat([prompt])
     } else {
-      if (cmd !== null && cmd !== undefined && !Array.isArray(cmd))
+      if (root.agentCommandConfigured())
         console.warn("mount-monitor: agentCommand must be an argument list, using the default agent")
       agentProc.command = ["omarchy", "agent", "prompt", prompt]
     }
     agentProc.running = true
+  }
+
+  // A configured agentCommand that the normalizer refused is worth a warning; an
+  // absent one is just the default agent.
+  function agentCommandConfigured(): bool {
+    var raw = root.setting("agentCommand", null)
+    return raw !== null && raw !== undefined && String(raw).trim() !== ""
   }
 
   function queueAlert(m, band): void {
@@ -129,11 +149,9 @@ BarWidget {
     return -1
   }
 
-  // The next notification to put on screen. Band alerts drain first, so an
-  // onboarding popup can never delay a full-drive warning. Anything the latest
-  // reading no longer supports is dropped on the way: a band alert whose mount
-  // went away or fell back below its band, and a new-partition notice whose
-  // drive was already ejected while it waited.
+  // The next band alert to put on screen. A band alert the latest reading no
+  // longer supports is dropped on the way: its mount went away, or fell back
+  // below the band it was queued for.
   function takeNextAlert(): var {
     while (root.alertQueue.length > 0) {
       var alert = root.alertQueue.shift()
@@ -142,15 +160,30 @@ BarWidget {
       alert.band = now
       return alert
     }
+    return null
+  }
+
+  // The next onboarding notice. A notice whose drive was ejected while it waited
+  // is dropped, and delivering a notice is what records the offer.
+  function takeNextNotice(): var {
     while (root.noticeQueue.length > 0) {
       var notice = root.noticeQueue.shift()
-      if (notice.kind === "new-partition") {
-        if (!Mounts.candidateAlive(root.candidates, notice.key)) continue
-        root.recordDelivered(notice)
-      }
+      if (notice.kind === "new-partition" && !Mounts.candidateAlive(root.candidates, notice.key)) continue
+      root.recordDelivered(notice)
       return notice
     }
     return null
+  }
+
+  function notifyArgs(alert): var {
+    return [
+      "notify-send",
+      "-A", "default=" + Mounts.actionFor(alert),
+      "-u", Mounts.urgencyFor(alert),
+      "-t", Mounts.timeoutFor(alert),
+      Mounts.titleFor(alert),
+      Mounts.bodyFor(alert)
+    ]
   }
 
   function fireNextAlert(): void {
@@ -162,15 +195,26 @@ BarWidget {
     notifyProc.alert = alert
     notifyProc.lastOut = ""
     notifyProc.didStart = false
-    notifyProc.command = [
-      "notify-send",
-      "-A", "default=" + Mounts.actionFor(alert),
-      "-u", Mounts.urgencyFor(alert),
-      "-t", Mounts.timeoutFor(alert),
-      Mounts.titleFor(alert),
-      Mounts.bodyFor(alert)
-    ]
+    notifyProc.command = root.notifyArgs(alert)
     notifyProc.running = true
+  }
+
+  // Onboarding notices ride their own process. notify-send blocks while its
+  // action is live, and a notice that never expires blocks for as long as it is
+  // on screen, so it cannot share notifyProc: a question nobody answers would
+  // hold every later full-drive warning in the queue. Band alerts drain on
+  // notifyProc regardless.
+  function fireNextNotice(): void {
+    if (root.activeNotice !== null) return
+    var notice = root.takeNextNotice()
+    if (notice === null) return
+
+    root.activeNotice = notice
+    noticeProc.alert = notice
+    noticeProc.lastOut = ""
+    noticeProc.didStart = false
+    noticeProc.command = root.notifyArgs(notice)
+    noticeProc.running = true
   }
 
   // notify-send blocks until its popup closes and a critical alert never
@@ -191,6 +235,18 @@ BarWidget {
     // its own alert, with a non-zero code so it is not read as a click —
     // advances the queue.
     notifyProc.signal(15)
+  }
+
+  // A notice that never started has no exit to wait for: clear the slot and let
+  // the next one through. Nothing here releases a live notice - it waits for the
+  // captain, and this slot has no watchdog. Killing it would take the only door
+  // to the onboarding flow with it.
+  function dropUnstartedNotice(reason): void {
+    if (root.activeNotice === null) return
+    console.warn("mount-monitor: dropping queued notice (" + reason + ")")
+    root.activeNotice = null
+    noticeProc.alert = null
+    root.fireNextNotice()
   }
 
   // A command that never started reports no exit at all, so running going
@@ -227,7 +283,7 @@ BarWidget {
 
   function parseDf(text): void {
     var wanted = root.wantedMounts()
-    var testOverride = Number(root.setting("testPct", -1))
+    var testOverride = Mounts.normalizeNumber(root.setting("testPct", -1), -1)
     // Which mounts may draw a ring, and what their usage is, is mounts.js's
     // decision; this only feeds it the reading and the configured list.
     root.mounts = Mounts.selectMounts(text, wanted, testOverride)
@@ -341,6 +397,7 @@ BarWidget {
     root.writeState(next)
 
     root.fireNextAlert()
+    root.fireNextNotice()
   }
 
   implicitWidth: row.implicitWidth
@@ -450,6 +507,37 @@ BarWidget {
     }
   }
 
+  // An onboarding notice, on its own process because it never expires: notify-send
+  // stays alive while its action is clickable, so sharing notifyProc would let a
+  // question nobody answers hold every later band alert in the queue.
+  Process {
+    id: noticeProc
+    command: ["true"]
+    property string lastOut: ""
+    property var alert: null
+    property bool didStart: false
+    stdout: StdioCollector {
+      onStreamFinished: noticeProc.lastOut = this.text
+    }
+    onStarted: noticeProc.didStart = true
+    onRunningChanged: {
+      if (root.startFailed(noticeProc))
+        root.dropUnstartedNotice("notify-send could not start")
+    }
+    onExited: function(exitCode, exitStatus) {
+      var alert = noticeProc.alert
+      noticeProc.alert = null
+      if (root.activeNotice === alert) root.activeNotice = null
+      // As with a band alert: notify-send prints the action identifier only when
+      // the popup's action was clicked before it was dismissed.
+      if (alert && exitCode === 0 && noticeProc.lastOut.trim() === "default")
+        root.runAgent(alert)
+      else if (alert && exitCode !== 0)
+        console.warn("mount-monitor: notify-send (notice) exited with code " + exitCode)
+      root.fireNextNotice()
+    }
+  }
+
   Process {
     id: agentProc
     command: ["true"]
@@ -494,7 +582,7 @@ BarWidget {
         id: ringButton
         required property var modelData
         readonly property int effPct: {
-          var t = Number(root.setting("testPct", -1))
+          var t = Mounts.normalizeNumber(root.setting("testPct", -1), -1)
           return t >= 0 ? t : modelData.pct
         }
         readonly property bool warn: effPct >= 80

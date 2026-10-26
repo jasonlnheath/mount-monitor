@@ -122,7 +122,59 @@ test("the scan uses pairs output so a mountpoint or label with a space survives"
 
 test("the scan offers the mounted disk filesystems and nothing else", () => {
   const list = Mounts.candidatePartitions(LSBLK);
-  assert.deepEqual(targets(list).sort(), [EFI, MODELS, SRV, USB, USB_PART, "/var/log"].sort());
+  assert.deepEqual(targets(list).sort(), [MODELS, SRV, USB, USB_PART, "/var/log"].sort());
+});
+
+test("an EFI or boot vfat slice is never offered as a ring", () => {
+  // The live noise: a fresh scan offered the 2G OMARCHY_EFI partition while the
+  // three drives with files on them were already ringed. A boot slice has no
+  // usage worth watching and nothing to prune.
+  const list = Mounts.candidatePartitions(LSBLK);
+  const paths = Array.from(list, (c) => c.path);
+  assert.ok(!paths.includes("/dev/nvme1n1p4"), "the OMARCHY_EFI partition is a boot slice, not storage");
+  assert.ok(!targets(list).includes(EFI), `${EFI} must never be a candidate: ${targets(list).join(", ")}`);
+});
+
+// One synthetic lsblk pairs row, in lsblkArgs()'s column order.
+function lsblkRow(fields) {
+  return Mounts.lsblkArgs()[2].split(",")
+    .map((column) => `${column}="${fields[column] === undefined ? "" : fields[column]}"`)
+    .join(" ");
+}
+
+test("a vfat slice is excluded by size, by label, or by a boot mountpoint", () => {
+  const rows = [
+    // Big enough to hold files, mounted like storage: stays.
+    { keep: true, fields: { NAME: "sdf1", PATH: "/dev/sdf1", TYPE: "part", FSTYPE: "vfat",
+      MOUNTPOINT: "/mnt/usb", SIZE: "32G", LABEL: "USB_DISK", PARTLABEL: "Data",
+      PARTUUID: "aaaa1111-2222-3333-4444-555555555555", UUID: "1111-2222", RM: "1" } },
+    // A small vfat at a data-looking mountpoint: boot-slice sized, so out.
+    { keep: false, fields: { NAME: "sdg1", PATH: "/dev/sdg1", TYPE: "part", FSTYPE: "vfat",
+      MOUNTPOINT: "/mnt/tiny", SIZE: "512M", LABEL: "TINY", PARTLABEL: "TINY",
+      PARTUUID: "aaaa1112-2222-3333-4444-555555555555", UUID: "1111-2223", RM: "1" } },
+    // A 2G ESP under /boot/efi with no label at all: the mountpoint names it.
+    { keep: false, fields: { NAME: "nvme0n1p5", PATH: "/dev/nvme0n1p5", TYPE: "part", FSTYPE: "vfat",
+      MOUNTPOINT: "/boot/efi", SIZE: "2G", PARTUUID: "aaaa1113-2222-3333-4444-555555555555",
+      UUID: "1111-2224", RM: "0" } },
+    // A big vfat whose label says EFI system: the label names it.
+    { keep: false, fields: { NAME: "sdh1", PATH: "/dev/sdh1", TYPE: "part", FSTYPE: "vfat",
+      MOUNTPOINT: "/mnt/esp", SIZE: "4G", LABEL: "EFI SYSTEM", PARTLABEL: "EFI system partition",
+      PARTUUID: "aaaa1114-2222-3333-4444-555555555555", UUID: "1111-2225", RM: "1" } },
+  ];
+  for (const row of rows) {
+    const line = lsblkRow(row.fields);
+    const paths = Array.from(Mounts.candidatePartitions(`${LSBLK}\n${line}\n`), (c) => c.path);
+    assert.equal(paths.includes(row.fields.PATH), row.keep, `${line}\nexpected keep=${row.keep}`);
+  }
+});
+
+test("a non-vfat partition of any size is untouched by the boot-slice filter", () => {
+  const paths = Array.from(Mounts.candidatePartitions(LSBLK), (c) => c.path);
+  // The 1.8T exfat stick, the 4T ext4 USB partition, and the 1.3T ntfs models
+  // partition are storage whatever their size: removable drives are legitimate
+  // backup and long-term storage.
+  for (const keep of ["/dev/sdb", "/dev/sdc1", "/dev/nvme1n1p2"])
+    assert.ok(paths.includes(keep), `${keep} is storage and must stay a candidate`);
 });
 
 test("pseudo, virtual, and non-disk rows are never candidates", () => {
@@ -249,8 +301,9 @@ test("first run offers every partition that is not already monitored", () => {
   const fresh = Mounts.parseState("");
   const offered = Mounts.newCandidates(candidates, fresh, WANTED, Mounts.monitoredDevices(rings(WANTED)));
   // / is monitored from the btrfs system partition, so that partition is not a
-  // candidate even though lsblk reports it mounted at /var/log.
-  assert.deepEqual(targets(offered).sort(), [EFI, USB, USB_PART].sort());
+  // candidate even though lsblk reports it mounted at /var/log. The EFI slice is
+  // not a candidate at all.
+  assert.deepEqual(targets(offered).sort(), [USB, USB_PART].sort());
   assert.ok(!targets(offered).includes("/var/log"),
     "offering the subvolume of an already-monitored device would draw a second identical ring");
 });
@@ -415,11 +468,23 @@ test("a popup for a partition is titled, worded, and timed as a question, not an
 
   // A full drive stays critical and never expires; an ask lingers to be clicked.
   assert.equal(Mounts.urgencyFor({ kind: "band", band: 3 }), "critical");
-  assert.equal(Mounts.urgencyFor({ kind: "onboarding", candidates: [] }), "normal");
   assert.equal(Mounts.timeoutFor({ kind: "band", band: 3 }), "0");
   assert.equal(Mounts.timeoutFor({ kind: "band", band: 1 }), "6000");
-  assert.equal(Mounts.timeoutFor({ kind: "onboarding", candidates: [] }), "12000");
-  assert.equal(Mounts.timeoutFor({ kind: "new-partition", candidate: stick }), "12000");
+});
+
+test("an onboarding notice stays up until the captain reads it, acts on it, or dismisses it", () => {
+  // Omarchy's own notification service clamps every non-critical urgency to at
+  // most 30 seconds whatever the sender asks for, and returns 0 - never expires -
+  // for critical only. A notice whose answer is the whole flow (there is no other
+  // door to onboarding) has to ride that flag, not a 12-second timeout.
+  const stick = find(Mounts.candidatePartitions(LSBLK), USB_PART);
+  assert.equal(Mounts.urgencyFor({ kind: "onboarding", candidates: [stick] }), "critical",
+    "normal urgency expires in the shell's own clamp, which is what made the notice vanish");
+  assert.equal(Mounts.urgencyFor({ kind: "new-partition", candidate: stick }), "critical");
+  assert.equal(Mounts.timeoutFor({ kind: "onboarding", candidates: [] }), "0",
+    "0 is the never-expire flag, not a duration");
+  assert.equal(Mounts.timeoutFor({ kind: "new-partition", candidate: stick }), "0");
+  assert.equal(Mounts.timeoutFor(null), "6000", "no alert, no persistence claim");
 });
 
 // The frontmatter block is what the agent's skill loader consumes, and the
