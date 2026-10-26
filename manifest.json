@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Mount Monitor",
-    "description": "Usage ring per configured disk mount (btrfs, NTFS, ext4, ...); alerts at 80/90/98%; click a notification to have your agent run a cleanup analysis, or a move-off report for a read-only mount. First run and new partitions get a notice asking which ones to monitor.",
+    "description": "Usage ring per configured disk mount (btrfs, NTFS, ext4, ...); alerts at 80/90/98%; click a notification to have your agent run a cleanup analysis, or a move-off report for a read-only mount. First run asks which partitions to monitor; a drive that appears later gets one dismissable notice to set up monitoring.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"

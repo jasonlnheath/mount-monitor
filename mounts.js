@@ -377,15 +377,17 @@ function onboardingPrompt(candidates) {
          "then wire the picks into the mount-monitor mounts setting in ~/.config/omarchy/shell.json."
 }
 
-// The one-partition notification for a partition that appeared after onboarding.
+// The one notice for a drive that appeared after onboarding. The copy is the
+// captain's, fixed: one dismissable notice per new drive, no removable-vs-
+// permanent question in it, and no pooling suggestion from the plugin. Whether
+// to monitor it, pool it, or leave a stick alone is decided after the click, and
+// the click's prompt carries every specific the popup leaves out.
 function newPartitionBody(candidate) {
-  var c = candidate || {}
-  return "New " + (c.removable ? "removable " : "") + "partition " + c.target + " (" + c.fstype +
-         ", " + c.size + ") found. Click to choose whether to monitor it."
+  return "Detected new drive. Click now to set up disk monitoring."
 }
 
 function newPartitionAction() {
-  return "Choose whether to monitor it"
+  return "Set up disk monitoring"
 }
 
 function newPartitionPrompt(candidate) {

@@ -301,23 +301,26 @@ test("the first-run prompt hands the list to the partition-onboarding skill", ()
   assert.ok(!/disk-prune/.test(prompt), "onboarding must not ask for a prune scan");
 });
 
-test("a new partition notifies once and names it", () => {
+test("a new drive notifies once with the captain's exact copy", () => {
   const stick = find(Mounts.candidatePartitions(LSBLK), USB_PART);
-  const body = Mounts.newPartitionBody(stick);
-  assert.ok(body.includes(USB_PART), body);
-  assert.ok(/removable/i.test(body), `a USB partition must be called removable: ${body}`);
-  assert.ok(/new/i.test(body), body);
-  assert.equal(Mounts.newPartitionAction(), "Choose whether to monitor it");
+  const fixed = find(Mounts.candidatePartitions(LSBLK), EFI);
 
+  // Captain's final copy: one dismissable notice per new drive, this exact text,
+  // removable or not. What to do about it is decided after the click, not by the popup.
+  const EXACT = "Detected new drive. Click now to set up disk monitoring.";
+  assert.equal(Mounts.newPartitionBody(stick), EXACT);
+  assert.equal(Mounts.newPartitionBody(fixed), EXACT);
+  assert.ok(!/removable/i.test(Mounts.newPartitionBody(stick)),
+    `the notice must not pre-question removable vs permanent: ${Mounts.newPartitionBody(stick)}`);
+  assert.equal(Mounts.newPartitionAction(), "Set up disk monitoring");
+
+  // The click still hands the agent every specific the popup left out.
   const prompt = Mounts.newPartitionPrompt(stick);
   assert.ok(prompt.includes("partition-onboarding"), prompt);
   assert.ok(prompt.includes(USB_PART), prompt);
   assert.ok(prompt.includes("/dev/sdc1"), prompt);
   assert.ok(/removable/i.test(prompt), prompt);
   assert.ok(!/disk-prune/.test(prompt), prompt);
-
-  const fixed = Mounts.newPartitionBody(find(Mounts.candidatePartitions(LSBLK), EFI));
-  assert.ok(!/removable/i.test(fixed), `a fixed partition must not be called removable: ${fixed}`);
 });
 
 test("a clicked notification dispatches to the prompt for its own kind", () => {
@@ -349,7 +352,7 @@ test("a popup for a partition is titled, worded, and timed as a question, not an
   assert.equal(Mounts.titleFor({ kind: "band", band: 1 }), "Mount Monitor — warning");
 
   assert.equal(Mounts.actionFor({ kind: "onboarding", candidates: [stick] }), "Choose partitions to monitor");
-  assert.equal(Mounts.actionFor({ kind: "new-partition", candidate: stick }), "Choose whether to monitor it");
+  assert.equal(Mounts.actionFor({ kind: "new-partition", candidate: stick }), "Set up disk monitoring");
   assert.equal(Mounts.bodyFor({ kind: "onboarding", candidates: [stick] }), Mounts.onboardingBody([stick]));
   assert.equal(Mounts.bodyFor({ kind: "new-partition", candidate: stick }), Mounts.newPartitionBody(stick));
 

@@ -33,11 +33,13 @@ whether it is read-only.
   pretend otherwise.
 - First run scans your partitions: a notice says how many it found, and clicking
   it hands your agent the list — size, filesystem, fixed or removable — to ask
-  which to monitor and wire into `mounts`. A partition that shows up later (a new
-  drive, a new partition, a USB stick you mounted for backup) gets its own
-  notice, once. What has been offered, declined, or accepted is remembered, so
-  the same partition is never offered twice. Set `"onboarding": false` on the
-  entry to skip the scan and its notices.
+  which to monitor and wire into `mounts`. A drive that shows up later (a new
+  partition, a USB stick you mounted for backup) gets one dismissable notice —
+  `Detected new drive. Click now to set up disk monitoring.` — once, and clicking
+  it hands your agent that drive's specifics. The plugin never decides for you
+  whether to monitor it, pool it, or leave it alone. What has been offered,
+  declined, or accepted is remembered, so the same partition is never offered
+  twice. Set `"onboarding": false` on the entry to skip the scan and its notices.
 
 Alerts go one at a time, so the one on screen stays clickable, and a queued
 alert is only dropped when the reading behind it stops holding — the mount
