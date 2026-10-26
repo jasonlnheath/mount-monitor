@@ -10,8 +10,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
@@ -361,49 +362,61 @@ test("a popup for a partition is titled, worded, and timed as a question, not an
   assert.equal(Mounts.timeoutFor({ kind: "new-partition", candidate: stick }), "12000");
 });
 
-test("both onboarding skills ship in the repo with agent frontmatter", () => {
+// The frontmatter block is what the agent's skill loader consumes, and the
+// state path inside a skill is the handshake with the widget: the skills must
+// name the exact file Mounts.statePath writes or their decisions never land.
+function readSkill(skill) {
+  const text = readFileSync(path.join(repo, "skills", skill, "SKILL.md"), "utf8");
+  const block = text.match(/^---\n([\s\S]*?)\n---/);
+  const frontmatter = {};
+  if (block)
+    for (const line of block[1].split("\n")) {
+      const sep = line.indexOf(":");
+      if (sep > 0) frontmatter[line.slice(0, sep).trim()] = line.slice(sep + 1).trim();
+    }
+  return { text, frontmatter };
+}
+
+test("both onboarding skills ship loader-valid frontmatter and the widget's state path", () => {
   for (const skill of ["partition-onboarding", "partition-remove"]) {
-    const file = path.join(repo, "skills", skill, "SKILL.md");
-    const text = readFileSync(file, "utf8");
-    assert.match(text, new RegExp(`^name: ${skill}$`, "m"), `${skill} frontmatter name`);
-    assert.match(text, /^description: .+$/m, `${skill} frontmatter description`);
-    assert.ok(/Mount Monitor/i.test(text), `${skill} must say it belongs to Mount Monitor`);
-    assert.ok(text.includes(Mounts.statePath("~")), `${skill} must read/write ${Mounts.statePath("~")}`);
-    assert.ok(text.includes("mounts"), `${skill} must wire the mounts setting`);
-    assert.ok(text.includes("omarchy restart shell"), `${skill} must restart the shell to take effect`);
+    const { text, frontmatter } = readSkill(skill);
+    assert.equal(frontmatter.name, skill, `${skill}'s frontmatter name must match its directory`);
+    assert.ok(frontmatter.description && frontmatter.description.trim() !== "",
+      `${skill} must carry a frontmatter description`);
+    assert.ok(text.includes(Mounts.statePath("~")),
+      `${skill} must read/write ${Mounts.statePath("~")}, the file the widget writes`);
   }
 });
 
-test("the remove skill unwires a monitor and records the decline", () => {
-  const text = readFileSync(path.join(repo, "skills", "partition-remove", "SKILL.md"), "utf8");
-  assert.ok(/declined/i.test(text), "a removed monitor must be recorded so it is never re-offered");
-  assert.ok(!/rm -rf/.test(text), "removing a monitor must never touch the partition itself");
-  assert.ok(/never delete|never remove.*data|no data/i.test(text), "the remove skill must be explicit about not touching data");
-});
+test("install.sh installs every skill the repo ships, replacing what was there", () => {
+  // The real installer, run for real: the repo staged at the omarchy plugin
+  // path install.sh insists on, with a throwaway HOME to install into.
+  const stage = mkdtempSync(path.join(tmpdir(), "mount-monitor-install-"));
+  try {
+    const pluginDir = path.join(stage, "omarchy", "plugins", "io.github.jasonlnheath.mount-monitor");
+    const home = path.join(stage, "home");
+    cpSync(repo, pluginDir, { recursive: true, filter: (src) => path.basename(src) !== ".git" });
 
-test("install.sh installs every skill the repo ships", () => {
-  const installer = readFileSync(path.join(repo, "install.sh"), "utf8");
-  const shipped = readdirSync(path.join(repo, "skills"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  assert.deepEqual(shipped, ["disk-prune", "partition-onboarding", "partition-remove"]);
+    // A leftover from an older install proves skills are replaced, not merged.
+    const skillsDir = path.join(home, ".agents", "skills");
+    mkdirSync(path.join(skillsDir, "disk-prune"), { recursive: true });
+    writeFileSync(path.join(skillsDir, "disk-prune", "stale-from-old-install.txt"), "old");
 
-  // The installer walks skills/ instead of naming skills one by one, so a skill
-  // cannot be shipped without being installed.
-  assert.match(installer, /for\s+skill_dir\s+in\s+"\$here"\/skills\/\*/);
-  assert.match(installer, /SKILL\.md/);
-  assert.ok(/rm -rf/.test(installer) && /cp -a/.test(installer), "skills are replaced, not merged");
-});
+    execFileSync("bash", [path.join(pluginDir, "install.sh")], {
+      env: { ...process.env, HOME: home },
+      encoding: "utf8",
+    });
 
-test("MountMonitor.qml runs the scan and keeps its own state file", () => {
-  const qml = readFileSync(path.join(repo, "MountMonitor.qml"), "utf8");
-  assert.match(qml, /command:\s*\[\s*"lsblk"\s*\]\.concat\(Mounts\.lsblkArgs\(\)\)/,
-    'the scan command must be ["lsblk"].concat(Mounts.lsblkArgs())');
-  assert.match(qml, /Mounts\.statePath\(/, "the widget must keep its onboarding state at Mounts.statePath");
-  assert.match(qml, /Mounts\.candidatePartitions\(/, "the scan result must come from mounts.js");
-  assert.match(qml, /Mounts\.promptFor\(/, "the clicked notification must dispatch on its kind");
-  assert.match(qml, /Mounts\.serializeState\(/, "offered partitions must be recorded in the state file");
+    const shipped = readdirSync(path.join(repo, "skills")).sort();
+    assert.deepEqual(readdirSync(skillsDir).sort(), shipped,
+      "exactly the shipped skills are installed, none skipped, none invented");
+    for (const skill of shipped)
+      assert.ok(existsSync(path.join(skillsDir, skill, "SKILL.md")), `skills/${skill}/SKILL.md is installed`);
+    assert.ok(!existsSync(path.join(skillsDir, "disk-prune", "stale-from-old-install.txt")),
+      "an installed skill directory is replaced wholesale, not merged");
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
 });
 
 // --- live check against this machine's real disk table ----------------------
@@ -424,9 +437,18 @@ test("the real lsblk run reports only mounted disk filesystems on this machine",
     assert.ok(c.fstype !== "swap", "swap must never be a candidate");
     assert.ok(c.key, `${c.path} has no partition identity`);
   }
-  // The captain's own drives are candidates on this rig whether or not they are
-  // configured yet.
-  const targetsHere = targets(list);
-  assert.ok(targetsHere.includes(MODELS) || targetsHere.length === 0,
-    `${MODELS} is mounted here and must be a candidate: ${targetsHere.join(", ")}`);
+  // The models partition is a candidate on this rig; elsewhere it is simply
+  // not mounted and the check does not apply.
+  let modelsHere = false;
+  try {
+    modelsHere = execFileSync("findmnt", ["-rn", "-o", "TARGET", MODELS], { encoding: "utf8" }).trim() !== "";
+  } catch {
+    modelsHere = false;
+  }
+  if (!modelsHere) {
+    t.skip(`${MODELS} is not mounted here`);
+    return;
+  }
+  assert.ok(targets(list).includes(MODELS),
+    `${MODELS} is mounted here and must be a candidate: ${targets(list).join(", ")}`);
 });

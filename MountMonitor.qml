@@ -60,6 +60,10 @@ BarWidget {
   // what is already watched).
   property bool stateDirDone: false
   property bool stateLoaded: false
+  // Set while a changed state file is being re-read, cleared once the fresh
+  // content has landed: an evaluate that runs in between would read the
+  // previous decisions and answer over the newest one.
+  property bool reloadPending: false
   property bool scanDone: false
   property bool mountsDone: false
   // The payload last written, so an unchanged scan does not rewrite the file.
@@ -273,7 +277,8 @@ BarWidget {
   }
 
   function evaluateOnboarding(): void {
-    if (!root.onboardingEnabled || !root.stateDirDone || !root.stateLoaded || !root.scanDone || !root.mountsDone)
+    if (!root.onboardingEnabled || !root.stateDirDone || !root.stateLoaded || root.reloadPending
+      || !root.scanDone || !root.mountsDone)
       return
 
     var wanted = root.wantedMounts()
@@ -365,11 +370,20 @@ BarWidget {
     watchChanges: true
     atomicWrites: true
     printErrors: false
-    onLoaded: root.loadState(text())
+    onLoaded: {
+      root.reloadPending = false
+      root.loadState(text())
+    }
     // text() is stale inside the change signal, so route a change through reload
-    // to onLoaded and always parse fresh content.
-    onFileChanged: reload()
-    onLoadFailed: root.loadState("")
+    // to onLoaded and always parse fresh content; evaluates wait for that read.
+    onFileChanged: {
+      root.reloadPending = true
+      reload()
+    }
+    onLoadFailed: {
+      root.reloadPending = false
+      root.loadState("")
+    }
   }
 
   Process {
