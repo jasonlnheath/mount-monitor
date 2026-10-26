@@ -31,8 +31,9 @@ syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
 forces every ring to a percentage, alerts included. There is no way to test a
-real desktop notification or a real click headlessly — the notification layer is
-verified by reading the wiring in the tests, and by the captain on the rig.
+real desktop notification or a real click headlessly, and no test reads the QML
+— the tests cover the mounts.js decisions behind the notifications, and the
+wiring is verified by reading it and by the captain on the rig.
 
 ## Contracts worth not breaking
 
