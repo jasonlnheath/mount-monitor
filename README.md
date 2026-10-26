@@ -22,7 +22,7 @@ whether it is read-only.
 - 80% and again at 90%: desktop notification, ring and percent embolden.
 - 98% and above: vibrant red ring that pulses (glows) at 0.5 Hz, critical
   notification that stays until dismissed.
-- Click any notification and Mount Monitor sends a cleanup prompt to your
+- Click a disk alert and Mount Monitor sends a cleanup prompt to your
   agent of choice, which runs the included `disk-prune` skill: a read-only
   scan that reports ranked prune/compress candidates with sizes. Nothing is
   ever deleted automatically.
