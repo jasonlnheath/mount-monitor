@@ -337,14 +337,19 @@ BarWidget {
   Process {
     id: scanProc
     command: ["lsblk"].concat(Mounts.lsblkArgs())
+    property string scanText: ""
     stdout: StdioCollector {
-      onStreamFinished: root.parseScan(this.text)
+      onStreamFinished: scanProc.scanText = this.text
     }
     stderr: StdioCollector {
       onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: lsblk:", this.text.trim())
     }
     onExited: function(exitCode, exitStatus) {
-      if (exitCode !== 0) console.warn("mount-monitor: lsblk exited with code " + exitCode + ", keeping the last scan")
+      if (exitCode !== 0) {
+        console.warn("mount-monitor: lsblk exited with code " + exitCode + ", keeping the last scan")
+        return
+      }
+      root.parseScan(scanProc.scanText)
     }
   }
 

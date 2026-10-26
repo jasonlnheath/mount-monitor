@@ -1,0 +1,7 @@
+# lsblk -P -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINT,SIZE,LABEL,PARTLABEL,PARTUUID,UUID,RM
+# A LUKS2 + btrfs install: the partition holds crypto_LUKS and carries no
+# mountpoint itself; the decrypted mapper child is TYPE=crypt and is what is
+# mounted at /.
+NAME="nvme0n1" PATH="/dev/nvme0n1" TYPE="disk" FSTYPE="" MOUNTPOINT="" SIZE="931.5G" LABEL="" PARTLABEL="" PARTUUID="" UUID="" RM="0"
+NAME="nvme0n1p2" PATH="/dev/nvme0n1p2" TYPE="part" FSTYPE="crypto_LUKS" MOUNTPOINT="" SIZE="929.5G" LABEL="" PARTLABEL="" PARTUUID="d1a2b3c4-0000-1111-2222-333344445555" UUID="" RM="0"
+NAME="luks-d1a2b3c4-0000-1111-2222-333344445555" PATH="/dev/mapper/luks-d1a2b3c4-0000-1111-2222-333344445555" TYPE="crypt" FSTYPE="btrfs" MOUNTPOINT="/" SIZE="929.4G" LABEL="OMARCHY" PARTLABEL="" PARTUUID="" UUID="5999cbd8-c212-4f4c-835b-e7ae23760525" RM="0"

@@ -151,10 +151,13 @@ function parseLsblkPairs(text) {
 
 // Which partitions are worth offering as a monitor. A candidate is a real disk
 // filesystem that is mounted somewhere:
-//   - TYPE part or disk: drops the optical drive (rom), snap's squashfs images
-//     (loop), and a parent disk that carries no filesystem of its own. A whole
-//     USB stick formatted without a partition table is a disk with a mountpoint,
-//     so it stays.
+//   - TYPE part, disk, or crypt: drops the optical drive (rom), snap's squashfs
+//     images (loop), and a parent disk that carries no filesystem of its own. A
+//     whole USB stick formatted without a partition table is a disk with a
+//     mountpoint, so it stays. A mounted crypt row is the decrypted LUKS volume
+//     itself — on a LUKS install that is the root — while the crypto_LUKS
+//     container partition stays out: lsblk lists it with no MOUNTPOINT, and the
+//     mapper child is the mount that can draw a ring.
 //   - FSTYPE present and not swap: drops unformatted slices and zram.
 //   - MOUNTPOINT present: a partition with no mount cannot draw a ring, so it is
 //     not offered. That is also what keeps the unmounted Windows recovery slices
@@ -162,7 +165,7 @@ function parseLsblkPairs(text) {
 // tmpfs, proc, sysfs, cgroup2, overlay and nsfs need no deny-list: they are not
 // block devices, so lsblk never lists them.
 function isCandidate(row) {
-  if (row.type !== "part" && row.type !== "disk") return false
+  if (row.type !== "part" && row.type !== "disk" && row.type !== "crypt") return false
   if (!row.fstype || row.fstype === "swap") return false
   if (!row.mountpoint) return false
   return String(row.path).indexOf("/dev/") === 0

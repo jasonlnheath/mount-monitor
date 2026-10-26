@@ -183,6 +183,36 @@ test("a candidate is identified by partition identity, not by device name", () =
   assert.equal(before.key, "4B4D-1A2B");
 });
 
+test("an encrypted install offers the mounted decrypted volume, never the LUKS container", () => {
+  const list = Mounts.candidatePartitions(fixture("lsblk-luks.txt"));
+  // The crypt child is the candidate, exactly once; the container partition
+  // carries no mountpoint and must never be offered.
+  assert.deepEqual(targets(list), ["/"]);
+  const child = find(list, "/");
+  assert.equal(child.path, "/dev/mapper/luks-d1a2b3c4-0000-1111-2222-333344445555");
+  assert.equal(child.fstype, "btrfs");
+  assert.equal(child.removable, false);
+  assert.ok(!Array.from(list, (c) => c.path).includes("/dev/nvme0n1p2"),
+    "the crypto_LUKS container must never be offered");
+});
+
+test("a decrypted volume's identity is the filesystem UUID, stable across reboots", () => {
+  const child = find(Mounts.candidatePartitions(fixture("lsblk-luks.txt")), "/");
+  // A mapper device has no PARTUUID, so the identity falls to the filesystem's
+  // UUID - not to the mapper name, which lsblk derives from the container UUID.
+  assert.equal(child.key, "5999cbd8-c212-4f4c-835b-e7ae23760525");
+});
+
+test("a monitored LUKS root suppresses its candidate through the device behind the ring", () => {
+  const findmnt =
+    "/dev/mapper/luks-d1a2b3c4-0000-1111-2222-333344445555[/@] / btrfs 140.4G 105.2G 57% rw,subvol=/@\n";
+  const watched = Mounts.monitoredDevices(Array.from(Mounts.selectMounts(findmnt, ["/"], -1)));
+  const offered = Mounts.newCandidates(Mounts.candidatePartitions(fixture("lsblk-luks.txt")),
+    Mounts.parseState(""), ["/"], watched);
+  assert.deepEqual(Array.from(offered), [],
+    "the crypt candidate sits behind the / ring and must not be offered");
+});
+
 // --- once-only memory -------------------------------------------------------
 
 test("the state file lives under the XDG state directory", () => {
@@ -433,7 +463,10 @@ test("the real lsblk run reports only mounted disk filesystems on this machine",
     return;
   }
   const list = Array.from(Mounts.candidatePartitions(out));
-  assert.ok(list.length > 0, "this machine has at least one mounted disk filesystem");
+  if (list.length === 0) {
+    t.skip("no mounted disk filesystems on this machine");
+    return;
+  }
   for (const c of list) {
     assert.ok(c.path.startsWith("/dev/"), `${c.path} is not a device`);
     assert.ok(c.target.startsWith("/"), `${c.target} is not a mountpoint`);

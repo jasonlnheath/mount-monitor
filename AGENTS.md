@@ -54,22 +54,31 @@ verified by reading the wiring in the tests, and by the captain on the rig.
 - Onboarding asks, it never decides: a scan may offer a partition, but a ring
   still only appears for a target in `mounts`. Keep it that way — the
   no-auto-discovery rule above is what the onboarding skills exist to serve.
-- A candidate is a `lsblk` row with TYPE `part` or `disk`, a FSTYPE that is not
-  `swap`, a MOUNTPOINT, and a path under `/dev/`. Pseudo filesystems are absent
-  because `lsblk` never lists them; an unmounted partition is not offered
-  because it cannot have a ring. Removable drives are candidates on purpose
-  (backup and long-term storage), and `RM` is the only place that flag comes
-  from.
+- A candidate is a `lsblk` row with TYPE `part`, `disk`, or `crypt`, a FSTYPE
+  that is not `swap`, a MOUNTPOINT, and a path under `/dev/`. Pseudo filesystems
+  are absent because `lsblk` never lists them; an unmounted partition is not
+  offered because it cannot have a ring. The `crypt` rule is what puts a LUKS
+  install's mounted root on the list — the `crypto_LUKS` container partition
+  stays out because it carries no MOUNTPOINT. Removable drives are candidates
+  on purpose (backup and long-term storage), and `RM` is the only place that
+  flag comes from.
 - Partition identity is `PARTUUID`, else `UUID`, else the device path — never
   the mountpoint and never the device name. That is what keeps a replugged USB
-  drive from being "new" again, and what the state file keys on.
+  drive from being "new" again, and what the state file keys on. A decrypted
+  `crypt` row has no PARTUUID, so it keys on the filesystem UUID — stable
+  across reboots.
 - The once-only memory is `~/.local/state/mount-monitor/onboarding.json`
   (`Mounts.statePath`): `onboarded` fires the first-run count notice once per
   install rather than once per shell restart, and `decisions` (offered /
   declined / monitored) is what stops the nagging. The widget writes its scan
   into `candidates` with a `monitored` flag so the skills and the bar agree on
   the list; the skills must merge into `decisions`, never replace it. Deleting
-  the file re-runs first run — that is the intended reset hook.
+  the file re-runs first run on the next shell start (`omarchy restart shell`)
+  — that is the intended reset hook; a live widget keeps the state in memory
+  and writes it back, so restart first.
+- A scan that exits non-zero is not a scan: `scanDone` is set only on exit 0,
+  so the next refresh retries instead of recording a first run from an empty
+  result.
 - A partition already behind an existing ring is never offered: exclusion checks
   the configured targets *and* the device behind each ring (`Mounts.deviceOf`
   strips the `[/subvol]` suffix findmnt adds), which is what keeps `/var/log`

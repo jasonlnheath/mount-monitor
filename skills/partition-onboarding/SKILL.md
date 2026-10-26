@@ -17,10 +17,12 @@ for the captain.
   declined, or accepted. Read this first.
 - **If that file is missing or unreadable**, scan directly:
   `lsblk -P -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINT,SIZE,LABEL,PARTLABEL,PARTUUID,UUID,RM`
-  Keep a row only when TYPE is `part` or `disk`, FSTYPE is set and not `swap`,
-  MOUNTPOINT is set, and the device sits under `/dev/`. That drops swap, snap's
-  loop images, optical drives, unformatted slices, and every pseudo filesystem -
-  they are not block devices, so lsblk never lists them.
+  Keep a row only when TYPE is `part`, `disk`, or a mounted `crypt` (the
+  decrypted LUKS volume - on a LUKS install that is the root, while its
+  `crypto_LUKS` container partition carries no MOUNTPOINT), FSTYPE is set and
+  not `swap`, MOUNTPOINT is set, and the device sits under `/dev/`. That drops
+  swap, snap's loop images, optical drives, unformatted slices, and every pseudo
+  filesystem - they are not block devices, so lsblk never lists them.
 - **What is already watched**: the `mounts` array on the
   `io.github.jasonlnheath.mount-monitor` entry in `~/.config/omarchy/shell.json`.
 

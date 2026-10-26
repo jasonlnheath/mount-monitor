@@ -108,7 +108,9 @@ omarchy restart shell
 Mount Monitor writes nothing outside those folders, your `shell.json`, and the
 onboarding state file at `~/.local/state/mount-monitor/onboarding.json` — the
 list of partitions it found and what you decided about each one. Delete that
-file and the first-run notice fires again.
+file and run `omarchy restart shell`, and the first-run notice fires again
+(restart while the widget is live would not: it holds the state in memory and
+writes it back).
 
 ## Configuration
 
