@@ -111,7 +111,7 @@ function everyAlert() {
     { name: "band alert", alert: { kind: "band", target: MODELS, pct: models.pct, avail: models.avail, readonly: models.readonly, band: 1 } },
     { name: "read-only band alert", alert: { kind: "band", target: USB, pct: 91, avail: "12.0G", readonly: true, band: 2 } },
     { name: "critical band alert", alert: { kind: "band", target: "/", pct: 99, avail: "1.1G", readonly: false, band: 3 } },
-    { name: "onboarding notice", alert: { kind: "onboarding", candidates } },
+    { name: "onboarding notice", alert: { kind: "onboarding", candidates, watched: 3 } },
     { name: "new-partition notice", alert: { kind: "new-partition", candidate: find(candidates, USB_PART) } },
   ];
 }

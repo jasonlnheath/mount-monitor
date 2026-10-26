@@ -82,7 +82,7 @@ captain on the rig.
   stays out because it carries no MOUNTPOINT. Removable drives are candidates
   on purpose (backup and long-term storage), and `RM` is the only place that
   flag comes from. The EFI partition is noise, not storage: offering it is what
-  made a fresh scan report "1 partition found" next to three real drives.
+  made a fresh scan report one bare partition count next to three real drives.
 - Partition identity is `PARTUUID`, else `UUID`, else the device path — never
   the mountpoint and never the device name. That is what keeps a replugged USB
   drive from being "new" again, and what the state file keys on. A decrypted
@@ -107,6 +107,15 @@ captain on the rig.
   the configured targets *and* the device behind each ring (`Mounts.deviceOf`
   strips the `[/subvol]` suffix findmnt adds), which is what keeps `/var/log`
   from being offered next to a `/` ring on the same btrfs partition.
+- The first-run notice reports **both** counts in plain words — `3 watched, 2
+  need a decision.` — never one bare number: a notice that counts only the
+  unmonitored partitions read as a miscount to a captain who can see their own
+  drives. The `monitored` flag is built once (`Mounts.annotateCandidates`: the
+  state file, the skills, and the notice all read it), counted by
+  `Mounts.monitoredCount`, and queued with the notice as `watched`;
+  `onboardingBody` and `onboardingPrompt` take the whole notice, not a candidate
+  list. Never print a zero — nothing waiting reads `All 4 watched. Nothing to
+  decide.`, nothing watched reads only `3 need a decision.`
 - A click reaches the agent through the omarchy-native exec hint, not the
   libnotify action alone. `Mounts.notifyArgs` adds
   `-h STRING:omarchy-exec-argv:<json argv>` to every notification: the daemon
@@ -133,8 +142,9 @@ captain on the rig.
   not hold a full-drive warning in the queue. Once a notice leaves the screen,
   Omarchy's notification history (`~/.local/state/omarchy/notifications/history/`,
   `qs-ipc notifications showHistory`) is what keeps it reachable.
-- `partition-onboarding` is present-first: the click prompt already carries every
-  candidate, so the skill reports them before reading anything, takes exactly one
+- `partition-onboarding` is present-first: the click prompt already carries the
+  watched count and every waiting candidate, so the skill reports them before
+  reading anything, takes exactly one
   verification read (the state file, for `key`, `monitored`, and `decisions`),
   and never re-runs `lsblk` or re-derives the filter. The direct scan lives only
   under its "no list in the prompt" fallback.

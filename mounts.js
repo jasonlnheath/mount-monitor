@@ -364,6 +364,44 @@ function monitoredDevices(mounts) {
   return devices
 }
 
+// The scan mirrored with a `monitored` flag on every candidate: a partition is
+// already watched when its mountpoint is a configured target, or the device
+// behind a configured ring is its device (the btrfs partition reported at
+// /var/log behind the root ring). The state file carries this list, the
+// onboarding skills read it, and the first-run notice counts it - all three have
+// to agree on what "watched" means, so the rule lives here once.
+function annotateCandidates(candidates, wanted, devices) {
+  var wantedList = wanted || []
+  var deviceList = devices || []
+  var out = []
+  var list = candidates || []
+  for (var i = 0; i < list.length; i++) {
+    var c = list[i]
+    if (!c) continue
+    out.push({
+      key: c.key,
+      target: c.target,
+      path: c.path,
+      fstype: c.fstype,
+      size: c.size,
+      label: c.label,
+      removable: c.removable === true,
+      monitored: wantedList.indexOf(c.target) >= 0 || deviceList.indexOf(c.path) >= 0
+    })
+  }
+  return out
+}
+
+// How many annotated candidates already have a ring - the first number the
+// first-run notice reports.
+function monitoredCount(candidates) {
+  var list = candidates || []
+  var n = 0
+  for (var i = 0; i < list.length; i++)
+    if (list[i] && list[i].monitored === true) n++
+  return n
+}
+
 // Candidates worth notifying about: not configured, not the device behind a
 // configured ring, and never offered or declined before.
 function newCandidates(candidates, state, wanted, devices) {
@@ -492,26 +530,55 @@ function markOffered(state, list, status) {
   }
 }
 
-// The first-run notification: how many partitions the scan found, and the ask.
-function onboardingBody(candidates) {
-  var n = (candidates || []).length
-  return n + " disk partition" + (n === 1 ? "" : "s") + " found. Click to choose which to monitor."
+// The two numbers the first-run notice reports: partitions already behind a
+// ring, and partitions still waiting for a decision. The widget passes the
+// watched count; a notice that carries none (an older queue entry) reports only
+// its own list rather than claiming nothing is watched.
+function onboardingCounts(alert) {
+  var a = alert || {}
+  var waiting = (a.candidates || []).length
+  var watched = a.watched === undefined || a.watched === null ? 0 : parseInt(a.watched, 10)
+  if (!isFinite(watched) || watched < 0) watched = 0
+  return { watched: watched, waiting: waiting }
+}
+
+// The first-run notification: both counts, in plain words. "N disk partitions
+// found" read as a miscount because N counted only the partitions with no ring -
+// a machine with four partitions and one ring said "1", and the captain counted
+// the drives on the desk. Say what is watched and what needs a decision; when
+// one side is zero, say the other plainly and print no zero.
+function onboardingBody(alert) {
+  var counts = onboardingCounts(alert)
+  if (counts.waiting === 0)
+    return counts.watched === 0 ? "No disk partitions found."
+                                : "All " + counts.watched + " watched. Nothing to decide."
+  var ask = counts.waiting + (counts.waiting === 1 ? " needs" : " need") + " a decision"
+  if (counts.watched === 0) return ask + ". Click to choose."
+  return counts.watched + " watched, " + ask + ". Click to choose."
 }
 
 function onboardingAction() {
   return "Choose partitions to monitor"
 }
 
-function onboardingPrompt(candidates) {
-  var list = candidates || []
-  var n = list.length
+// The click's prompt: the same two counts the popup shows, then every waiting
+// partition with its specifics. The counts ride the prompt so the skill reports
+// what is already watched without a second scan disagreeing with the bar.
+function onboardingPrompt(alert) {
+  var a = alert || {}
+  var list = a.candidates || []
+  var counts = onboardingCounts(a)
   var names = []
   for (var i = 0; i < list.length; i++)
     names.push(list[i].target + " (" + list[i].fstype + ", " + list[i].size + ", " +
                (list[i].label || list[i].path) + (list[i].removable ? ", removable" : "") + ")")
-  return "Mount Monitor: " + n + " disk partition" + (n === 1 ? "" : "s") + " on this machine " +
-         (n === 1 ? "has" : "have") + " no ring yet - " + names.join(", ") + ". Run the partition-onboarding " +
-         "skill: report each one with size, filesystem, label, and whether it is removable, ask which to monitor, " +
+  var watchedClause = counts.watched === 0 ? ""
+    : counts.watched + " partition" + (counts.watched === 1 ? "" : "s") +
+      " already " + (counts.watched === 1 ? "has" : "have") + " a ring, "
+  return "Mount Monitor: " + watchedClause + list.length + " partition" + (list.length === 1 ? "" : "s") +
+         " " + (list.length === 1 ? "has" : "have") + " no ring yet - " + names.join(", ") + ". Run the partition-onboarding " +
+         "skill: report each one with size, filesystem, label, and whether it is removable, name the partitions " +
+         "that already have a ring instead of offering them again, ask which to monitor, " +
          "then wire the picks into the mount-monitor mounts setting in ~/.config/omarchy/shell.json."
 }
 
@@ -543,7 +610,7 @@ function newPartitionPrompt(candidate) {
 // there was before onboarding existed.
 function promptFor(alert) {
   if (!alert) return ""
-  if (alert.kind === "onboarding") return onboardingPrompt(alert.candidates)
+  if (alert.kind === "onboarding") return onboardingPrompt(alert)
   if (alert.kind === "new-partition") return newPartitionPrompt(alert.candidate)
   return agentPrompt(alert)
 }
@@ -567,7 +634,7 @@ function actionFor(alert) {
 
 function bodyFor(alert) {
   if (!alert) return ""
-  if (alert.kind === "onboarding") return onboardingBody(alert.candidates)
+  if (alert.kind === "onboarding") return onboardingBody(alert)
   if (alert.kind === "new-partition") return newPartitionBody(alert.candidate)
   return notifyBody(alert)
 }

@@ -394,33 +394,96 @@ test("a dropped notice records nothing, so a replugged drive is asked again", ()
 
 // --- the two new notifications ----------------------------------------------
 
-test("the first-run notification counts the partitions and asks the user to pick", () => {
-  const candidates = Array.from(Mounts.candidatePartitions(LSBLK));
-  const body = Mounts.onboardingBody(candidates);
-  assert.ok(body.startsWith(String(candidates.length)), `body must lead with the count: ${body}`);
-  assert.ok(/partition/.test(body), body);
+// The list the widget writes into the state file and counts for the notice:
+// every scan candidate marked with whether a ring already covers it.
+function annotated() {
+  return Array.from(Mounts.annotateCandidates(
+    Mounts.candidatePartitions(LSBLK), WANTED, Mounts.monitoredDevices(rings(WANTED))));
+}
+
+// The first-run notice exactly as the widget queues it on a fresh install:
+// the partitions still waiting for a decision, plus how many are already watched.
+function firstRunNotice() {
+  const waiting = Array.from(Mounts.newCandidates(
+    Mounts.candidatePartitions(LSBLK), Mounts.parseState(""), WANTED, Mounts.monitoredDevices(rings(WANTED))));
+  return { kind: "onboarding", candidates: waiting, watched: Mounts.monitoredCount(annotated()) };
+}
+
+test("the scan marks which partitions a ring already covers", () => {
+  const list = annotated();
+  // /mnt/models and /srv/models are configured targets; /var/log is the btrfs
+  // system partition sitting behind the root ring. The two USB drives are not.
+  assert.deepEqual(targets(list.filter((c) => c.monitored)).sort(), [MODELS, SRV, "/var/log"].sort());
+  assert.deepEqual(targets(list.filter((c) => !c.monitored)).sort(), [USB, USB_PART].sort());
+  assert.equal(Mounts.monitoredCount(list), 3);
+  // The annotation keeps every field the state file and the skills read.
+  for (const c of list)
+    for (const field of ["key", "target", "path", "fstype", "size", "label", "removable", "monitored"])
+      assert.ok(field in c, `${c.target} lost ${field} on the way through the annotation`);
+});
+
+test("the first-run notice reports both counts, never one unexplained number", () => {
+  const body = Mounts.onboardingBody(firstRunNotice());
+  assert.ok(/3 watched/.test(body), `the already-watched count must be in the copy: ${body}`);
+  assert.ok(/2 need a decision/.test(body), `the waiting count must be in the copy: ${body}`);
   assert.ok(/click/i.test(body), body);
   assert.equal(Mounts.onboardingAction(), "Choose partitions to monitor");
+  // The copy the captain called a miscount: one bare number, no second count.
+  assert.ok(!/^\d+ disk partitions? found/.test(body), `old miscount copy: ${body}`);
+  assert.ok(body.split(/\s+/).length <= 12, `terse copy, not a wall of text: ${body}`);
+});
 
-  const one = Mounts.onboardingBody([candidates[0]]);
-  assert.ok(one.startsWith("1"), one);
-  assert.ok(!one.includes("1 disk partitions"), `one partition must read as singular: ${one}`);
+test("the first-run notice says the one side plainly when the other is zero", () => {
+  const allWatched = Mounts.onboardingBody({ kind: "onboarding", candidates: [], watched: 4 });
+  assert.ok(/4/.test(allWatched) && /watch/i.test(allWatched), `must still say what is watched: ${allWatched}`);
+  assert.ok(!/need a decision|needs a decision/.test(allWatched), `nothing is waiting: ${allWatched}`);
+  assert.ok(!/\b0\b/.test(allWatched), `a zero is never printed: ${allWatched}`);
+
+  const stick = find(Mounts.candidatePartitions(LSBLK), USB_PART);
+  const nothingWatched = Mounts.onboardingBody({ kind: "onboarding", candidates: [stick, find(Mounts.candidatePartitions(LSBLK), USB), find(Mounts.candidatePartitions(LSBLK), MODELS)], watched: 0 });
+  assert.ok(/3 need a decision/.test(nothingWatched), nothingWatched);
+  assert.ok(!/\b0\b/.test(nothingWatched), `a zero is never printed: ${nothingWatched}`);
+  assert.ok(!/watch/i.test(nothingWatched), `nothing is watched, so do not claim a count of it: ${nothingWatched}`);
+
+  assert.ok(/partition/i.test(Mounts.onboardingBody({ kind: "onboarding", candidates: [], watched: 0 })),
+    "a machine with no candidate partitions still says so plainly");
+});
+
+test("one partition waiting reads singular next to the watched count", () => {
+  const stick = find(Mounts.candidatePartitions(LSBLK), USB_PART);
+  const one = Mounts.onboardingBody({ kind: "onboarding", candidates: [stick], watched: 1 });
+  assert.ok(/1 watched/.test(one), one);
+  assert.ok(/1 needs a decision/.test(one), `one partition must read as singular: ${one}`);
+  assert.ok(!/1 need a decision/.test(one), one);
 });
 
 test("the first-run prompt hands the list to the partition-onboarding skill", () => {
-  const candidates = Array.from(Mounts.candidatePartitions(LSBLK));
-  const prompt = Mounts.onboardingPrompt(candidates);
+  const prompt = Mounts.onboardingPrompt(firstRunNotice());
   assert.ok(prompt.includes("partition-onboarding"), prompt);
-  assert.ok(prompt.includes(MODELS) && prompt.includes(USB), prompt);
+  // The click carries the same two counts the popup shows, so the skill never
+  // re-derives what is already watched from a second scan.
+  assert.ok(/3 partitions already have a ring/.test(prompt), prompt);
+  assert.ok(/2 partitions have no ring yet/.test(prompt), prompt);
+  assert.ok(prompt.includes(USB) && prompt.includes(USB_PART), prompt);
+  assert.ok(!prompt.includes(MODELS), `a watched partition is counted, not offered again: ${prompt}`);
   assert.ok(/ask/i.test(prompt) && /monitor/i.test(prompt), prompt);
   assert.ok(!/disk-prune/.test(prompt), "onboarding must not ask for a prune scan");
+  assert.ok(/name the partitions that already have a ring/i.test(prompt),
+    `the skill must be told not to re-offer the watched ones: ${prompt}`);
   // The label rides the prompt - the models partition's DAW label appears
   // nowhere else in it - so the skill's present-first line renders with no read.
-  assert.ok(prompt.includes("DAW"), prompt);
+  const labeled = Mounts.onboardingPrompt({
+    kind: "onboarding", watched: 0,
+    candidates: [find(Mounts.candidatePartitions(LSBLK), MODELS)],
+  });
+  assert.ok(labeled.includes("DAW") && labeled.includes(MODELS), labeled);
   // An unlabeled partition is presented by its device path instead.
-  const unlabeled = Mounts.onboardingPrompt(
-    [{ key: "k", target: "/mnt/x", path: "/dev/sdz1", fstype: "ext4", size: "8T", label: "", removable: false }]);
+  const unlabeled = Mounts.onboardingPrompt({
+    kind: "onboarding", watched: 1,
+    candidates: [{ key: "k", target: "/mnt/x", path: "/dev/sdz1", fstype: "ext4", size: "8T", label: "", removable: false }],
+  });
   assert.ok(unlabeled.includes("/dev/sdz1"), unlabeled);
+  assert.ok(/1 partition already has a ring/.test(unlabeled), `singular watched count: ${unlabeled}`);
 });
 
 test("a new drive notifies once with the captain's exact copy", () => {
@@ -456,9 +519,9 @@ test("a clicked notification dispatches to the prompt for its own kind", () => {
   const band = Mounts.promptFor({ kind: "band", target: MODELS, pct: models.pct, avail: models.avail, readonly: models.readonly });
   assert.equal(band, Mounts.agentPrompt(models), "a band alert keeps the cleanup prompt it has always had");
 
-  const candidates = Array.from(Mounts.candidatePartitions(LSBLK));
-  const onboarding = Mounts.promptFor({ kind: "onboarding", candidates });
-  assert.equal(onboarding, Mounts.onboardingPrompt(candidates));
+  const notice = firstRunNotice();
+  const onboarding = Mounts.promptFor(notice);
+  assert.equal(onboarding, Mounts.onboardingPrompt(notice));
   assert.ok(onboarding.includes("partition-onboarding"), onboarding);
 
   const fresh = Mounts.promptFor({ kind: "new-partition", candidate: stick });
@@ -466,6 +529,14 @@ test("a clicked notification dispatches to the prompt for its own kind", () => {
 
   // A band alert written before kinds existed must still get the cleanup prompt.
   assert.equal(Mounts.promptFor({ target: "/", pct: 57, avail: "105.2G", readonly: false }), Mounts.agentPrompt(rings(WANTED)[0]));
+});
+
+test("MountMonitor.qml hands the first-run notice both counts and delegates the watched rule", () => {
+  const qml = readFileSync(path.join(repo, "MountMonitor.qml"), "utf8");
+  assert.ok(/kind:\s*"onboarding"[\s\S]{0,160}watched:\s*Mounts\.monitoredCount/.test(qml),
+    "the queued first-run notice must carry the already-watched count from mounts.js");
+  assert.ok(qml.includes("Mounts.annotateCandidates"),
+    "the monitored flag the state file, the skills, and the notice all read lives in mounts.js");
 });
 
 // --- the skills and their wiring --------------------------------------------
@@ -479,7 +550,8 @@ test("a popup for a partition is titled, worded, and timed as a question, not an
 
   assert.equal(Mounts.actionFor({ kind: "onboarding", candidates: [stick] }), "Choose partitions to monitor");
   assert.equal(Mounts.actionFor({ kind: "new-partition", candidate: stick }), "Set up disk monitoring");
-  assert.equal(Mounts.bodyFor({ kind: "onboarding", candidates: [stick] }), Mounts.onboardingBody([stick]));
+  assert.equal(Mounts.bodyFor({ kind: "onboarding", candidates: [stick], watched: 2 }),
+    Mounts.onboardingBody({ kind: "onboarding", candidates: [stick], watched: 2 }));
   assert.equal(Mounts.bodyFor({ kind: "new-partition", candidate: stick }), Mounts.newPartitionBody(stick));
 
   // A full drive stays critical and never expires; a 80s or 90s warning is a

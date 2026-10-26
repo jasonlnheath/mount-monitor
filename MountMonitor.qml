@@ -24,7 +24,9 @@ import "mounts.js" as Mounts
 // A read-only mount is alerted about too, but honestly: nothing can be
 // pruned on it, so its alert asks the agent what to move off it instead.
 // Onboarding: on first run the widget scans the disk table (lsblk) and notifies
-// how many partitions it found; a clicked notice opens the agent on the
+// both counts - how many partitions are already watched and how many still need
+// a decision - never one bare number, which reads as a miscount to anyone who
+// can see their own drives. A clicked notice opens the agent on the
 // partition-onboarding skill, which asks which to monitor and wires the picks
 // into the mounts setting. A partition that appears later notifies once. What
 // has been offered, declined, or accepted lives in the state file at
@@ -313,24 +315,11 @@ BarWidget {
   }
 
   // The scan mirrored into the state file, each candidate marked with whether a
-  // ring already covers it. The onboarding skills read this list instead of
-  // re-deriving the filter, so the agent and the bar agree on what a partition is.
+  // ring already covers it. The rule lives in mounts.js because the state file,
+  // the onboarding skills, and the first-run notice's watched count all read the
+  // same flag.
   function annotatedCandidates(wanted, watched): var {
-    var out = []
-    for (var i = 0; i < root.candidates.length; i++) {
-      var c = root.candidates[i]
-      out.push({
-        key: c.key,
-        target: c.target,
-        path: c.path,
-        fstype: c.fstype,
-        size: c.size,
-        label: c.label,
-        removable: c.removable,
-        monitored: wanted.indexOf(c.target) >= 0 || watched.indexOf(c.path) >= 0
-      })
-    }
-    return out
+    return Mounts.annotateCandidates(root.candidates, wanted, watched)
   }
 
   // The state as it now stands, written only when its payload changed: the
@@ -374,13 +363,18 @@ BarWidget {
     var wanted = root.wantedMounts()
     var watched = Mounts.monitoredDevices(root.mounts)
     var fresh = Mounts.newCandidates(root.candidates, root.onboardingState, wanted, watched)
+    var annotated = root.annotatedCandidates(wanted, watched)
     var next = root.onboardingState
 
     if (!next.onboarded) {
-      // First run: one notice for everything the scan found. Recording it - even
-      // when the list is empty - is what makes the count notification fire once
-      // per install rather than once per shell restart.
-      if (fresh.length > 0) root.noticeQueue.push({ kind: "onboarding", candidates: fresh })
+      // First run: one notice for everything the scan found. It carries the
+      // already-watched count next to the waiting list, because a notice that
+      // reports only the unmonitored partitions reads as a miscount to anyone
+      // who can see their own drives. Recording it - even when the list is
+      // empty - is what makes the notice fire once per install rather than once
+      // per shell restart.
+      if (fresh.length > 0)
+        root.noticeQueue.push({ kind: "onboarding", candidates: fresh, watched: Mounts.monitoredCount(annotated) })
       next = Mounts.markOffered(next, fresh, "offered")
     } else if (fresh.length > 0) {
       // A partition that appeared after onboarding gets its own notice, once;
@@ -391,7 +385,7 @@ BarWidget {
           root.noticeQueue.push({ kind: "new-partition", key: fresh[i].key, candidate: fresh[i] })
     }
 
-    next.candidates = root.annotatedCandidates(wanted, watched)
+    next.candidates = annotated
     root.writeState(next)
 
     root.fireNextAlert()

@@ -31,8 +31,11 @@ whether it is read-only.
   agent prompt say so up front and ask what to **move off** it instead: nothing
   can be pruned or compressed on a read-only mount, and the plugin does not
   pretend otherwise.
-- First run scans your partitions: a notice says how many it found, and clicking
-  it hands your agent the list — size, filesystem, label, fixed or removable —
+- First run scans your partitions, and the notice reports both counts — how many
+  are already watched and how many still need a decision (`3 watched, 2 need a
+  decision.`), never one bare number. Nothing waiting reads `All 4 watched.
+  Nothing to decide.` Clicking it hands your agent the waiting list — size,
+  filesystem, label, fixed or removable — plus the count already behind a ring,
   to ask which to monitor and wire into `mounts`. A drive that shows up later
   (a new partition, a USB stick you mounted for backup) gets one dismissable
   notice — `Detected new drive. Click now to set up disk monitoring.` — once,
