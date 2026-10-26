@@ -1,5 +1,7 @@
 # Mount Monitor
 
+<p align="center"><img src="logo.svg" width="220" alt="Mount Monitor MM mark"></p>
+
 A simple visualizer of disk usage that monitors when space gets too high, on
 any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or above it
 throws a notification and glows red. Notifications are configured to go to your
@@ -7,7 +9,7 @@ agent of choice with a skill that suggests files to prune / compress, or what
 to move off a read-only mount. It also finds the partitions on your machine and
 asks which ones you want watched.
 
-![Mount Monitor in the Omarchy bar](preview.png)
+![Mount Monitor in the Omarchy bar](bar-screenshot.png)
 
 An [Omarchy](https://omarchy.org) bar plugin. One monochrome usage ring per
 mount you configure, on any filesystem sitting on a real device — btrfs, NTFS,

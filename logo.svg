@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- MM · full alert ring: 100% ring glowing red, MM centered -->
+  <defs>
+    <filter id="redglow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="56" fill="#000000"/>
+  <!-- the alert: 100% ring, red, glowing -->
+  <circle cx="256" cy="256" r="168" fill="none" stroke="#e5484d" stroke-width="26"
+          filter="url(#redglow)"/>
+  <!-- MM centered inside -->
+  <text x="256" y="312" font-family="omarchy" font-size="150"
+        text-anchor="middle" fill="#ffffff">MM</text>
+</svg>
