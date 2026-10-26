@@ -1,55 +1,72 @@
 ---
 name: partition-onboarding
-description: Mount Monitor partition onboarding - list the disk partitions that have no usage ring, ask the captain which to monitor, and wire the picks into the bar plugin's mounts setting. Use when Mount Monitor notifies that partitions were found or that a new partition appeared, when asked to add, start monitoring, or watch a partition or drive, or before wiring a new disk into the bar. Report first, wire only what the captain picks - never format, mount, or delete anything on its own.
+description: Mount Monitor partition onboarding - present the disk partitions the click prompt already lists, ask the captain which to monitor, and wire the picks into the bar plugin's mounts setting. Use when Mount Monitor notifies that partitions were found or that a new partition appeared, when asked to add, start monitoring, or watch a partition or drive, or before wiring a new disk into the bar. Report first, wire only what the captain picks - never format, mount, or delete anything on its own.
 ---
 
 # Partition onboarding
 
-Goal: turn "N partitions found" into watched mounts. Report every candidate with
-its size and filesystem, ask which to monitor, then wire the picks. Never pick
-for the captain.
+Goal: turn "N partitions found" into watched mounts. The click that opened this
+skill already carried every candidate with its target, filesystem, size, label
+(or the device path when there is no label), and whether it is removable.
+Present them, ask, wire the picks. Never re-derive what
+the prompt already told you: a live run that rescans the disk table spends
+minutes reproducing a list that is already on screen.
 
-## Inputs
+## Present first
 
-- **The scan the widget already ran**: `~/.local/state/mount-monitor/onboarding.json`.
-  `candidates` is the list, each with `key`, `target`, `path`, `fstype`, `size`,
-  `label`, `removable`, `monitored`. `decisions` is what has already been offered,
-  declined, or accepted. Read this first.
-- **If that file is missing or unreadable**, scan directly:
-  `lsblk -P -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINT,SIZE,LABEL,PARTLABEL,PARTUUID,UUID,RM`
-  Keep a row only when TYPE is `part`, `disk`, or a mounted `crypt` (the
-  decrypted LUKS volume - on a LUKS install that is the root, while its
-  `crypto_LUKS` container partition carries no MOUNTPOINT), FSTYPE is set and
-  not `swap`, MOUNTPOINT is set, and the device sits under `/dev/`. That drops
-  swap, snap's loop images, optical drives, unformatted slices, and every pseudo
-  filesystem - they are not block devices, so lsblk never lists them.
-- **What is already watched**: the `mounts` array on the
-  `io.github.jasonlnheath.mount-monitor` entry in `~/.config/omarchy/shell.json`.
+1. **Put the candidates on screen immediately, from the prompt.** One line each:
+   `<target> · <size> · <fstype> · <label, or the device path when there is no label> · fixed|removable`
+   Nothing is read or run before this. The question is the point of the notice;
+   everything else is detail you fetch afterwards.
+2. **Ask which to monitor. Wait for the answer.** Never assume the obvious drive.
 
-## Procedure
+## The one verification read
 
-1. **Read the state file, then `shell.json`.** Skip anything already monitored,
-   already offered, or already declined. Do not re-ask a answered question.
-2. **Watch for the same drive twice.** `/` and `/var/log` can be one btrfs
-   partition mounted twice. Compare each candidate's `path` against the `SOURCE`
-   of every monitored mount (`findmnt -rn -o SOURCE,TARGET`). A second mount of a
-   watched partition gets no ring and is not offered.
-3. **Report one line per candidate**, then ask:
-   `<target> · <size> · <fstype> · <label> · fixed|removable`
-   Name the ones already monitored or already declined instead of hiding them.
-4. **Ask which to monitor. Wait for the answer.** Never assume the obvious drive.
-5. **Wire the picks.** Edit only the `mounts` array of the widget entry in
-   `~/.config/omarchy/shell.json`, in the order the captain wants the rings to
-   appear. Leave every other key in that entry (`agentCommand`, `testPct`) intact,
-   and leave the rest of `shell.json` alone.
-6. **An unmounted partition cannot have a ring.** Say so. Mount it - `udisksctl
+Read `~/.local/state/mount-monitor/onboarding.json` once - after the list is on
+screen, before wiring anything. It carries the same candidates with `key`
+(PARTUUID, else UUID, else device path), `monitored`, and `decisions` (offered /
+declined / monitored), so this single read is where the keys come from, what is
+already behind a ring, and what the captain already answered. Do not re-ask an
+answered question: name the already-monitored and already-declined partitions
+instead of hiding them.
+
+That is the entire verification budget - one read. **Never run `lsblk`, never run
+`findmnt`, never re-derive the candidate filter when the prompt carries the
+list.** The widget ran the scan, its filter is the authority, and a second scan
+disagrees with the bar the captain is looking at.
+
+## Wire it
+
+3. **Wire the picks.** Edit only the `mounts` array of the
+   `io.github.jasonlnheath.mount-monitor` entry in `~/.config/omarchy/shell.json`,
+   in the order the captain wants the rings to appear. Leave every other key in
+   that entry (`agentCommand`, `onboarding`, `testPct`) intact, and leave the rest
+   of `shell.json` alone.
+4. **An unmounted partition cannot have a ring.** Say so. Mount it - `udisksctl
    mount` or an fstab entry - only if the captain says to, then wire it.
-7. **Record the choices** in the state file's `decisions`, keyed by the
-   candidate's `key` (PARTUUID, else UUID, else device path): accepted goes
-   `monitored`, refused goes `declined`. Merge into the existing map, never
-   replace it. This is what stops the plugin asking again.
-8. **Apply it**: `omarchy restart shell`, then confirm a ring appeared for each
+5. **Record the choices** in the state file's `decisions`, keyed by the
+   candidate's `key`: accepted goes `monitored`, refused goes `declined`. Merge
+   into the existing map, never replace it. This is what stops the plugin asking
+   again.
+6. **Apply it**: `omarchy restart shell`, then confirm a ring appeared for each
    pick and nothing else on the bar changed.
+
+## Only when the prompt carries no list
+
+If the notice carried no candidates, or the state file is missing or unreadable,
+scan directly:
+
+`lsblk -P -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINT,SIZE,LABEL,PARTLABEL,PARTUUID,UUID,RM`
+
+Keep a row only when TYPE is `part`, `disk`, or a mounted `crypt` (the decrypted
+LUKS volume - on a LUKS install that is the root, while its `crypto_LUKS`
+container partition carries no MOUNTPOINT), FSTYPE is set and not `swap`,
+MOUNTPOINT is set, the device sits under `/dev/`, and the row is not a boot slice
+(a vfat under 1G, or one labelled exactly `efi`, `esp`, or `boot`, or mounted at
+`/efi` or under `/boot/`). That drops swap, snap's loop images, optical drives,
+unformatted slices, every pseudo filesystem - they are not block devices, so
+lsblk never lists them - and the EFI partition that is noise next to real
+drives. Then present the list and continue at step 2.
 
 ## Report shape
 
