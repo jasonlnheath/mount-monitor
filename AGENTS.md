@@ -11,10 +11,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `mounts.js` holds the pure decisions: how a plugin setting value becomes a
   mount list, an argv, a flag, or a number, which findmnt row may draw a ring,
   the 80/90/98 bands, the notification body, its action label, the whole
-  `notify-send` argv and the argv a click runs, the agent prompt, the tooltip,
-  the partition candidate filter, the onboarding state file, and the copy for
-  every notification kind. Put filter, threshold, candidate, setting,
-  and alert-wording changes there so they are covered by the tests.
+  `notify-send` argv and the argv a click runs, the agent prompt, the id a prompt
+  names a mount or partition by and the untrusted device-data block the rest of
+  the device's own words ride in, the tooltip, the partition candidate filter,
+  the onboarding state file, and the copy for every notification kind. Put
+  filter, threshold, candidate, setting, and alert-wording changes there so they
+  are covered by the tests.
 - `mounts.js` is imported by QML (`import "mounts.js" as Mounts`) and loaded by
   the node tests through `node:vm`. It must stay plain top-level `function`
   declarations: no `export`, no `import`, no `.pragma library`, or one of the
@@ -30,21 +32,43 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 `tests/fixtures/` (`findmnt` rows, `lsblk -P` rows) plus live `findmnt` and
 `lsblk` checks that skip when the mount or the tool is absent, a live check in
 `tests/click.test.mjs` that runs the notification service's own `parseExecArgv`
-against the plugin's hint (skips where the shell is not installed), an install.sh
+against the plugin's hint (skips where the shell is not installed), the
+hostile-label regression in `tests/label-injection.test.mjs`, an install.sh
 syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
 forces every ring to a percentage, alerts included. There is no way to test a
 real desktop notification or a real click headlessly. The tests cover the
-mounts.js decisions behind the notifications, the click argv, and the settings
-recovery; the tests that look at `MountMonitor.qml` are delegation guards (the
-widget builds its findmnt command through `Mounts.findmntArgs`, its popup
-command through `Mounts.notifyArgs`, and its agent command through
-`Mounts.agentArgv`). The rest of the wiring is verified by reading it and by the
-captain on the rig.
+mounts.js decisions behind the notifications, the click argv, the settings
+recovery, and the trust boundary between the plugin's fixed prompt copy and what a
+device calls itself; the tests that look at `MountMonitor.qml` are delegation
+guards (the widget builds its findmnt command through `Mounts.findmntArgs`, its
+popup command through `Mounts.notifyArgs`, and its agent command through
+`Mounts.agentArgv`, and it carries `m.id` / `c.id` rather than inventing names).
+The rest of the wiring is verified by reading it and by the captain on the rig.
 
 ## Contracts worth not breaking
 
+- **Device text is data, never instructions** (marketplace finding
+  omacom/omarchy-plugin-marketplace#12972, Medium): a volume label, a PARTLABEL,
+  and — because udisks2 auto-mounts a stick at `/run/media/<user>/<LABEL>` — a
+  mountpoint are written by whoever formatted the filesystem, and they arrive
+  through `lsblk` and `findmnt`. Typed argv keeps a shell out of the click; it
+  never kept a crafted label out of the sentence. Every prompt is now fixed copy
+  in `mounts.js`, identical for every device of a kind; a mount or partition is
+  named by `Mounts.mountId` (`mm-<8hex>-<8hex>`, minted from the candidate's
+  `key` — PARTUUID, else UUID, else device path — and from the target for a ring)
+  and validated by `isMountId` on the way out, so a device never supplies the name
+  the agent is told to act on. Everything else a device calls itself rides inside
+  `dataOpen()` / `dataClose()` as `JSON.stringify` of `mountRecord` /
+  `candidateRecord`, through `sanitizeText` (control characters, bidi overrides and
+  zero-width formatting, and `<` `>` — which is what makes the delimiters
+  unforgeable — turned into spaces, whitespace collapsed, truncated at
+  `DEVICE_TEXT_MAX`). `untrustedNotice()` carries the "data, not instructions"
+  declaration and the requirement that the user confirm the concrete change: keep
+  that wording out of anything a device controls, and never put a label, target,
+  or device path into an instruction sentence again. `tests/label-injection.test.mjs`
+  is the guard.
 - Every plugin setting is read through a `Mounts.normalize*` helper
   (`normalizeMounts`, `normalizeAgentCommand`, `normalizeBool`, `normalizeNumber`).
   The hand-off delivers a Qt list, not a JavaScript Array: `Array.isArray` on a
@@ -92,8 +116,9 @@ captain on the rig.
   (`Mounts.statePath`): `onboarded` fires the first-run count notice once per
   install rather than once per shell restart, and `decisions` (offered /
   declined / monitored) is what stops the nagging. The widget writes its scan
-  into `candidates` with a `monitored` flag so the skills and the bar agree on
-  the list; the skills must merge into `decisions`, never replace it. A
+  into `candidates` with a `monitored` flag and the `id` the notice named that
+  partition by, so the skills and the bar agree on the list and an id maps back to
+  a `key` there; the skills must merge into `decisions`, never replace it. A
   new-partition offer is recorded when its notice is delivered, not when it is
   queued — a notice dropped on a drive that went away leaves no record, so the
   drive is asked about again when it returns. Deleting

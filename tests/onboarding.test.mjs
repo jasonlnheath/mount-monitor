@@ -90,6 +90,17 @@ function rings(wanted) {
   return Array.from(Mounts.selectMounts(FINDMNT, wanted, -1));
 }
 
+// The alert the widget queues for a ring (MountMonitor.qml queueAlert): the row's
+// own fields, so the click the daemon answers and the click this widget answers
+// build the same prompt for the same mount.
+function bandAlert(m, band) {
+  return {
+    kind: "band", target: m.target, source: m.source, id: m.id, fstype: m.fstype,
+    used: m.used, pct: m.pct, avail: m.avail, readonly: m.readonly,
+    band: band === undefined ? 0 : band,
+  };
+}
+
 // --- what the scan asks for -------------------------------------------------
 
 test("the scan is a lsblk run that asks for the columns the filter needs", () => {
@@ -516,7 +527,7 @@ test("a clicked notification dispatches to the prompt for its own kind", () => {
   const stick = find(Mounts.candidatePartitions(LSBLK), USB_PART);
   const models = rings(WANTED).find((m) => m.target === MODELS);
 
-  const band = Mounts.promptFor({ kind: "band", target: MODELS, pct: models.pct, avail: models.avail, readonly: models.readonly });
+  const band = Mounts.promptFor(bandAlert(models));
   assert.equal(band, Mounts.agentPrompt(models), "a band alert keeps the cleanup prompt it has always had");
 
   const notice = firstRunNotice();
@@ -528,7 +539,8 @@ test("a clicked notification dispatches to the prompt for its own kind", () => {
   assert.equal(fresh, Mounts.newPartitionPrompt(stick));
 
   // A band alert written before kinds existed must still get the cleanup prompt.
-  assert.equal(Mounts.promptFor({ target: "/", pct: 57, avail: "105.2G", readonly: false }), Mounts.agentPrompt(rings(WANTED)[0]));
+  assert.equal(Mounts.promptFor(bandAlert(rings(WANTED)[0])), Mounts.agentPrompt(rings(WANTED)[0]),
+    "an alert carrying the row's fields gets the prompt that row's ring would get");
 });
 
 test("MountMonitor.qml hands the first-run notice both counts and delegates the watched rule", () => {

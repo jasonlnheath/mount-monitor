@@ -40,13 +40,27 @@ function fixture(name) {
 const RIG = fixture("findmnt-rig.txt");
 const BTRFS_ONLY = fixture("findmnt-btrfs-only.txt");
 const MODELS = "/mnt/models";
+const SRV = "/srv/models";
 // The captain's bar: root, the btrfs data drive, and the models partition.
-const WANTED = ["/", "/srv/models", MODELS];
+const WANTED = ["/", SRV, MODELS];
 
 function targets(list) {
   // Array.from rather than list.map: the list is built inside mounts.js's VM
   // context, and a cross-realm array is not deep-equal to a local one.
   return Array.from(list, (m) => m.target);
+}
+
+// The two halves of a prompt: the fixed instruction copy, and the device records
+// it names by id. See tests/label-injection.test.mjs for the whole contract.
+function instructionOf(prompt) {
+  return String(prompt).split("<<<")[0];
+}
+
+function blockRecords(prompt) {
+  const start = String(prompt).indexOf("<<<MOUNT MONITOR DEVICE DATA");
+  const open = String(prompt).indexOf(">>>", start) + 3;
+  const close = String(prompt).indexOf("<<<END DEVICE DATA>>>", open);
+  return JSON.parse(String(prompt).slice(open, close).trim());
 }
 
 // --- the reported bug -------------------------------------------------------
@@ -181,18 +195,28 @@ test("the agent prompt for a read-only mount asks for a move-off report, not a p
   const list = Mounts.selectMounts(RIG, WANTED, -1);
   const models = list.find((m) => m.target === MODELS);
   const prompt = Mounts.agentPrompt(models);
-  assert.ok(prompt.includes(MODELS), prompt);
   assert.ok(prompt.includes("read-only"), prompt);
   assert.ok(!/scan .* for prune and compress candidates/.test(prompt), prompt);
   assert.ok(prompt.includes("disk-prune"), prompt);
+  // The mount is named by the plugin's own id in the sentence and described in the
+  // block: a mountpoint is data the agent reports, never part of its instruction.
+  assert.match(instructionOf(prompt), /with id mm-[0-9a-f]{8}-[0-9a-f]{8}/, instructionOf(prompt));
+  assert.ok(!instructionOf(prompt).includes(MODELS), instructionOf(prompt));
+  assert.deepEqual(targets(blockRecords(prompt)), [MODELS]);
+  assert.equal(blockRecords(prompt)[0].readonly, true);
 });
 
 test("a writable mount keeps the prune/compress prompt", () => {
   const list = Mounts.selectMounts(RIG, WANTED, -1);
   const root = list.find((m) => m.target === "/");
+  const srv = list.find((m) => m.target === SRV);
   const prompt = Mounts.agentPrompt(root);
-  assert.ok(/scan \/ for prune and compress candidates/.test(prompt), prompt);
-  assert.ok(!prompt.includes("read-only"), prompt);
+  assert.match(instructionOf(prompt), /scan that mount for prune and compress candidates/, prompt);
+  assert.ok(!instructionOf(prompt).includes("read-only"), prompt);
+  assert.deepEqual(targets(blockRecords(prompt)), ["/"], "the target rides in the block");
+  assert.ok(!instructionOf(Mounts.agentPrompt(srv)).includes(SRV),
+    "no mountpoint in the instruction, whatever the mount is called");
+  assert.deepEqual(targets(blockRecords(Mounts.agentPrompt(srv))), [SRV]);
   const body = Mounts.notifyBody({ target: root.target, pct: root.pct, avail: root.avail, readonly: root.readonly, band: 0 });
   assert.ok(body.includes("prune/compress candidates"), body);
 });

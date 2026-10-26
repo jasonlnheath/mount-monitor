@@ -64,6 +64,25 @@ configured mount that is not currently mounted simply has no ring. Virtual
 filesystems — tmpfs, proc, sysfs, cgroup2, overlay, and anything else without a
 device behind it — never draw a ring, even when configured.
 
+## What a clicked alert sends your agent
+
+The prompt is fixed copy written in this plugin, and it is the same sentence for
+every device of a kind: it names the mount or partition by an id Mount Monitor
+mints itself (`mm-` plus 16 hex digits, derived from the partition's PARTUUID or
+UUID, or the mount's target) and asks the matching skill to do its job.
+
+Everything a device calls itself — mountpoint, device path, filesystem, size, and
+the volume or partition label, which is text whoever formatted the drive wrote —
+travels in a delimited **device data block** that the prompt declares untrusted
+data, never instructions. Control characters, invisible and bidirectional
+formatting, and the block's own delimiters are stripped out of those strings, and
+every string is length-bounded, so a drive cannot bury the fixed copy or close the
+block and speak outside it. A filesystem handed to you cannot put an instruction
+into your agent's ask by wearing one as a label.
+
+Nothing in that block counts as your approval either: the skills report and ask,
+and only you say what gets wired, pruned, compressed, or removed.
+
 ## Requirements
 
 Omarchy Quattro (Quickshell) with third-party `schemaVersion: 1` bar widgets,
