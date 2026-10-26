@@ -16,7 +16,12 @@ import "mounts.js" as Mounts
 // vibrant red ring pulsing at 0.5 Hz). Clicking a notification sends a cleanup
 // prompt to the configured agent (default: the omarchy default agent in a
 // terminal; override with the agentCommand setting, e.g. your fleet agent's
-// inbox). A read-only mount is alerted about too, but honestly: nothing can be
+// inbox). The click is handed over two ways, because the shell can only use one
+// of them at a time: the popup's exec hint (Mounts.notifyArgs), which Omarchy's
+// notification service runs itself and which its persisted history row keeps, and
+// the libnotify action, which only answers while this widget's notify-send is
+// alive. A notice that outlived a shell restart is clickable through the hint.
+// A read-only mount is alerted about too, but honestly: nothing can be
 // pruned on it, so its alert asks the agent what to move off it instead.
 // Onboarding: on first run the widget scans the disk table (lsblk) and notifies
 // how many partitions it found; a clicked notice opens the agent on the
@@ -29,7 +34,8 @@ import "mounts.js" as Mounts
 // dismissed, because the answer is the only door to the flow. It rides its own
 // notify-send process for that reason - a question nobody answers must not hold
 // a full-drive warning in the queue. Once it leaves the screen Omarchy's own
-// notification history keeps it.
+// notification history keeps it, exec hint and all, so a row restored after a
+// shell restart still opens the agent.
 // Configure mounts via the shell.json layout entry:
 //   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/mnt/models"] }
 // Default when unconfigured: root only. Every setting is read through the
@@ -109,16 +115,12 @@ BarWidget {
 
   function runAgent(alert): void {
     var cmd = Mounts.normalizeAgentCommand(root.setting("agentCommand", null))
-    // The alert's kind decides the ask: a band alert asks for disk-prune, an
-    // onboarding notice asks for partition-onboarding.
-    var prompt = Mounts.promptFor(alert)
-    if (cmd !== null) {
-      agentProc.command = cmd.concat([prompt])
-    } else {
-      if (root.agentCommandConfigured())
-        console.warn("mount-monitor: agentCommand must be an argument list, using the default agent")
-      agentProc.command = ["omarchy", "agent", "prompt", prompt]
-    }
+    if (cmd === null && root.agentCommandConfigured())
+      console.warn("mount-monitor: agentCommand must be an argument list, using the default agent")
+    // The same argv the popup's exec hint carries: the alert's kind decides the
+    // ask, so a click the daemon runs and a click this widget answers cannot
+    // disagree about what the agent is asked to do.
+    agentProc.command = Mounts.agentArgv(alert, cmd)
     agentProc.running = true
   }
 
@@ -176,14 +178,10 @@ BarWidget {
   }
 
   function notifyArgs(alert): var {
-    return [
-      "notify-send",
-      "-A", "default=" + Mounts.actionFor(alert),
-      "-u", Mounts.urgencyFor(alert),
-      "-t", Mounts.timeoutFor(alert),
-      Mounts.titleFor(alert),
-      Mounts.bodyFor(alert)
-    ]
+    // The whole notify-send command lives in mounts.js: the action, urgency, and
+    // timeout the queue and the persistence depend on, plus the omarchy exec hint
+    // that keeps the click alive when this widget's sender process does not.
+    return Mounts.notifyArgs(alert, root.setting("agentCommand", null))
   }
 
   function fireNextAlert(): void {
@@ -497,8 +495,11 @@ BarWidget {
       var alert = notifyProc.alert
       notifyProc.alert = null
       if (root.activeAlert === alert) root.activeAlert = null
-      // notify-send prints the action identifier ("default") only when the
-      // popup's action was clicked before expiry
+      // The popup's own click normally runs the exec hint and dismisses the
+      // popup, so nothing prints here. notify-send prints the action identifier
+      // ("default") only when the action is invoked through the live sender — the
+      // fallback route, taken when the hint is absent or the sender is what the
+      // daemon has to answer through.
       if (alert && exitCode === 0 && notifyProc.lastOut.trim() === "default")
         root.runAgent(alert)
       else if (alert && exitCode !== 0)
@@ -528,8 +529,9 @@ BarWidget {
       var alert = noticeProc.alert
       noticeProc.alert = null
       if (root.activeNotice === alert) root.activeNotice = null
-      // As with a band alert: notify-send prints the action identifier only when
-      // the popup's action was clicked before it was dismissed.
+      // As with a band alert: the exec hint is what answers a click on an
+      // omarchy popup, live or restored. The action identifier is the fallback
+      // route, printed only when the live sender is what got invoked.
       if (alert && exitCode === 0 && noticeProc.lastOut.trim() === "default")
         root.runAgent(alert)
       else if (alert && exitCode !== 0)

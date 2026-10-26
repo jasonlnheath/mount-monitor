@@ -1,11 +1,12 @@
 // Mount Monitor shared logic.
 //
 // Imported by MountMonitor.qml (import "mounts.js" as Mounts) and loaded by
-// tests/mounts.test.mjs, tests/onboarding.test.mjs, and tests/settings.test.mjs,
-// so the plugin settings recovery, the mount filter, the alert bands, the alert
-// text, the partition scan, and the once-only onboarding memory are testable
-// without a running shell. Pure functions only: no QML objects, no state. The
-// widget keeps the state (bands, alert queue, processes) and decides when to ask.
+// tests/mounts.test.mjs, tests/onboarding.test.mjs, tests/settings.test.mjs,
+// and tests/click.test.mjs, so the plugin settings recovery, the mount filter,
+// the alert bands, the alert text, the argv a clicked notification runs, the
+// partition scan, and the once-only onboarding memory are testable without a
+// running shell. Pure functions only: no QML objects, no state. The widget keeps
+// the state (bands, alert queue, processes) and decides when to ask.
 
 // --- plugin settings -------------------------------------------------------
 //
@@ -592,4 +593,68 @@ function timeoutFor(alert) {
 // heads-up, not a decision that has to be answered.
 function isPersistent(alert) {
   return alert.band === 3 || alert.kind === "onboarding" || alert.kind === "new-partition"
+}
+
+// --- the click: what a clicked notification runs ----------------------------
+//
+// A click has to reach the agent even when the widget that sent the notice is
+// gone. Omarchy's notification service runs a click two ways (Service.qml
+// invokePopupDefault): an argv vector carried in the `omarchy-exec-argv` string
+// hint, which the persisted history row keeps, or a live libnotify action, which
+// exists only while the sending notify-send process is alive. A notice still on
+// screen after a shell restart is a restored row with no live action at all, so
+// the `-A default=` action alone is a click that dies silently - the reported
+// bug. Every notification carries both routes.
+
+// The argv a click runs: the configured agentCommand - raw setting or already
+// normalized, it goes through the same list recovery as every other setting -
+// with this alert's prompt appended as one argument, or the default agent when
+// there is no usable override. A list of arguments, never a shell string: the
+// daemon runs it through Util.execArgv and the widget through Process, so a
+// mount target with a space in it stays one argument on either route.
+function agentArgv(alert, agentCommand) {
+  var cmd = normalizeAgentCommand(agentCommand)
+  var prompt = promptFor(alert)
+  if (cmd !== null) return cmd.concat([prompt])
+  return ["omarchy", "agent", "prompt", prompt]
+}
+
+// The hint name the notification service reads the click argv from.
+function execHintKey() {
+  return "omarchy-exec-argv"
+}
+
+// The click argv as the hint value: a JSON array of strings, one line, quotes
+// and newlines escaped. Empty when the daemon's own validator
+// (NotificationLogic.js parseExecArgv: non-empty array, every entry a string, a
+// program with no leading dash) would refuse it - a hint that is going to be
+// rejected changes nothing, so leave it off and let the live action answer.
+function execHintValue(alert, agentCommand) {
+  var argv = agentArgv(alert, agentCommand)
+  if (!argv || argv.length === 0) return ""
+  var program = String(argv[0] === undefined || argv[0] === null ? "" : argv[0])
+  if (program === "" || program.charAt(0) === "-") return ""
+  // An empty entry is a hole in the argv - an alert with nothing to ask has no
+  // click to run, and a half-built command must not be handed to the daemon.
+  for (var i = 0; i < argv.length; i++)
+    if (String(argv[i] === undefined || argv[i] === null ? "" : argv[i]).trim() === "") return ""
+  return JSON.stringify(argv)
+}
+
+// The whole notify-send command for one notification: the libnotify action (the
+// queue depends on it - notify-send blocks while its action is live and prints
+// the action identifier when it is clicked), the urgency and timeout that make a
+// question persist, the exec hint that makes the click survive a shell restart,
+// and summary and body last so they can never be read as options.
+function notifyArgs(alert, agentCommand) {
+  var args = [
+    "notify-send",
+    "-A", "default=" + actionFor(alert),
+    "-u", urgencyFor(alert),
+    "-t", timeoutFor(alert)
+  ]
+  var hint = execHintValue(alert, agentCommand)
+  if (hint !== "") args.push("-h", "STRING:" + execHintKey() + ":" + hint)
+  args.push(titleFor(alert), bodyFor(alert))
+  return args
 }
