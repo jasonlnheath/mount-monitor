@@ -307,6 +307,33 @@ test("a queued notice is dropped when its partition is already gone", () => {
     "an ejected drive must not still fire its notification");
 });
 
+test("a dropped notice records nothing, so a replugged drive is asked again", () => {
+  const candidates = Mounts.candidatePartitions(LSBLK);
+  const state = Mounts.parseState(SCANNED_STATE);
+  const watched = Mounts.monitoredDevices(rings(WANTED));
+
+  // The new USB partition queues its once-only notice; queueing records nothing.
+  const queued = Mounts.newCandidates(candidates, state, WANTED, watched);
+  assert.deepEqual(targets(queued), [USB_PART]);
+  assert.equal(state.decisions[USB_PART_KEY], undefined, "queueing must not record the offer");
+
+  // The drive is ejected while the notice waits, so the notice is dropped -
+  // and a dropped notice must leave the partition unrecorded.
+  const ejected = Array.from(candidates).filter((c) => c.path !== "/dev/sdc1");
+  assert.equal(Mounts.candidateAlive(ejected, USB_PART_KEY), false);
+
+  // Replugged days later, the same partition is new again: the drop consumed
+  // nothing of the once-only ask.
+  assert.deepEqual(targets(Mounts.newCandidates(candidates, state, WANTED, watched)), [USB_PART],
+    "a dropped notice must not consume the once-only ask");
+
+  // Delivery is what records it: after the notice fires, it never fires again.
+  const delivered = Mounts.markOffered(state, queued, "offered");
+  assert.equal(delivered.decisions[USB_PART_KEY], "offered");
+  assert.deepEqual(Array.from(Mounts.newCandidates(candidates, delivered, WANTED, watched)), [],
+    "a delivered notice is what makes the partition never-offered-again");
+});
+
 // --- the two new notifications ----------------------------------------------
 
 test("the first-run notification counts the partitions and asks the user to pick", () => {

@@ -144,7 +144,10 @@ BarWidget {
     }
     while (root.noticeQueue.length > 0) {
       var notice = root.noticeQueue.shift()
-      if (notice.kind === "new-partition" && !Mounts.candidateAlive(root.candidates, notice.key)) continue
+      if (notice.kind === "new-partition") {
+        if (!Mounts.candidateAlive(root.candidates, notice.key)) continue
+        root.recordDelivered(notice)
+      }
       return notice
     }
     return null
@@ -276,6 +279,35 @@ BarWidget {
     return out
   }
 
+  // The state as it now stands, written only when its payload changed: the
+  // timestamp changes every cycle and must not turn every refresh into a disk
+  // write.
+  function writeState(next): void {
+    root.onboardingState = next
+    var payload = Mounts.serializeState(next, "")
+    if (payload !== root.lastStateWrite) {
+      root.lastStateWrite = payload
+      root.stateWritten = true
+      stateFile.setText(Mounts.serializeState(next, new Date().toISOString()))
+    }
+  }
+
+  // A new-partition offer is recorded when its notice is delivered, not when it
+  // was queued - a notice dropped on a drive that went away while it waited
+  // leaves no record, so the drive is asked about again when it returns - and
+  // never over a decision that landed while the notice sat in the queue.
+  function recordDelivered(notice): void {
+    var state = root.onboardingState
+    if (state.decisions[notice.key] !== undefined) return
+    root.writeState(Mounts.markOffered(state, [notice.candidate], "offered"))
+  }
+
+  function isQueued(key): bool {
+    for (var i = 0; i < root.noticeQueue.length; i++)
+      if (root.noticeQueue[i].kind === "new-partition" && root.noticeQueue[i].key === key) return true
+    return false
+  }
+
   function evaluateOnboarding(): void {
     if (!root.onboardingEnabled || !root.stateDirDone || !root.stateLoaded || root.reloadPending
       || !root.scanDone || !root.mountsDone)
@@ -293,23 +325,16 @@ BarWidget {
       if (fresh.length > 0) root.noticeQueue.push({ kind: "onboarding", candidates: fresh })
       next = Mounts.markOffered(next, fresh, "offered")
     } else if (fresh.length > 0) {
-      // A partition that appeared after onboarding gets its own notice, once.
+      // A partition that appeared after onboarding gets its own notice, once;
+      // the offer is recorded when the notice is delivered, so a partition
+      // whose notice is already waiting is not queued a second time.
       for (var i = 0; i < fresh.length; i++)
-        root.noticeQueue.push({ kind: "new-partition", key: fresh[i].key, candidate: fresh[i] })
-      next = Mounts.markOffered(next, fresh, "offered")
+        if (!root.isQueued(fresh[i].key))
+          root.noticeQueue.push({ kind: "new-partition", key: fresh[i].key, candidate: fresh[i] })
     }
 
     next.candidates = root.annotatedCandidates(wanted, watched)
-    root.onboardingState = next
-
-    // Compare the payload, not the whole file: the timestamp changes every cycle
-    // and must not turn every refresh into a disk write.
-    var payload = Mounts.serializeState(next, "")
-    if (payload !== root.lastStateWrite) {
-      root.lastStateWrite = payload
-      root.stateWritten = true
-      stateFile.setText(Mounts.serializeState(next, new Date().toISOString()))
-    }
+    root.writeState(next)
 
     root.fireNextAlert()
   }

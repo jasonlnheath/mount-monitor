@@ -72,7 +72,10 @@ verified by reading the wiring in the tests, and by the captain on the rig.
   install rather than once per shell restart, and `decisions` (offered /
   declined / monitored) is what stops the nagging. The widget writes its scan
   into `candidates` with a `monitored` flag so the skills and the bar agree on
-  the list; the skills must merge into `decisions`, never replace it. Deleting
+  the list; the skills must merge into `decisions`, never replace it. A
+  new-partition offer is recorded when its notice is delivered, not when it is
+  queued — a notice dropped on a drive that went away leaves no record, so the
+  drive is asked about again when it returns. Deleting
   the file re-runs first run on the next shell start (`omarchy restart shell`)
   — that is the intended reset hook; a live widget keeps the state in memory
   and writes it back, so restart first.
