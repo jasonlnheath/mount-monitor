@@ -41,14 +41,17 @@ whether it is read-only.
   declined, or accepted is remembered, so the same partition is never offered
   twice. Set `"onboarding": false` on the entry to skip the scan and its notices.
 
-Alerts go one at a time, so the one on screen stays clickable, and a queued
-alert is only dropped when the reading behind it stops holding — the mount
-went away or its usage fell back below the band it was queued for. A popup
-left unanswered is dismissed after two minutes so the queue keeps moving. A
-mount that is already in a band when the shell starts or reloads is not
-re-notified until it crosses again; 98% and above always notifies. Onboarding
-notices ride the same queue, behind the disk alerts: a full drive is never
-made to wait behind a question.
+Disk alerts go one at a time, so the one on screen stays clickable, and a
+queued alert is only dropped when the reading behind it stops holding — the
+mount went away or its usage fell back below the band it was queued for. A
+disk alert left unanswered is dismissed after two minutes so the queue keeps
+moving. A mount that is already in a band when the shell starts or reloads is
+not re-notified until it crosses again; 98% and above always notifies.
+Onboarding and new-drive notices are different: they stay up until you read,
+act on, or dismiss them, and a dismissed one remains reachable in Omarchy's
+notification history. They ride their own lane too, so a notice and a disk
+alert can be on screen at once — a full drive is never made to wait behind a
+question.
 
 Rings refresh once a minute and only mounts you configure are shown. A
 configured mount that is not currently mounted simply has no ring. Virtual

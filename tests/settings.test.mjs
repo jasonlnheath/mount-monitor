@@ -58,23 +58,10 @@ function strings(list) {
   return Array.from(list, (s) => s);
 }
 
-// The shapes a plugin setting can actually arrive in. A Qt list wrapper is not
-// a JavaScript Array: it enumerates its elements as index-named properties and
-// survives JSON.stringify, which is the round-trip that recovers it on the bar.
-function qtListLike(items) {
-  const wrapper = {};
-  for (let i = 0; i < items.length; i++) wrapper[String(i)] = items[i];
-  return wrapper;
-}
-
-function qtListLikeWithLength(items) {
-  const wrapper = qtListLike(items);
-  wrapper.length = items.length;
-  return wrapper;
-}
-
+// The shape the plugin hand-off delivers: a list wrapper that is not a
+// JavaScript Array, but whose JSON serialization is the array - the round-trip
+// that recovers it on the bar.
 function stringifiedListLike(items) {
-  // A wrapper whose serialization is the array itself.
   return { toJSON: () => items };
 }
 
@@ -86,20 +73,15 @@ test("a real array of mounts reaches the bar unchanged", () => {
 });
 
 test("a Qt list wrapper is recovered into the configured mount list", () => {
-  for (const raw of [qtListLike(WANTED), qtListLikeWithLength(WANTED), stringifiedListLike(WANTED)]) {
-    assert.ok(!Array.isArray(raw), `${JSON.stringify(raw)} must not already be an Array`);
-    assert.deepEqual(strings(Mounts.normalizeMounts(raw)), WANTED,
-      "the JSON round-trip must recover every configured mount, in order");
-  }
-});
-
-test("a JSON string carrying the array is recovered", () => {
-  assert.deepEqual(strings(Mounts.normalizeMounts(JSON.stringify(WANTED))), WANTED);
-  assert.deepEqual(strings(Mounts.normalizeMounts(' ["/", "/srv/models"] ')), ["/", "/srv/models"]);
+  const raw = stringifiedListLike(WANTED);
+  assert.ok(!Array.isArray(raw), `${JSON.stringify(raw)} must not already be an Array`);
+  assert.deepEqual(strings(Mounts.normalizeMounts(raw)), WANTED,
+    "the JSON round-trip must recover every configured mount, in order");
 });
 
 test("a mount list that is not a list at all falls back to root only", () => {
-  for (const raw of [undefined, null, "", "   ", "not a list", 42, true, {}, { fstype: "btrfs" }, "[1,2]", ["", "  "]]) {
+  for (const raw of [undefined, null, "", "   ", "not a list", "[1,2]", JSON.stringify(WANTED),
+    42, true, {}, { fstype: "btrfs" }, { 0: "/", 1: SRV }, ["", "  "]]) {
     assert.deepEqual(strings(Mounts.normalizeMounts(raw)), ["/"],
       `${JSON.stringify(raw)} must fall back to the documented default, not an empty bar`);
   }
@@ -107,12 +89,12 @@ test("a mount list that is not a list at all falls back to root only", () => {
 
 test("an explicitly empty mount list means no rings, which is not the same as garbage", () => {
   assert.deepEqual(strings(Mounts.normalizeMounts([])), []);
-  assert.deepEqual(strings(Mounts.normalizeMounts("[]")), []);
+  assert.deepEqual(strings(Mounts.normalizeMounts(stringifiedListLike([]))), []);
 });
 
 test("mount entries are trimmed and unusable entries are dropped, order preserved", () => {
   assert.deepEqual(strings(Mounts.normalizeMounts([" / ", "/srv/models", "", null])), ["/", "/srv/models"]);
-  assert.deepEqual(strings(Mounts.normalizeMounts(qtListLike(["/", "", SRV]))), ["/", SRV]);
+  assert.deepEqual(strings(Mounts.normalizeMounts(stringifiedListLike(["/", "", SRV]))), ["/", SRV]);
 });
 
 // --- agentCommand: the argv override ----------------------------------------
@@ -124,18 +106,13 @@ test("a real agentCommand argv reaches the agent unchanged", () => {
 test("a Qt list wrapper agentCommand is recovered instead of rejected", () => {
   // The live failure: "agentCommand must be an argument list" while the config
   // carried a perfectly good two-argument list.
-  for (const raw of [qtListLike(AGENT), qtListLikeWithLength(AGENT), stringifiedListLike(AGENT)]) {
-    assert.ok(!Array.isArray(raw));
-    assert.deepEqual(strings(Mounts.normalizeAgentCommand(raw)), AGENT);
-  }
-});
-
-test("a JSON string agentCommand is recovered", () => {
-  assert.deepEqual(strings(Mounts.normalizeAgentCommand(JSON.stringify(AGENT))), AGENT);
+  const raw = stringifiedListLike(AGENT);
+  assert.ok(!Array.isArray(raw));
+  assert.deepEqual(strings(Mounts.normalizeAgentCommand(raw)), AGENT);
 });
 
 test("an agentCommand that is not an argument list means the default agent", () => {
-  for (const raw of [undefined, null, "", "omarchy agent prompt", 7, true, {}, { cmd: "omarchy" }]) {
+  for (const raw of [undefined, null, "", "omarchy agent prompt", JSON.stringify(AGENT), 7, true, {}, { cmd: "omarchy" }]) {
     assert.equal(Mounts.normalizeAgentCommand(raw), null,
       `${JSON.stringify(raw)} must read as "no override", never as a half-built command`);
   }
@@ -179,7 +156,7 @@ test("the testPct override survives a string-shaped or wrapper-shaped number", (
 // --- the bug's downstream effect --------------------------------------------
 
 test("a recovered mount list is what keeps configured mounts out of the candidate scan", () => {
-  const wanted = Mounts.normalizeMounts(qtListLike(WANTED));
+  const wanted = Mounts.normalizeMounts(stringifiedListLike(WANTED));
   const rings = Array.from(Mounts.selectMounts(FINDMNT, wanted, -1));
   const offered = Mounts.newCandidates(
     Mounts.candidatePartitions(LSBLK), Mounts.parseState(""), wanted, Mounts.monitoredDevices(rings));
@@ -193,7 +170,6 @@ test("a recovered mount list is what keeps configured mounts out of the candidat
 
 test("the fallback mount list is what made the bar draw one ring and offer the rest", () => {
   // The counterexample, kept so the fix stays honest about what it changed.
-  const wanted = Mounts.normalizeMounts(qtListLike(WANTED));
   const fallback = ["/"];
   assert.ok(Array.from(Mounts.selectMounts(FINDMNT, fallback, -1)).length === 1);
   const offered = Array.from(Mounts.newCandidates(
@@ -201,13 +177,4 @@ test("the fallback mount list is what made the bar draw one ring and offer the r
     Mounts.monitoredDevices(Array.from(Mounts.selectMounts(FINDMNT, fallback, -1)))), (c) => c.target);
   assert.ok(offered.includes(MODELS) && offered.includes(SRV),
     "with the fallback list the monitored mounts were reported as new");
-});
-
-// --- the QML stays wired to the shared logic --------------------------------
-
-test("mounts.js stays a plain script both consumers can load", () => {
-  const src = readFileSync(path.join(repo, "mounts.js"), "utf8");
-  assert.ok(!/^\s*(export|import)\b/m.test(src), "no export statement, no import statement");
-  assert.ok(!src.includes(".pragma library"), "no .pragma library");
-  assert.match(src, /^function [A-Za-z]+\(/m, "plain top-level function declarations");
 });

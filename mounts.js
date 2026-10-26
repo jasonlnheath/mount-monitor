@@ -18,30 +18,22 @@
 // per-setting guess in QML.
 
 // The elements of a list-shaped value, in order, or null when the value is not
-// a list at all. Three shapes are accepted: a real array; anything whose JSON
-// serialization is an array (the Qt list wrapper survives exactly this
-// round-trip); and a wrapper whose elements sit under their own index as
-// property names. A JSON string carrying the array is parsed. Entries must be
-// strings - a mount target and an argv element both are - and blanks are
-// dropped. `dropped` counts the entries that were unusable, so a caller that
-// cannot tolerate a hole (an argv) can refuse a half-built list.
+// a list at all. Two shapes are accepted: a real array, and anything whose JSON
+// serialization is an array - the Qt list wrapper the hand-off delivers
+// survives exactly that round-trip, which is the one recovery verified on the
+// live bar. Entries must be strings - a mount target and an argv element both
+// are - and blanks are dropped. `dropped` counts the entries that were
+// unusable, so a caller that cannot tolerate a hole (an argv) can refuse a
+// half-built list.
 function recoverList(raw) {
-  var value = raw
-  if (typeof value === "string") {
-    var text = value.trim()
-    if (text.substring(0, 1) !== "[") return null
-    try { value = JSON.parse(text) } catch (e) { return null }
-  }
-
   var items = null
-  if (Array.isArray(value)) {
-    items = value
+  if (Array.isArray(raw)) {
+    items = raw
   } else {
     try {
-      var round = JSON.parse(JSON.stringify(value))
+      var round = JSON.parse(JSON.stringify(raw))
       if (Array.isArray(round)) items = round
     } catch (e) { items = null }
-    if (items === null) items = indexKeyedItems(value)
   }
   if (items === null) return null
 
@@ -55,20 +47,6 @@ function recoverList(raw) {
     out.push(entry)
   }
   return { items: out, dropped: dropped }
-}
-
-// The last-resort shape: a list wrapper that is neither an Array nor serializes
-// as one, so its elements are enumerable only as "0", "1", ...
-function indexKeyedItems(value) {
-  if (!value || typeof value !== "object") return null
-  var keys = []
-  for (var key in value)
-    if (/^[0-9]+$/.test(key)) keys.push(key)
-  if (keys.length === 0) return null
-  keys.sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10) })
-  var out = []
-  for (var i = 0; i < keys.length; i++) out.push(value[keys[i]])
-  return out
 }
 
 // The configured ring list. Absent, garbage, or a list with nothing usable in it
@@ -321,8 +299,8 @@ function isBootSlice(row) {
   if (fstype !== "vfat" && fstype !== "fat" && fstype !== "fat12" && fstype !== "fat16" && fstype !== "fat32")
     return false
   if (sizeBytes(row.size) < 1073741824) return true
-  var names = (String(row.label || "") + " " + String(row.partlabel || "")).toLowerCase()
-  if (names.indexOf("efi") >= 0 || names.indexOf("boot") >= 0) return true
+  var names = (String(row.label || "") + " " + String(row.partlabel || "")).toLowerCase().split(/\s+/)
+  if (names.indexOf("efi") >= 0 || names.indexOf("esp") >= 0 || names.indexOf("boot") >= 0) return true
   var mountpoint = String(row.mountpoint || "")
   return mountpoint === "/efi" || mountpoint === "/boot" || mountpoint.substring(0, 6) === "/boot/"
 }
@@ -528,11 +506,11 @@ function onboardingPrompt(candidates) {
   var n = list.length
   var names = []
   for (var i = 0; i < list.length; i++)
-    names.push(list[i].target + " (" + list[i].fstype + ", " + list[i].size +
-               (list[i].removable ? ", removable" : "") + ")")
+    names.push(list[i].target + " (" + list[i].fstype + ", " + list[i].size + ", " +
+               (list[i].label || list[i].path) + (list[i].removable ? ", removable" : "") + ")")
   return "Mount Monitor: " + n + " disk partition" + (n === 1 ? "" : "s") + " on this machine " +
          (n === 1 ? "has" : "have") + " no ring yet - " + names.join(", ") + ". Run the partition-onboarding " +
-         "skill: report each one with size, filesystem, and whether it is removable, ask which to monitor, " +
+         "skill: report each one with size, filesystem, label, and whether it is removable, ask which to monitor, " +
          "then wire the picks into the mount-monitor mounts setting in ~/.config/omarchy/shell.json."
 }
 
@@ -552,7 +530,7 @@ function newPartitionAction() {
 function newPartitionPrompt(candidate) {
   var c = candidate || {}
   return "Mount Monitor: new " + (c.removable ? "removable " : "") + "partition " + c.target + " on " +
-         c.path + " (" + c.fstype + ", " + c.size + ") just appeared and has no ring. Run the " +
+         c.path + " (" + c.fstype + ", " + c.size + (c.label ? ", " + c.label : "") + ") just appeared and has no ring. Run the " +
          "partition-onboarding skill for this partition: report what it is and ask whether to monitor it, " +
          "then wire it into the mount-monitor mounts setting in ~/.config/omarchy/shell.json if accepted."
 }

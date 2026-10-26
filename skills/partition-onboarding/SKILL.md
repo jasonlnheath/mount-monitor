@@ -6,8 +6,9 @@ description: Mount Monitor partition onboarding - present the disk partitions th
 # Partition onboarding
 
 Goal: turn "N partitions found" into watched mounts. The click that opened this
-skill already carried every candidate with its target, filesystem, size, and
-whether it is removable. Present them, ask, wire the picks. Never re-derive what
+skill already carried every candidate with its target, filesystem, size, label
+(or the device path when there is no label), and whether it is removable.
+Present them, ask, wire the picks. Never re-derive what
 the prompt already told you: a live run that rescans the disk table spends
 minutes reproducing a list that is already on screen.
 

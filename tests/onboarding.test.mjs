@@ -160,6 +160,11 @@ test("a vfat slice is excluded by size, by label, or by a boot mountpoint", () =
     { keep: false, fields: { NAME: "sdh1", PATH: "/dev/sdh1", TYPE: "part", FSTYPE: "vfat",
       MOUNTPOINT: "/mnt/esp", SIZE: "4G", LABEL: "EFI SYSTEM", PARTLABEL: "EFI system partition",
       PARTUUID: "aaaa1114-2222-3333-4444-555555555555", UUID: "1111-2225", RM: "1" } },
+    // Labels that merely contain efi - REFILL and DEFIANT each carry it
+    // mid-word - are data, not boot slices: the whole token names the slice.
+    { keep: true, fields: { NAME: "sdi1", PATH: "/dev/sdi1", TYPE: "part", FSTYPE: "vfat",
+      MOUNTPOINT: "/mnt/refill", SIZE: "4G", LABEL: "REFILL", PARTLABEL: "DEFIANT",
+      PARTUUID: "aaaa1115-2222-3333-4444-555555555555", UUID: "1111-2226", RM: "1" } },
   ];
   for (const row of rows) {
     const line = lsblkRow(row.fields);
@@ -409,6 +414,13 @@ test("the first-run prompt hands the list to the partition-onboarding skill", ()
   assert.ok(prompt.includes(MODELS) && prompt.includes(USB), prompt);
   assert.ok(/ask/i.test(prompt) && /monitor/i.test(prompt), prompt);
   assert.ok(!/disk-prune/.test(prompt), "onboarding must not ask for a prune scan");
+  // The label rides the prompt - the models partition's DAW label appears
+  // nowhere else in it - so the skill's present-first line renders with no read.
+  assert.ok(prompt.includes("DAW"), prompt);
+  // An unlabeled partition is presented by its device path instead.
+  const unlabeled = Mounts.onboardingPrompt(
+    [{ key: "k", target: "/mnt/x", path: "/dev/sdz1", fstype: "ext4", size: "8T", label: "", removable: false }]);
+  assert.ok(unlabeled.includes("/dev/sdz1"), unlabeled);
 });
 
 test("a new drive notifies once with the captain's exact copy", () => {
@@ -431,6 +443,10 @@ test("a new drive notifies once with the captain's exact copy", () => {
   assert.ok(prompt.includes("/dev/sdc1"), prompt);
   assert.ok(/removable/i.test(prompt), prompt);
   assert.ok(!/disk-prune/.test(prompt), prompt);
+  // The label rides too: the models partition's DAW label appears nowhere else
+  // in the prompt, next to the path that is always carried.
+  const modelsPrompt = Mounts.newPartitionPrompt(find(Mounts.candidatePartitions(LSBLK), MODELS));
+  assert.ok(modelsPrompt.includes("DAW") && modelsPrompt.includes("/dev/nvme1n1p2"), modelsPrompt);
 });
 
 test("a clicked notification dispatches to the prompt for its own kind", () => {
