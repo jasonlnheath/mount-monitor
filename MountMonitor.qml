@@ -295,8 +295,12 @@ BarWidget {
   // A new-partition offer is recorded when its notice is delivered, not when it
   // was queued - a notice dropped on a drive that went away while it waited
   // leaves no record, so the drive is asked about again when it returns - and
-  // never over a decision that landed while the notice sat in the queue.
+  // never over a decision that landed while the notice sat in the queue. While
+  // a state-file reload is in flight the record is skipped: the popup still
+  // shows, and the next evaluate either finds the decision already recorded or
+  // queues the still-undecided partition again.
   function recordDelivered(notice): void {
+    if (root.reloadPending) return
     var state = root.onboardingState
     if (state.decisions[notice.key] !== undefined) return
     root.writeState(Mounts.markOffered(state, [notice.candidate], "offered"))
