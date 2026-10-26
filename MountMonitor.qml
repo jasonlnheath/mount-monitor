@@ -18,6 +18,13 @@ import "mounts.js" as Mounts
 // terminal; override with the agentCommand setting, e.g. your fleet agent's
 // inbox). A read-only mount is alerted about too, but honestly: nothing can be
 // pruned on it, so its alert asks the agent what to move off it instead.
+// Onboarding: on first run the widget scans the disk table (lsblk) and notifies
+// how many partitions it found; a clicked notice opens the agent on the
+// partition-onboarding skill, which asks which to monitor and wires the picks
+// into the mounts setting. A partition that appears later notifies once. What
+// has been offered, declined, or accepted lives in the state file at
+// Mounts.statePath, so the same partition is never offered twice. Set
+// "onboarding": false on the shell.json entry to skip the scan and its notices.
 // Configure mounts via the shell.json layout entry:
 //   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/mnt/models"] }
 // Default when unconfigured: root only.
@@ -40,12 +47,42 @@ BarWidget {
   property bool primed: false
   readonly property color alertRed: "#ff2d2d"
 
+  // --- onboarding -----------------------------------------------------------
+  // The last candidate scan: [{ key, target, path, fstype, size, label, removable }].
+  property var candidates: []
+  // What has already been offered, declined, or accepted, read from the state
+  // file. This is the memory that keeps a partition from being offered twice.
+  property var onboardingState: Mounts.parseState("")
+  // queued onboarding notices, drained only after the band alerts are done
+  property var noticeQueue: []
+  // The scan is evaluated once all four inputs of a cycle have landed: the state
+  // directory, the state file, the disk table, and the mount table (which says
+  // what is already watched).
+  property bool stateDirDone: false
+  property bool stateLoaded: false
+  // Set while a changed state file is being re-read, cleared once the fresh
+  // content has landed: an evaluate that runs in between would read the
+  // previous decisions and answer over the newest one.
+  property bool reloadPending: false
+  property bool scanDone: false
+  property bool mountsDone: false
+  // The payload last written, so an unchanged scan does not rewrite the file.
+  property string lastStateWrite: ""
+  property bool stateWritten: false
+  readonly property bool onboardingEnabled: root.setting("onboarding", true) === true
+  readonly property string onboardingStatePath: Mounts.statePath(Quickshell.env("HOME"))
+
   function refresh(): void {
     root.broadcast("refreshSelf")
   }
 
   function refreshSelf(): void {
     if (!dfProc.running) dfProc.running = true
+    // The state file is read once at startup and then on every change to it - a
+    // decline the onboarding skill wrote lands through onFileChanged. Re-reading
+    // it each cycle would race this widget's own write and re-offer what it has
+    // already offered.
+    if (root.onboardingEnabled && !scanProc.running) scanProc.running = true
   }
 
   function wantedMounts(): var {
@@ -57,18 +94,17 @@ BarWidget {
     return Mounts.bandFor(pct)
   }
 
-  function agentPrompt(m): string {
-    return Mounts.agentPrompt(m)
-  }
-
-  function runAgent(m): void {
+  function runAgent(alert): void {
     var cmd = root.setting("agentCommand", null)
+    // The alert's kind decides the ask: a band alert asks for disk-prune, an
+    // onboarding notice asks for partition-onboarding.
+    var prompt = Mounts.promptFor(alert)
     if (Array.isArray(cmd) && cmd.length > 0) {
-      agentProc.command = cmd.concat([root.agentPrompt(m)])
+      agentProc.command = cmd.concat([prompt])
     } else {
       if (cmd !== null && cmd !== undefined && !Array.isArray(cmd))
         console.warn("mount-monitor: agentCommand must be an argument list, using the default agent")
-      agentProc.command = ["omarchy", "agent", "prompt", root.agentPrompt(m)]
+      agentProc.command = ["omarchy", "agent", "prompt", prompt]
     }
     agentProc.running = true
   }
@@ -80,10 +116,10 @@ BarWidget {
       // again while its first alert is still queued behind another mount gets a
       // single notification for the band it actually reached.
       if (band > root.alertQueue[i].band)
-        root.alertQueue[i] = { target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band }
+        root.alertQueue[i] = { kind: "band", target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band }
       return
     }
-    root.alertQueue.push({ target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band })
+    root.alertQueue.push({ kind: "band", target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band })
   }
 
   // Band the latest reading reports for a mount, -1 when it is not mounted.
@@ -93,31 +129,48 @@ BarWidget {
     return -1
   }
 
-  function fireNextAlert(): void {
-    if (root.activeAlert !== null || root.alertQueue.length === 0) return
+  // The next notification to put on screen. Band alerts drain first, so an
+  // onboarding popup can never delay a full-drive warning. Anything the latest
+  // reading no longer supports is dropped on the way: a band alert whose mount
+  // went away or fell back below its band, and a new-partition notice whose
+  // drive was already ejected while it waited.
+  function takeNextAlert(): var {
     while (root.alertQueue.length > 0) {
       var alert = root.alertQueue.shift()
       var now = root.bandOf(alert.target)
-      // Drop anything the latest reading no longer supports: the mount went
-      // away, it is no longer configured, or its usage fell back below the
-      // band it was queued for.
       if (now < alert.band) continue
       alert.band = now
-      root.activeAlert = alert
-      notifyProc.alert = alert
-      notifyProc.lastOut = ""
-      notifyProc.didStart = false
-      notifyProc.command = [
-        "notify-send",
-        "-A", "default=" + Mounts.notifyAction(alert),
-        "-u", alert.band === 3 ? "critical" : "normal",
-        "-t", alert.band === 3 ? "0" : "6000",
-        "Mount Monitor — " + (alert.band === 3 ? "CRITICAL" : "warning"),
-        Mounts.notifyBody(alert)
-      ]
-      notifyProc.running = true
-      return
+      return alert
     }
+    while (root.noticeQueue.length > 0) {
+      var notice = root.noticeQueue.shift()
+      if (notice.kind === "new-partition") {
+        if (!Mounts.candidateAlive(root.candidates, notice.key)) continue
+        root.recordDelivered(notice)
+      }
+      return notice
+    }
+    return null
+  }
+
+  function fireNextAlert(): void {
+    if (root.activeAlert !== null) return
+    var alert = root.takeNextAlert()
+    if (alert === null) return
+
+    root.activeAlert = alert
+    notifyProc.alert = alert
+    notifyProc.lastOut = ""
+    notifyProc.didStart = false
+    notifyProc.command = [
+      "notify-send",
+      "-A", "default=" + Mounts.actionFor(alert),
+      "-u", Mounts.urgencyFor(alert),
+      "-t", Mounts.timeoutFor(alert),
+      Mounts.titleFor(alert),
+      Mounts.bodyFor(alert)
+    ]
+    notifyProc.running = true
   }
 
   // notify-send blocks until its popup closes and a critical alert never
@@ -178,7 +231,116 @@ BarWidget {
     // Which mounts may draw a ring, and what their usage is, is mounts.js's
     // decision; this only feeds it the reading and the configured list.
     root.mounts = Mounts.selectMounts(text, wanted, testOverride)
+    root.mountsDone = true
     root.checkBands(root.mounts, wanted)
+    root.evaluateOnboarding()
+  }
+
+  // --- onboarding: scan, memory, notices ------------------------------------
+
+  function parseScan(text): void {
+    root.candidates = Mounts.candidatePartitions(text)
+    root.scanDone = true
+    root.evaluateOnboarding()
+  }
+
+  function loadState(raw): void {
+    if (String(raw === undefined || raw === null ? "" : raw).trim() === "" && root.stateWritten) {
+      // The file exists because this widget wrote it. An empty read is the
+      // watcher racing its own save, not a fresh install: keep what we know
+      // rather than re-offering everything.
+      root.stateLoaded = true
+      root.evaluateOnboarding()
+      return
+    }
+    root.onboardingState = Mounts.parseState(raw)
+    root.stateLoaded = true
+    root.evaluateOnboarding()
+  }
+
+  // The scan mirrored into the state file, each candidate marked with whether a
+  // ring already covers it. The onboarding skills read this list instead of
+  // re-deriving the filter, so the agent and the bar agree on what a partition is.
+  function annotatedCandidates(wanted, watched): var {
+    var out = []
+    for (var i = 0; i < root.candidates.length; i++) {
+      var c = root.candidates[i]
+      out.push({
+        key: c.key,
+        target: c.target,
+        path: c.path,
+        fstype: c.fstype,
+        size: c.size,
+        label: c.label,
+        removable: c.removable,
+        monitored: wanted.indexOf(c.target) >= 0 || watched.indexOf(c.path) >= 0
+      })
+    }
+    return out
+  }
+
+  // The state as it now stands, written only when its payload changed: the
+  // timestamp changes every cycle and must not turn every refresh into a disk
+  // write.
+  function writeState(next): void {
+    root.onboardingState = next
+    var payload = Mounts.serializeState(next, "")
+    if (payload !== root.lastStateWrite) {
+      root.lastStateWrite = payload
+      root.stateWritten = true
+      stateFile.setText(Mounts.serializeState(next, new Date().toISOString()))
+    }
+  }
+
+  // A new-partition offer is recorded when its notice is delivered, not when it
+  // was queued - a notice dropped on a drive that went away while it waited
+  // leaves no record, so the drive is asked about again when it returns - and
+  // never over a decision that landed while the notice sat in the queue. While
+  // a state-file reload is in flight the record is skipped: the popup still
+  // shows, and the next evaluate either finds the decision already recorded or
+  // queues the still-undecided partition again.
+  function recordDelivered(notice): void {
+    if (root.reloadPending) return
+    var state = root.onboardingState
+    if (state.decisions[notice.key] !== undefined) return
+    root.writeState(Mounts.markOffered(state, [notice.candidate], "offered"))
+  }
+
+  function isQueued(key): bool {
+    for (var i = 0; i < root.noticeQueue.length; i++)
+      if (root.noticeQueue[i].kind === "new-partition" && root.noticeQueue[i].key === key) return true
+    return false
+  }
+
+  function evaluateOnboarding(): void {
+    if (!root.onboardingEnabled || !root.stateDirDone || !root.stateLoaded || root.reloadPending
+      || !root.scanDone || !root.mountsDone)
+      return
+
+    var wanted = root.wantedMounts()
+    var watched = Mounts.monitoredDevices(root.mounts)
+    var fresh = Mounts.newCandidates(root.candidates, root.onboardingState, wanted, watched)
+    var next = root.onboardingState
+
+    if (!next.onboarded) {
+      // First run: one notice for everything the scan found. Recording it - even
+      // when the list is empty - is what makes the count notification fire once
+      // per install rather than once per shell restart.
+      if (fresh.length > 0) root.noticeQueue.push({ kind: "onboarding", candidates: fresh })
+      next = Mounts.markOffered(next, fresh, "offered")
+    } else if (fresh.length > 0) {
+      // A partition that appeared after onboarding gets its own notice, once;
+      // the offer is recorded when the notice is delivered, so a partition
+      // whose notice is already waiting is not queued a second time.
+      for (var i = 0; i < fresh.length; i++)
+        if (!root.isQueued(fresh[i].key))
+          root.noticeQueue.push({ kind: "new-partition", key: fresh[i].key, candidate: fresh[i] })
+    }
+
+    next.candidates = root.annotatedCandidates(wanted, watched)
+    root.writeState(next)
+
+    root.fireNextAlert()
   }
 
   implicitWidth: row.implicitWidth
@@ -195,6 +357,66 @@ BarWidget {
     }
     onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0) console.warn("mount-monitor: findmnt exited with code " + exitCode + ", keeping the last reading")
+    }
+  }
+
+  // The candidate scan. lsblk is per partition, which is what keeps several
+  // btrfs subvolume mounts of one drive down to one candidate, and it is the
+  // only place the removable flag lives. util-linux, same package as findmnt.
+  Process {
+    id: scanProc
+    command: ["lsblk"].concat(Mounts.lsblkArgs())
+    property string scanText: ""
+    stdout: StdioCollector {
+      onStreamFinished: scanProc.scanText = this.text
+    }
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: lsblk:", this.text.trim())
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) {
+        console.warn("mount-monitor: lsblk exited with code " + exitCode + ", keeping the last scan")
+        return
+      }
+      root.parseScan(scanProc.scanText)
+    }
+  }
+
+  // The state directory has to exist before the file can be read or watched:
+  // FileView cannot observe a file that has never been created.
+  Process {
+    id: stateDirProc
+    command: ["mkdir", "-p", Mounts.stateDir(Quickshell.env("HOME"))]
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: state dir:", this.text.trim())
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) console.warn("mount-monitor: could not create the onboarding state dir, onboarding stays in memory")
+      // Nothing may write the state file before its directory is known to exist.
+      root.stateDirDone = true
+      stateFile.reload()
+    }
+  }
+
+  FileView {
+    id: stateFile
+    path: root.onboardingStatePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      root.reloadPending = false
+      root.loadState(text())
+    }
+    // text() is stale inside the change signal, so route a change through reload
+    // to onLoaded and always parse fresh content; evaluates wait for that read.
+    onFileChanged: {
+      root.reloadPending = true
+      reload()
+    }
+    onLoadFailed: {
+      root.reloadPending = false
+      root.loadState("")
     }
   }
 
@@ -257,6 +479,8 @@ BarWidget {
     triggeredOnStart: true
     onTriggered: root.refresh()
   }
+
+  Component.onCompleted: if (root.onboardingEnabled) stateDirProc.running = true
 
   Row {
     id: row

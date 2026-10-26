@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Mount Monitor checks: the mount filter, alert bands, and alert text in
-# mounts.js, then a QML syntax/import check over MountMonitor.qml when Qt's
-# qmllint is on the box. Run from anywhere: bash tests/run.sh
+# Mount Monitor checks: the node tests over mounts.js (mount filter, alert
+# bands, alert text, partition onboarding), an install.sh syntax check, a
+# skills/ SKILL.md check, then a QML syntax/import check over MountMonitor.qml
+# when Qt's qmllint is on the box. Run from anywhere: bash tests/run.sh
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,6 +10,15 @@ repo="$(dirname "$here")"
 
 command -v node > /dev/null || { echo "node is required to run the tests" >&2; exit 1; }
 node --test "$here"
+
+# The skills the repo ships are what install.sh copies, so check they are real
+# skill directories and that the installer still parses.
+bash -n "$repo/install.sh" || { echo "install.sh syntax check FAILED" >&2; exit 1; }
+for skill_dir in "$repo"/skills/*/; do
+  skill="$(basename "$skill_dir")"
+  [[ -f "$skill_dir/SKILL.md" ]] || { echo "skills/$skill has no SKILL.md" >&2; exit 1; }
+done
+echo "install.sh parses; skills present: $(basename -a "$repo"/skills/*/ | tr '\n' ' ')"
 
 qmllint=""
 if command -v qmllint > /dev/null 2>&1; then

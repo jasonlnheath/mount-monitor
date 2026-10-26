@@ -4,7 +4,8 @@ A simple visualizer of disk usage that monitors when space gets too high, on
 any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or above it
 throws a notification and glows red. Notifications are configured to go to your
 agent of choice with a skill that suggests files to prune / compress, or what
-to move off a read-only mount.
+to move off a read-only mount. It also finds the partitions on your machine and
+asks which ones you want watched.
 
 ![Mount Monitor in the Omarchy bar](preview.png)
 
@@ -21,7 +22,7 @@ whether it is read-only.
 - 80% and again at 90%: desktop notification, ring and percent embolden.
 - 98% and above: vibrant red ring that pulses (glows) at 0.5 Hz, critical
   notification that stays until dismissed.
-- Click any notification and Mount Monitor sends a cleanup prompt to your
+- Click a disk alert and Mount Monitor sends a cleanup prompt to your
   agent of choice, which runs the included `disk-prune` skill: a read-only
   scan that reports ranked prune/compress candidates with sizes. Nothing is
   ever deleted automatically.
@@ -30,13 +31,24 @@ whether it is read-only.
   agent prompt say so up front and ask what to **move off** it instead: nothing
   can be pruned or compressed on a read-only mount, and the plugin does not
   pretend otherwise.
+- First run scans your partitions: a notice says how many it found, and clicking
+  it hands your agent the list — size, filesystem, fixed or removable — to ask
+  which to monitor and wire into `mounts`. A drive that shows up later (a new
+  partition, a USB stick you mounted for backup) gets one dismissable notice —
+  `Detected new drive. Click now to set up disk monitoring.` — once, and clicking
+  it hands your agent that drive's specifics. The plugin never decides for you
+  whether to monitor it, pool it, or leave it alone. What has been offered,
+  declined, or accepted is remembered, so the same partition is never offered
+  twice. Set `"onboarding": false` on the entry to skip the scan and its notices.
 
 Alerts go one at a time, so the one on screen stays clickable, and a queued
 alert is only dropped when the reading behind it stops holding — the mount
 went away or its usage fell back below the band it was queued for. A popup
 left unanswered is dismissed after two minutes so the queue keeps moving. A
 mount that is already in a band when the shell starts or reloads is not
-re-notified until it crosses again; 98% and above always notifies.
+re-notified until it crosses again; 98% and above always notifies. Onboarding
+notices ride the same queue, behind the disk alerts: a full drive is never
+made to wait behind a question.
 
 Rings refresh once a minute and only mounts you configure are shown. A
 configured mount that is not currently mounted simply has no ring. Virtual
@@ -46,8 +58,10 @@ device behind it — never draw a ring, even when configured.
 ## Requirements
 
 Omarchy Quattro (Quickshell) with third-party `schemaVersion: 1` bar widgets,
-`findmnt` from util-linux to read the mounts, and `notify-send` from libnotify
-for the alerts. Without `notify-send` the rings still draw, nothing alerts.
+`findmnt` and `lsblk` from util-linux to read the mounts and the partition
+table, and `notify-send` from libnotify for the alerts. Without `notify-send`
+the rings still draw, nothing alerts. Without `lsblk` the rings still draw, no
+onboarding notices.
 
 ## Install
 
@@ -58,14 +72,15 @@ git clone https://github.com/jasonlnheath/mount-monitor \
 omarchy restart shell
 ```
 
-`install.sh` copies the `disk-prune` skill into `~/.agents/skills/` and prints
+`install.sh` copies the skills in `skills/` — `disk-prune`,
+`partition-onboarding`, `partition-remove` — into `~/.agents/skills/` and prints
 the bar wiring line. `omarchy plugin add
 https://github.com/jasonlnheath/mount-monitor --enable` also installs and
 enables the widget and manages updates for you, but it does not run
-`install.sh` and does not install the `disk-prune` skill — without also
-running `install.sh` (or copying `skills/disk-prune/` into
-`~/.agents/skills/` yourself), notifications still appear but clicking them
-sends your agent a cleanup prompt it has no skill to run.
+`install.sh` and does not install the skills — without also running
+`install.sh` (or copying `skills/` into `~/.agents/skills/` yourself),
+notifications still appear but clicking them sends your agent a prompt it has no
+skill to run.
 
 Then add it to the right side of your bar in `~/.config/omarchy/shell.json`:
 
@@ -79,15 +94,23 @@ Then add it to the right side of your bar in `~/.config/omarchy/shell.json`:
 omarchy plugin remove io.github.jasonlnheath.mount-monitor
 ```
 
-If you installed by cloning, delete the plugin folder and the skill, drop the
-widget entry from `shell.json`, and restart the shell:
+If you installed by cloning, delete the plugin folder, the skills, and the
+onboarding state, drop the widget entry from `shell.json`, and restart the
+shell:
 
 ```bash
-rm -rf ~/.config/omarchy/plugins/io.github.jasonlnheath.mount-monitor ~/.agents/skills/disk-prune
+rm -rf ~/.config/omarchy/plugins/io.github.jasonlnheath.mount-monitor \
+  ~/.agents/skills/disk-prune ~/.agents/skills/partition-onboarding ~/.agents/skills/partition-remove \
+  ~/.local/state/mount-monitor
 omarchy restart shell
 ```
 
-Mount Monitor writes nothing outside those two folders and your `shell.json`.
+Mount Monitor writes nothing outside those folders, your `shell.json`, and the
+onboarding state file at `~/.local/state/mount-monitor/onboarding.json` — the
+list of partitions it found and what you decided about each one. Delete that
+file and run `omarchy restart shell`, and the first-run notice fires again
+(restart while the widget is live would not: it holds the state in memory and
+writes it back).
 
 ## Configuration
 
@@ -105,39 +128,57 @@ All settings live on the widget's entry in `shell.json`:
   fixed, block-device-backed mount counts, not only btrfs: a second internal
   drive, an external disk, or a Windows partition mounted read-only at
   `/mnt/models`. Default: `["/"]` (root only). Tell your agent to add or remove
-  entries here whenever you want a drive watched.
+  entries here whenever you want a drive watched — that is what the
+  `partition-onboarding` and `partition-remove` skills do.
+- `onboarding` — `true` unless you set it to `false`. With it on, the widget
+  scans the partition table with `lsblk`, notifies on first run, and notifies
+  once for each partition that appears later. With it off it draws only the
+  rings you configured and says nothing about the rest of your disks.
 - `agentCommand` — the command that receives the cleanup prompt when you
   click a notification. It is an argument list run directly, not a shell
   line, and the prompt is appended as the last argument. Default when unset:
   `omarchy agent prompt <prompt>`, which opens your default Omarchy agent in
   a terminal with the cleanup request. Point it at whatever your agent
-  listens on — an inbox script, a CLI, a webhook.
+  listens on — an inbox script, a CLI, a webhook. Every notification kind
+  rides this same path: a disk alert and a partition notice differ in the
+  prompt, not the plumbing.
 
-## The disk-prune skill
+## Skills
 
-`skills/disk-prune/SKILL.md` is agent-agnostic: it tells any capable agent how
-to scan a mount for prune/compress candidates (package caches, journals, tool
-caches, 1G+ files, compressible trees, cold-storage moves) and report them
-ranked, sized, and read-only. On a read-only mount it reports the opposite
-instead: plainly that nothing there can be pruned or compressed, what the space
-is actually taken up by, and ranked candidates to move off to another drive.
-Copy it wherever your agent loads skills from.
+Everything a clicked notification asks for lives in `skills/`, agent-agnostic
+`SKILL.md` files. Copy them wherever your agent loads skills from.
+
+- **`disk-prune`** — how to scan a mount for prune/compress candidates (package
+  caches, journals, tool caches, 1G+ files, compressible trees, cold-storage
+  moves) and report them ranked, sized, and read-only. On a read-only mount it
+  reports the opposite instead: plainly that nothing there can be pruned or
+  compressed, what the space is actually taken up by, and ranked candidates to
+  move off to another drive.
+- **`partition-onboarding`** — how to report the partitions that have no ring,
+  ask which to monitor, and wire the picks into `mounts`, recording each answer
+  so the question is not asked twice. Removable drives count: plenty of people
+  keep backups and long-term storage on them.
+- **`partition-remove`** — how to take a mount off the bar and record it as
+  declined so it is not offered again. It changes the `mounts` setting only:
+  never deletes data, never unmounts, never formats.
 
 ## Development
 
-The mount filter, the 80/90/98 bands, and the alert text live in `mounts.js`,
-which `MountMonitor.qml` imports and the tests load directly:
+The mount filter, the 80/90/98 bands, the alert text, and the partition
+onboarding decisions live in `mounts.js`, which `MountMonitor.qml` imports and
+the tests load directly:
 
 ```bash
 bash tests/run.sh
 ```
 
 That runs `node --test tests/` against the fixtures in `tests/fixtures/` (plus
-a live `findmnt` check that skips when a mount is not present) and, when Qt's
-`qmllint` is installed, checks that `MountMonitor.qml` parses and its
-`mounts.js` import resolves. `testPct` is a setting for trying a band out:
-`{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }` reports every
-ring at 98% — display and alerts alike. Remove it when you are done.
+live `findmnt` and `lsblk` checks that skip when a mount or the tool is not
+present) and, when Qt's `qmllint` is installed, checks that `MountMonitor.qml`
+parses and its `mounts.js` import resolves. `testPct` is a setting for trying a
+band out: `{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }`
+reports every ring at 98% — display and alerts alike. Remove it when you are
+done.
 
 ## Feedback
 

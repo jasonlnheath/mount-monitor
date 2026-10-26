@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "jasonlnheath",
   "license": "MIT",
-  "description": "A simple visualizer of hd usage that monitors when space gets too high, on any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or more it throws a notification and glows red. Notifications are configured to go to your agent of choice with a skill that suggests files to prune / compress, or what to move off a read-only mount.",
+  "description": "A simple visualizer of hd usage that monitors when space gets too high, on any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or more it throws a notification and glows red. Notifications are configured to go to your agent of choice with a skill that suggests files to prune / compress, or what to move off a read-only mount. On first run it scans your partitions and asks which to monitor, and a partition that appears later notifies once.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Mount Monitor",
-    "description": "Usage ring per configured disk mount (btrfs, NTFS, ext4, ...); alerts at 80/90/98%; click a notification to have your agent run a cleanup analysis, or a move-off report for a read-only mount.",
+    "description": "Usage ring per configured disk mount (btrfs, NTFS, ext4, ...); alerts at 80/90/98%; click a notification to have your agent run a cleanup analysis, or a move-off report for a read-only mount. First run asks which partitions to monitor; a drive that appears later gets one dismissable notice to set up monitoring.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"
