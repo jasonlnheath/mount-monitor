@@ -10,9 +10,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   last scan) and decides *when* to ask mounts.js; it holds no decisions itself.
 - `mounts.js` holds the pure decisions: how a plugin setting value becomes a
   mount list, an argv, a flag, or a number, which findmnt row may draw a ring,
-  the 80/90/98 bands, the notification body, its action label, the agent prompt,
-  the tooltip, the partition candidate filter, the onboarding state file, and the
-  copy for every notification kind. Put filter, threshold, candidate, setting,
+  the 80/90/98 bands, the notification body, its action label, the whole
+  `notify-send` argv and the argv a click runs, the agent prompt, the tooltip,
+  the partition candidate filter, the onboarding state file, and the copy for
+  every notification kind. Put filter, threshold, candidate, setting,
   and alert-wording changes there so they are covered by the tests.
 - `mounts.js` is imported by QML (`import "mounts.js" as Mounts`) and loaded by
   the node tests through `node:vm`. It must stay plain top-level `function`
@@ -27,16 +28,20 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 `bash tests/run.sh` — `node --test tests/` over the fixtures in
 `tests/fixtures/` (`findmnt` rows, `lsblk -P` rows) plus live `findmnt` and
-`lsblk` checks that skip when the mount or the tool is absent, an install.sh
+`lsblk` checks that skip when the mount or the tool is absent, a live check in
+`tests/click.test.mjs` that runs the notification service's own `parseExecArgv`
+against the plugin's hint (skips where the shell is not installed), an install.sh
 syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
 forces every ring to a percentage, alerts included. There is no way to test a
 real desktop notification or a real click headlessly. The tests cover the
-mounts.js decisions behind the notifications and the settings recovery; the one
-test that looks at `MountMonitor.qml` is a delegation guard (the widget builds
-its findmnt command through `Mounts.findmntArgs`). The rest of the wiring is
-verified by reading it and by the captain on the rig.
+mounts.js decisions behind the notifications, the click argv, and the settings
+recovery; the tests that look at `MountMonitor.qml` are delegation guards (the
+widget builds its findmnt command through `Mounts.findmntArgs`, its popup
+command through `Mounts.notifyArgs`, and its agent command through
+`Mounts.agentArgv`). The rest of the wiring is verified by reading it and by the
+captain on the rig.
 
 ## Contracts worth not breaking
 
@@ -102,6 +107,18 @@ verified by reading it and by the captain on the rig.
   the configured targets *and* the device behind each ring (`Mounts.deviceOf`
   strips the `[/subvol]` suffix findmnt adds), which is what keeps `/var/log`
   from being offered next to a `/` ring on the same btrfs partition.
+- A click reaches the agent through the omarchy-native exec hint, not the
+  libnotify action alone. `Mounts.notifyArgs` adds
+  `-h STRING:omarchy-exec-argv:<json argv>` to every notification: the daemon
+  (`Service.qml invokePopupDefault`) prefers that argv, which is persisted with
+  the row so a notice that outlived a shell restart is still clickable, and only
+  then falls back to the live `-A default=` action, which dies with its sender.
+  Keep both: the action is what makes `notify-send` block while the popup is
+  clickable and what the alert queue drains on. The argv is built as a list
+  (`Mounts.agentArgv`, the prompt appended as one argument), never as a shell
+  string, because the daemon runs it through `Util.execArgv`. `execHintValue`
+  sends nothing the daemon's `parseExecArgv` would refuse (a program with a
+  leading dash), leaving the live action in place.
 - Every notification kind rides the same `notify-send` + agent plumbing and
   dispatches on `kind` through `promptFor`, `titleFor`, `actionFor`, `bodyFor`,
   `urgencyFor`, `timeoutFor`. Band alerts send on `notifyProc` (one at a time,
