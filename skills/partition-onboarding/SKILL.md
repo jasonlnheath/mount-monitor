@@ -62,11 +62,11 @@ Keep a row only when TYPE is `part`, `disk`, or a mounted `crypt` (the decrypted
 LUKS volume - on a LUKS install that is the root, while its `crypto_LUKS`
 container partition carries no MOUNTPOINT), FSTYPE is set and not `swap`,
 MOUNTPOINT is set, the device sits under `/dev/`, and the row is not a boot slice
-(a vfat under 1G, or one labelled EFI/boot, or mounted at `/efi` or under
-`/boot/`). That drops swap, snap's loop images, optical drives, unformatted
-slices, every pseudo filesystem - they are not block devices, so lsblk never
-lists them - and the EFI partition that is noise next to real drives. Then
-present the list and continue at step 2.
+(a vfat under 1G, or one labelled exactly `efi`, `esp`, or `boot`, or mounted at
+`/efi` or under `/boot/`). That drops swap, snap's loop images, optical drives,
+unformatted slices, every pseudo filesystem - they are not block devices, so
+lsblk never lists them - and the EFI partition that is noise next to real
+drives. Then present the list and continue at step 2.
 
 ## Report shape
 

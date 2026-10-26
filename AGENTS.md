@@ -69,8 +69,8 @@ verified by reading it and by the captain on the rig.
   no-auto-discovery rule above is what the onboarding skills exist to serve.
 - A candidate is a `lsblk` row with TYPE `part`, `disk`, or `crypt`, a FSTYPE
   that is not `swap`, a MOUNTPOINT, a path under `/dev/`, and is not a boot slice
-  (`isBootSlice`: vfat under 1G, or labelled EFI/boot, or mounted at `/efi` or
-  under `/boot/`). Pseudo filesystems
+  (`isBootSlice`: vfat under 1G, or labelled exactly `efi`, `esp`, or `boot`, or
+  mounted at `/efi` or under `/boot/`). Pseudo filesystems
   are absent because `lsblk` never lists them; an unmounted partition is not
   offered because it cannot have a ring. The `crypt` rule is what puts a LUKS
   install's mounted root on the list — the `crypto_LUKS` container partition

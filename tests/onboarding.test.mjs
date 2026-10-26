@@ -482,7 +482,8 @@ test("a popup for a partition is titled, worded, and timed as a question, not an
   assert.equal(Mounts.bodyFor({ kind: "onboarding", candidates: [stick] }), Mounts.onboardingBody([stick]));
   assert.equal(Mounts.bodyFor({ kind: "new-partition", candidate: stick }), Mounts.newPartitionBody(stick));
 
-  // A full drive stays critical and never expires; an ask lingers to be clicked.
+  // A full drive stays critical and never expires; a 80s or 90s warning is a
+  // 6-second heads-up. An ask persists the same way as a full drive - next test.
   assert.equal(Mounts.urgencyFor({ kind: "band", band: 3 }), "critical");
   assert.equal(Mounts.timeoutFor({ kind: "band", band: 3 }), "0");
   assert.equal(Mounts.timeoutFor({ kind: "band", band: 1 }), "6000");

@@ -548,8 +548,8 @@ function promptFor(alert) {
 }
 
 // The popup's headline, action label, body, urgency, and how long it stays up -
-// all dispatched on the same kind. A full drive is critical and never expires; an
-// onboarding ask is normal and lingers long enough to be read and clicked.
+// all dispatched on the same kind. A full drive and every onboarding question
+// are critical and never expire (isPersistent); a 80s or 90s warning is normal.
 function titleFor(alert) {
   if (!alert) return "Mount Monitor"
   if (alert.kind === "onboarding") return "Mount Monitor — partitions found"

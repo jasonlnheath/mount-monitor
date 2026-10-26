@@ -32,14 +32,15 @@ whether it is read-only.
   can be pruned or compressed on a read-only mount, and the plugin does not
   pretend otherwise.
 - First run scans your partitions: a notice says how many it found, and clicking
-  it hands your agent the list — size, filesystem, fixed or removable — to ask
-  which to monitor and wire into `mounts`. A drive that shows up later (a new
-  partition, a USB stick you mounted for backup) gets one dismissable notice —
-  `Detected new drive. Click now to set up disk monitoring.` — once, and clicking
-  it hands your agent that drive's specifics. The plugin never decides for you
-  whether to monitor it, pool it, or leave it alone. What has been offered,
-  declined, or accepted is remembered, so the same partition is never offered
-  twice. Set `"onboarding": false` on the entry to skip the scan and its notices.
+  it hands your agent the list — size, filesystem, label, fixed or removable —
+  to ask which to monitor and wire into `mounts`. A drive that shows up later
+  (a new partition, a USB stick you mounted for backup) gets one dismissable
+  notice — `Detected new drive. Click now to set up disk monitoring.` — once,
+  and clicking it hands your agent that drive's specifics. The plugin never
+  decides for you whether to monitor it, pool it, or leave it alone. What has
+  been offered, declined, or accepted is remembered, so the same partition is
+  never offered twice. Set `"onboarding": false` on the entry to skip the scan
+  and its notices.
 
 Disk alerts go one at a time, so the one on screen stays clickable, and a
 queued alert is only dropped when the reading behind it stops holding — the
@@ -130,9 +131,10 @@ All settings live on the widget's entry in `shell.json`:
 - `mounts` — which mounts get rings, in the order their rings appear. Any
   fixed, block-device-backed mount counts, not only btrfs: a second internal
   drive, an external disk, or a Windows partition mounted read-only at
-  `/mnt/models`. Default: `["/"]` (root only). Tell your agent to add or remove
-  entries here whenever you want a drive watched — that is what the
-  `partition-onboarding` and `partition-remove` skills do.
+  `/mnt/models`. Default: `["/"]` (root only). An explicitly empty list means
+  no rings. Tell your agent to add or remove entries here whenever you want a
+  drive watched — that is what the `partition-onboarding` and
+  `partition-remove` skills do.
 - `onboarding` — `true` unless you set it to `false`. With it on, the widget
   scans the partition table with `lsblk`, notifies on first run, and notifies
   once for each partition that appears later. With it off it draws only the
