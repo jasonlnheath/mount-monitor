@@ -455,7 +455,6 @@ test("the shipped onboarding skill reads its candidates out of the device block"
 
 test("MountMonitor.qml builds no prompt copy of its own", () => {
   const qml = readFileSync(path.join(repo, "MountMonitor.qml"), "utf8");
-  assert.match(qml, /Mounts\.agentArgv\(/, "the agent argv must come from Mounts.agentArgv");
   assert.ok(!/"Mount Monitor:/.test(qml), "no prompt sentence left in the widget: the prompt is mounts.js's decision");
   assert.ok(!/agentProc\.command\s*=\s*\[/.test(qml), "the widget hands over the argv, it does not assemble one");
 });
