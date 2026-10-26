@@ -5,19 +5,28 @@ description: Mount Monitor partition onboarding - present the disk partitions th
 
 # Partition onboarding
 
-Goal: turn "N partitions found" into watched mounts. The click that opened this
-skill already carried every candidate with its target, filesystem, size, label
-(or the device path when there is no label), and whether it is removable.
-Present them, ask, wire the picks. Never re-derive what
-the prompt already told you: a live run that rescans the disk table spends
-minutes reproducing a list that is already on screen.
+Goal: turn "3 watched, 2 need a decision" into watched mounts. The click that
+opened this skill carried what to work from, and the two kinds differ: a
+first-run notice reports both counts - how many partitions are already behind
+a ring, and how many are waiting - with every waiting candidate's target,
+filesystem, size, label (or the device path when there is no label), and
+whether it is removable; a new-partition click names just that one partition
+and no counts. Present what the prompt brought, ask, wire the picks. Never
+re-derive what the prompt already told you: a live run that rescans the disk
+table spends minutes reproducing a list that is already on screen.
 
 ## Present first
 
-1. **Put the candidates on screen immediately, from the prompt.** One line each:
+1. **Put what the notice brought on screen immediately, from the prompt.** When
+   the notice reported counts, lead with them - watched, and waiting for a
+   decision - then one line per waiting candidate:
    `<target> · <size> · <fstype> · <label, or the device path when there is no label> · fixed|removable`
    Nothing is read or run before this. The question is the point of the notice;
-   everything else is detail you fetch afterwards.
+   everything else is detail you fetch afterwards. Never report the waiting count
+   as "N partitions found": the watched ones exist, the bar already shows them.
+   A new-partition click carries one partition and no counts: report that
+   partition alone from its own prompt and ask - invent no number the notice
+   did not report.
 2. **Ask which to monitor. Wait for the answer.** Never assume the obvious drive.
 
 ## The one verification read
