@@ -2,7 +2,8 @@
 //
 // Imported by MountMonitor.qml (import "mounts.js" as Mounts) and loaded by
 // tests/mounts.test.mjs, tests/onboarding.test.mjs, tests/settings.test.mjs,
-// tests/click.test.mjs, and tests/label-injection.test.mjs, so the plugin
+// tests/click.test.mjs, tests/label-injection.test.mjs, and
+// tests/spaced-mountpoint.test.mjs, so the plugin
 // settings recovery, the mount filter, the alert bands, the alert text, the argv
 // a clicked notification runs, the partition scan, the once-only onboarding
 // memory, and the trust boundary between the plugin's own instructions and what
