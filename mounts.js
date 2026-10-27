@@ -907,6 +907,155 @@ function isPersistent(alert) {
   return alert.band === 3 || alert.kind === "onboarding" || alert.kind === "new-partition"
 }
 
+// --- block events: how fast a plugged drive is noticed ----------------------
+// Without these, the only thing that ever asked for a scan was the widget's own
+// 60-second timer: a drive plugged just after a sweep waited nearly a minute for
+// its notice (the captain's USB test, 2026-10-26: 30-60 seconds). The kernel
+// announces every block device the moment it appears, and `udevadm monitor
+// --kernel --subsystem-match=block` delivers those announcements to an ordinary
+// user with no root and no polkit, so the widget can run it as a long-running
+// process and ask for a scan when one lands. The 60-second sweep stays: it is
+// what this falls back to, not what this replaces.
+//
+// Measured on this rig (real `udevadm monitor` output, events generated with
+// `udisksctl loop-setup`; captured in tests/fixtures/udev-monitor.txt):
+//   - One plug is a BURST, not a line: a disk with a partition table printed
+//     four kernel lines 13 ms apart. Rescanning on each line would run lsblk and
+//     findmnt four times for one drive.
+//   - A replug of a device the kernel already knows is change-only: the second
+//     setup of the same device printed no `add` line at all. So "add/change" is
+//     not a filter on `add`; every action on the block subsystem counts, and a
+//     `remove` is wanted too - it is what drops a notice whose drive is gone
+//     promptly instead of on the next sweep.
+//   - udisks2 mounted a vfat loop about 70 ms after the last kernel uevent of
+//     its setup, and mounting a filesystem emits no block uevent of its own. The
+//     mount that makes a plugged drive a *candidate* is therefore not in the
+//     event stream: a rescan fired the instant the burst goes quiet can land
+//     before the mount exists, find no MOUNTPOINT, and report nothing - and
+//     nothing would ever ask again. That is what the settle rescan is for.
+//   - Through Quickshell's Process + SplitParser the first line reached QML about
+//     10 ms after `udisksctl loop-setup` returned, and the first chunk was
+//     "\nKERNEL[...]" - the blank line after udevadm's banner glued to the first
+//     event - so the parser trims instead of assuming a clean line.
+//
+// A udev line is used for one thing only: deciding *whether to rescan*. Its
+// devpath and subsystem never reach a prompt, a popup body, an id, or the state
+// file, so nothing a device calls itself enters the fixed copy above.
+const UDEV_QUIET_MS = 1500;
+const UDEV_MAX_WAIT_MS = 5000;
+const UDEV_SETTLE_MS = 3000;
+const UDEV_RESTART_DELAYS = [2000, 6000, 18000];
+const UDEV_STABLE_MS = 120000;
+// `KERNEL[204133.554193] add      /devices/virtual/block/loop0/loop0p1 (block)`
+// and the `UDEV  [...]` form. udevadm pads the action column; the subsystem is
+// either bare (`(block)`) or keyed (`(subsystem=block)`).
+const UDEV_LINE = /^(\S+)\s*\[([0-9.]+)\]\s+(\S+)\s+(\S+)\s+\(([^)]*)\)$/;
+
+// The monitor command. The kernel source is the earliest signal and needs no
+// privilege; the subsystem filter is what keeps a stick's own usb, scsi, and mmc
+// lines from waking the widget. Typed argv like every other command here.
+function udevArgs() {
+  return ["udevadm", "monitor", "--kernel", "--subsystem-match=block"]
+}
+
+// One udevadm line in, an event out, or null for anything that is not one:
+// udevadm's own banner ("monitor will print the received events for:",
+// "KERNEL - the kernel uevent"), blank lines, the leading-newline chunk
+// SplitParser delivers first, and garbage.
+function parseUdevEvent(line) {
+  if (line === null || line === undefined)
+    return null
+  var text = String(line).trim()
+  if (text === "")
+    return null
+  var m = UDEV_LINE.exec(text)
+  if (m === null)
+    return null
+  var source = m[1].toUpperCase()
+  if (source !== "KERNEL" && source !== "UDEV")
+    return null
+  var subsystem = m[5]
+  var eq = subsystem.indexOf("=")
+  if (eq >= 0)
+    subsystem = subsystem.slice(eq + 1)
+  return {
+    source: source,
+    stamp: m[2],
+    action: m[3].toLowerCase(),
+    devpath: m[4],
+    subsystem: subsystem.toLowerCase()
+  }
+}
+
+// Whether a line is a block-device event the widget should answer. Any action:
+// add, change, remove, bind, unbind, online, offline, move.
+function isBlockEvent(line) {
+  var event = parseUdevEvent(line)
+  return event !== null && event.subsystem === "block"
+}
+
+// How long from *now* until the rescan this burst deserves: fire once the burst
+// has been quiet for UDEV_QUIET_MS, but never hold it past UDEV_MAX_WAIT_MS from
+// the burst's first event. Called on every line with the burst's own clock, so
+// each line pushes the single scheduled rescan later and none of them fires; a
+// burst that never stops still rescans, on the cap. The three arguments are
+// wall-clock milliseconds from the widget (Date.now on both sides), so an
+// unusable value falls back to the quiet window rather than a negative timer.
+function rescanDelayMs(now, first, last) {
+  var n = Number(now)
+  var f = Number(first)
+  var l = Number(last)
+  if (!isFinite(n) || !isFinite(f) || !isFinite(l))
+    return UDEV_QUIET_MS
+  var quietLeft = UDEV_QUIET_MS - (n - l)
+  var capLeft = UDEV_MAX_WAIT_MS - (n - f)
+  if (!isFinite(quietLeft) || quietLeft < 0)
+    quietLeft = 0
+  if (!isFinite(capLeft) || capLeft < 0)
+    capLeft = 0
+  var delay = Math.min(quietLeft, capLeft)
+  if (!isFinite(delay) || delay < 0)
+    delay = 0
+  return delay
+}
+
+// The monitor is a long-running child process, so a udevadm that dies is
+// restarted on a widening delay and given up on after this many tries. Giving up
+// costs nothing but speed: the 60-second sweep never stopped running. -1 means
+// do not try again.
+function udevRestartDelayMs(attempt) {
+  var n = Number(attempt)
+  if (!isFinite(n) || n < 1)
+    return -1
+  var i = Math.floor(n) - 1
+  if (i >= UDEV_RESTART_DELAYS.length)
+    return -1
+  return UDEV_RESTART_DELAYS[i]
+}
+
+function udevRestartTries() {
+  return UDEV_RESTART_DELAYS.length
+}
+
+// A monitor that stayed up at least this long has earned its restart budget
+// back, so a healthy month does not spend the retries of a later one-off death.
+function udevStableMs() {
+  return UDEV_STABLE_MS
+}
+
+function udevQuietMs() {
+  return UDEV_QUIET_MS
+}
+
+function udevMaxWaitMs() {
+  return UDEV_MAX_WAIT_MS
+}
+
+// The follow-up rescan, because the automount lands after the last uevent.
+function udevSettleMs() {
+  return UDEV_SETTLE_MS
+}
+
 // --- the click: what a clicked notification runs ----------------------------
 //
 // A click has to reach the agent even when the widget that sent the notice is

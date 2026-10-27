@@ -44,6 +44,13 @@ import "mounts.js" as Mounts
 // a full-drive warning in the queue. Once it leaves the screen Omarchy's own
 // notification history keeps it, exec hint and all, so a row restored after a
 // shell restart still opens the agent.
+// Detection: a plugged drive is noticed on the kernel's own block-device events
+// (Mounts.udevArgs, kept open as a long-running udevadm monitor), not on the
+// polling sweep. A plug is a burst of uevent lines, so they coalesce into one
+// rescan, and one more rescan follows because udisks2 mounts a stick after the
+// last event lands. The 60-second sweep stays, and it is what detection falls
+// back to when udevadm cannot start or will not stay up. Set "detectEvents":
+// false on the shell.json entry to skip the monitor.
 // Configure mounts via the shell.json layout entry:
 //   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/mnt/models"] }
 // Default when unconfigured: root only. Every setting is read through the
@@ -98,6 +105,16 @@ BarWidget {
     Mounts.normalizeBool(root.setting("onboarding", true), true)
   readonly property string onboardingStatePath: Mounts.statePath(Quickshell.env("HOME"))
 
+  // --- block events ---------------------------------------------------------
+  // The burst being coalesced, in wall-clock milliseconds, 0 when nothing is
+  // pending. Milliseconds since the epoch do not fit in an int.
+  property real burstFirst: 0
+  property real burstLast: 0
+  // Restart attempts spent on the monitor.
+  property int monitorRestarts: 0
+  readonly property bool eventsEnabled:
+    Mounts.normalizeBool(root.setting("detectEvents", true), true)
+
   function refresh(): void {
     root.broadcast("refreshSelf")
   }
@@ -109,6 +126,39 @@ BarWidget {
     // it each cycle would race this widget's own write and re-offer what it has
     // already offered.
     if (root.onboardingEnabled && !scanProc.running) scanProc.running = true
+  }
+
+  // One line from udevadm monitor. Only a block-device line is answered, and the
+  // only answer is a rescan: what a device's path is called never travels any
+  // further than this decision, the way a volume label never reaches the copy.
+  function noteBlockEvent(line): void {
+    if (!Mounts.isBlockEvent(line)) return
+    var now = Date.now()
+    // A burst older than the cap starts over, so a stale first stamp can only
+    // make the next rescan sooner, never later.
+    if (root.burstFirst === 0 || now - root.burstFirst > Mounts.udevMaxWaitMs())
+      root.burstFirst = now
+    root.burstLast = now
+    var delay = Mounts.rescanDelayMs(now, root.burstFirst, root.burstLast)
+    if (delay <= 0) { root.eventRescan(); return }
+    eventTimer.interval = delay
+    eventTimer.restart()
+  }
+
+  // The rescan a burst buys, and why a second one has to follow it: the first
+  // reading catches the device, the settle reading catches the automount that
+  // lands after the last uevent. Both go through the path the sweep uses, so a
+  // mount that appears mid-session gets its ring, its band alert, and its
+  // onboarding notice exactly as it would on the next tick.
+  function eventRescan(): void {
+    root.burstFirst = 0
+    root.burstLast = 0
+    root.refresh()
+    settleTimer.restart()
+  }
+
+  function settleRescan(): void {
+    root.refresh()
   }
 
   function wantedMounts(): var {
@@ -566,6 +616,82 @@ BarWidget {
     }
   }
 
+  // The kernel's own block-device announcements, kept open for the life of the
+  // shell: this is what turns "plugged in" into "ask for a scan" in seconds
+  // instead of on the next sweep. StdioCollector is useless for a stream that
+  // never finishes, so a SplitParser hands the lines over one at a time.
+  Process {
+    id: udevProc
+    command: Mounts.udevArgs()
+    property bool didStart: false
+    property bool gaveUp: false
+    property real startedAt: 0
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: (line) => root.noteBlockEvent(line)
+    }
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: udevadm monitor:", this.text.trim())
+    }
+    onStarted: {
+      udevProc.didStart = true
+      udevProc.startedAt = Date.now()
+    }
+    onRunningChanged: {
+      // udevadm missing: a command that never started reports no exit, so this
+      // is the only signal there is. Say it once and stop trying - the sweep is
+      // the detection path again.
+      if (root.startFailed(udevProc)) {
+        udevProc.gaveUp = true
+        console.warn("mount-monitor: udevadm monitor could not start, detection falls back to the 60-second sweep")
+      }
+    }
+    onExited: function(exitCode, exitStatus) {
+      // A monitor that died is not a failed scan: the sweep never stopped. It is
+      // restarted on a widening delay and given up on after a bounded number of
+      // tries, because a udevadm that is gone would otherwise spin. One that
+      // stayed up has earned its retries back.
+      var up = udevProc.startedAt > 0 ? Date.now() - udevProc.startedAt : 0
+      if (up >= Mounts.udevStableMs()) root.monitorRestarts = 0
+      var delay = Mounts.udevRestartDelayMs(root.monitorRestarts + 1)
+      if (!root.eventsEnabled || delay < 0) {
+        console.warn("mount-monitor: udevadm monitor gave up, detection falls back to the 60-second sweep")
+        udevProc.gaveUp = true
+        return
+      }
+      root.monitorRestarts += 1
+      console.warn("mount-monitor: udevadm monitor exited with code " + exitCode + ", restarting in " + delay + "ms (try " + root.monitorRestarts + ")")
+      monitorTimer.interval = delay
+      monitorTimer.restart()
+    }
+  }
+
+  Timer {
+    id: eventTimer
+    interval: Mounts.udevQuietMs()
+    repeat: false
+    onTriggered: root.eventRescan()
+  }
+
+  Timer {
+    id: settleTimer
+    interval: Mounts.udevSettleMs()
+    repeat: false
+    onTriggered: root.settleRescan()
+  }
+
+  Timer {
+    id: monitorTimer
+    interval: Mounts.udevRestartDelayMs(1)
+    repeat: false
+    onTriggered: {
+      // didStart marks the current attempt, so a restart that cannot start is
+      // still caught by startFailed.
+      udevProc.didStart = false
+      if (root.eventsEnabled && !udevProc.running && !udevProc.gaveUp) udevProc.running = true
+    }
+  }
+
   Timer {
     id: alertWatchdog
     interval: 120000
@@ -581,7 +707,10 @@ BarWidget {
     onTriggered: root.refresh()
   }
 
-  Component.onCompleted: if (root.onboardingEnabled) stateDirProc.running = true
+  Component.onCompleted: {
+    if (root.onboardingEnabled) stateDirProc.running = true
+    if (root.eventsEnabled && !udevProc.running) udevProc.running = true
+  }
 
   Row {
     id: row

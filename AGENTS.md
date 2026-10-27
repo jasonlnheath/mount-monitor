@@ -14,7 +14,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `notify-send` argv and the argv a click runs, the agent prompt, the id a prompt
   names a mount or partition by and the untrusted device-data block the rest of
   the device's own words ride in, the tooltip, the partition candidate filter,
-  the onboarding state file, and the copy for every notification kind. Put
+  the onboarding state file, the block-event detection decisions (the `udevadm`
+  argv, what counts as a block event, how a burst coalesces into one rescan and why
+  a settle rescan follows it, the restart backoff), and the copy for every
+  notification kind. Put
   filter, threshold, candidate, setting, and alert-wording changes there so they
   are covered by the tests.
 - `mounts.js` is imported by QML (`import "mounts.js" as Mounts`) and loaded by
@@ -29,10 +32,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Tests
 
 `bash tests/run.sh` — `node --test tests/` over the fixtures in
-`tests/fixtures/` (`findmnt` rows, `lsblk -P` rows) plus live `findmnt` and
-`lsblk` checks that skip when the mount or the tool is absent, a live check in
-`tests/click.test.mjs` that runs the notification service's own `parseExecArgv`
-against the plugin's hint (skips where the shell is not installed), the
+`tests/fixtures/` (`findmnt` rows, `lsblk -P` rows, real `udevadm monitor` lines)
+plus live `findmnt` and `lsblk` checks that skip when the mount or the tool is
+absent, a live check in `tests/click.test.mjs` that runs the notification
+service's own `parseExecArgv` against the plugin's hint (skips where the shell is
+not installed), the block-event detection decisions in `tests/detect.test.mjs`
+(including a live `udevadm monitor` + `udisksctl loop-setup` plug that skips where
+either is absent), the
 hostile-label regression in `tests/label-injection.test.mjs`, the
 spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, an install.sh
 syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
@@ -91,6 +97,27 @@ The rest of the wiring is verified by reading it and by the captain on the rig.
   A byte sequence that is not valid UTF-8 becomes U+FFFD rather than an invented
   character. `tests/spaced-mountpoint.test.mjs` is the guard, including a live
   round-trip of a real findmnt reading against findmnt's own escaping rule.
+- **Detection is event-driven, with the 60s sweep as the fallback** (the captain's
+  USB test 2026-10-26: 30-60 seconds to a notice): `MountMonitor.qml` keeps
+  `Mounts.udevArgs()` (`udevadm monitor --kernel --subsystem-match=block`, no root,
+  no polkit) open as a long-running `Process` with a `SplitParser`, and the only
+  answer to a block line is `root.refresh()` — the same path the sweep uses, so
+  rings, band alerts, and onboarding notices are untouched. Every timing decision
+  lives in `mounts.js`: `isBlockEvent` (any action on the block subsystem counts —
+  a replug of a device the kernel already knows is `change`-only, and a `remove` is
+  wanted because it drops a notice whose drive is gone), `rescanDelayMs` (coalesce
+  the burst: quiet for `udevQuietMs`, capped at `udevMaxWaitMs` so a burst that
+  never stops still rescans), `udevSettleMs` (a second rescan, because udisks2's
+  automount lands ~70 ms after the last uevent and mounting a filesystem emits no
+  block uevent of its own), and `udevRestartDelayMs` / `udevStableMs` (a dead
+  monitor restarts on a widening backoff, then gives up to the sweep; one that
+  stayed up earns its budget back). Measured on the rig: kernel uevent reaches
+  Quickshell ~10 ms after the plug, mount ~70 ms after the last uevent; the real
+  lines are in `tests/fixtures/udev-monitor.txt`. A udev line's `devpath` and
+  `subsystem` decide *whether to rescan* and nothing else — they never reach a
+  prompt, body, id, or the state file. `detectEvents` is the `normalizeBool`-read
+  off switch. Never remove the 60-second timer: it is what a missing or
+  short-lived `udevadm` falls back to.
 - Only mounts listed in the widget's `mounts` setting draw rings, in that
   order. There is no auto-discovery on purpose: several btrfs subvolumes of one
   device would each draw an identical ring, and unconfigured partitions

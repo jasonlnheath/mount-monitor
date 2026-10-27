@@ -59,7 +59,15 @@ notification history. They ride their own lane too, so a notice and a disk
 alert can be on screen at once — a full drive is never made to wait behind a
 question.
 
-Rings refresh once a minute and only mounts you configure are shown. A
+A plugged drive is noticed in seconds, not on the next sweep: the widget keeps
+`udevadm monitor --kernel --subsystem-match=block` open for the life of the shell
+and rescans when a block device appears, changes, or goes away. One plug is a
+burst of kernel lines, so they coalesce into a single rescan, and a second rescan
+follows it because the automount lands just after the last event. The 60-second
+sweep stays as the fallback — without `udevadm`, or if the monitor will not stay
+up, detection is the sweep again and nothing else about the widget changes. Set
+`"detectEvents": false` on the entry to skip the monitor. Rings refresh on that
+path and only mounts you configure are shown. A
 configured mount that is not currently mounted simply has no ring. Virtual
 filesystems — tmpfs, proc, sysfs, cgroup2, overlay, and anything else without a
 device behind it — never draw a ring, even when configured.
@@ -87,9 +95,11 @@ and only you say what gets wired, pruned, compressed, or removed.
 
 Omarchy Quattro (Quickshell) with third-party `schemaVersion: 1` bar widgets,
 `findmnt` and `lsblk` from util-linux to read the mounts and the partition
-table, and `notify-send` from libnotify for the alerts. Without `notify-send`
-the rings still draw, nothing alerts. Without `lsblk` the rings still draw, no
-onboarding notices.
+table, `notify-send` from libnotify for the alerts, and `udevadm` from systemd to
+notice a plugged drive right away. Without `notify-send` the rings still draw,
+nothing alerts. Without `lsblk` the rings still draw, no onboarding notices.
+Without `udevadm` the rings still draw and still alert — detection just falls back
+to the 60-second sweep.
 
 ## Install
 
@@ -165,6 +175,10 @@ All settings live on the widget's entry in `shell.json`:
   scans the partition table with `lsblk`, notifies on first run, and notifies
   once for each partition that appears later. With it off it draws only the
   rings you configured and says nothing about the rest of your disks.
+- `detectEvents` — `true` unless you set it to `false`. With it on the widget runs
+  `udevadm monitor` as a long-running child process, so a plugged drive, a newly
+  mounted partition, or a drive you pulled gets its notice in seconds instead of
+  on the next 60-second sweep. With it off the sweep is the only detection path.
 - `agentCommand` — the command that receives the cleanup prompt when you
   click a notification. It is an argument list run directly, not a shell
   line, and the prompt is appended as the last argument. Default when unset:
@@ -195,9 +209,9 @@ Everything a clicked notification asks for lives in `skills/`, agent-agnostic
 
 ## Development
 
-The mount filter, the 80/90/98 bands, the alert text, and the partition
-onboarding decisions live in `mounts.js`, which `MountMonitor.qml` imports and
-the tests load directly:
+The mount filter, the 80/90/98 bands, the alert text, the partition onboarding
+decisions, and the block-event detection timings live in `mounts.js`, which
+`MountMonitor.qml` imports and the tests load directly:
 
 ```bash
 bash tests/run.sh
