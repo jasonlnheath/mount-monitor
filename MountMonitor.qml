@@ -16,11 +16,17 @@ import "mounts.js" as Mounts
 // vibrant red ring pulsing at 0.5 Hz). Clicking a notification sends a cleanup
 // prompt to the configured agent (default: the omarchy default agent in a
 // terminal; override with the agentCommand setting, e.g. your fleet agent's
-// inbox). The click is handed over two ways, because the shell can only use one
-// of them at a time: the popup's exec hint (Mounts.notifyArgs), which Omarchy's
-// notification service runs itself and which its persisted history row keeps, and
-// the libnotify action, which only answers while this widget's notify-send is
-// alive. A notice that outlived a shell restart is clickable through the hint.
+// inbox). The prompt is fixed copy from mounts.js: it names a mount or partition
+// by an id the plugin mints and carries the mountpoint, device, filesystem, and
+// label as a delimited block of explicitly untrusted device data, because a volume
+// label is written by whoever formatted the filesystem and must not reach a
+// tool-capable agent as part of the ask. The user's confirmation of the concrete
+// change is required outside that text. The click is handed over two ways, because
+// the shell can only use one of them at a time: the popup's exec hint
+// (Mounts.notifyArgs), which Omarchy's notification service runs itself and which
+// its persisted history row keeps, and the libnotify action, which only answers
+// while this widget's notify-send is alive. A notice that outlived a shell restart
+// is clickable through the hint.
 // A read-only mount is alerted about too, but honestly: nothing can be
 // pruned on it, so its alert asks the agent what to move off it instead.
 // Onboarding: on first run the widget scans the disk table (lsblk) and notifies
@@ -140,10 +146,21 @@ BarWidget {
       // again while its first alert is still queued behind another mount gets a
       // single notification for the band it actually reached.
       if (band > root.alertQueue[i].band)
-        root.alertQueue[i] = { kind: "band", target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band }
+        root.alertQueue[i] = root.bandAlert(m, band)
       return
     }
-    root.alertQueue.push({ kind: "band", target: m.target, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band })
+    root.alertQueue.push(root.bandAlert(m, band))
+  }
+
+  // The alert for one ring: the row's own fields, including the id mounts.js minted
+  // for it. The prompt the click sends names the mount by that id and carries the
+  // rest as untrusted device data (see the device text section of mounts.js), so
+  // whatever a volume label calls itself never reaches the agent as an instruction.
+  function bandAlert(m, band): var {
+    return {
+      kind: "band", target: m.target, source: m.source, id: m.id, fstype: m.fstype,
+      used: m.used, pct: m.pct, avail: m.avail, readonly: m.readonly, band: band
+    }
   }
 
   // Band the latest reading reports for a mount, -1 when it is not mounted.
