@@ -171,8 +171,9 @@ The rest of the wiring is verified by reading it and by the captain on the rig.
   carries the watched count and every waiting candidate (a new-partition click
   carries just that partition, no counts), so the skill reports what the prompt
   brought before reading anything, takes exactly one
-  verification read (the state file, for `key`, `monitored`, and `decisions`),
-  and never re-runs `lsblk` or re-derives the filter. The direct scan lives only
+  verification read (the state file, for `id`, `key`, `monitored`, and
+  `decisions` — the read is where an id becomes a `key`), and never re-runs
+  `lsblk` or re-derives the filter. The direct scan lives only
   under its "no list in the prompt" fallback.
 - `partition-remove` changes the `mounts` setting and records a decline, and
   must never touch the partition: no delete, no unmount, no format.
