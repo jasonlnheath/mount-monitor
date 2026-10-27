@@ -56,7 +56,10 @@ disagrees with the bar the captain is looking at.
 
 3. **Wire the picks.** Edit only the `mounts` array of the
    `io.github.jasonlnheath.mount-monitor` entry in `~/.config/omarchy/shell.json`,
-   in the order the captain wants the rings to appear. Leave every other key in
+   in the order the captain wants the rings to appear. Write each pick exactly as
+   the device data block spells its target, one entry per mountpoint: a mountpoint
+   with a space (`"/mnt/my stick"`) is one entry, and findmnt's escaped column
+   (`/mnt/my\x20stick`) is not what the setting takes. Leave every other key in
    that entry (`agentCommand`, `onboarding`, `testPct`) intact, and leave the rest
    of `shell.json` alone.
 4. **An unmounted partition cannot have a ring.** Say so. Mount it - `udisksctl

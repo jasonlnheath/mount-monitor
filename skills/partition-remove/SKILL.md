@@ -13,7 +13,10 @@ it again.
 - **What is monitored today**: the `mounts` array on the
   `io.github.jasonlnheath.mount-monitor` entry in `~/.config/omarchy/shell.json`.
 - **The partition behind each ring**: `findmnt -rn -o SOURCE,TARGET,FSTYPE,SIZE`,
-  so a target is matched to its device instead of guessed at.
+  so a target is matched to its device instead of guessed at. findmnt escapes the
+  bytes it cannot print inside its own columns (`/mnt/my\x20stick`); the `mounts`
+  entry carries the real path (`/mnt/my stick`). Match them by the unescaped path
+  — they are the same mount — and quote either one in any command you run.
 - **The onboarding memory**: `~/.local/state/mount-monitor/onboarding.json`,
   whose `candidates` give each partition its `key` (PARTUUID, else UUID, else
   device path) for the decline record.
@@ -25,10 +28,11 @@ it again.
 2. **Confirm which one to remove** before editing anything. If two targets sit on
    one partition (btrfs subvolumes), say so and ask whether both go.
 3. **Remove that target from `mounts` only.** Change nothing else in the entry and
-   nothing else in `shell.json`. Removing a monitor is a bar setting, not a disk
-   operation: never delete the partition, never delete data on it, never unmount
-   it, never format it. If the captain wants the drive unmounted, wiped, or
-   retired, that is a separate ask with its own confirmation.
+   nothing else in `shell.json`. One entry is one mountpoint, spaces included:
+   `"/mnt/my stick"` is a single entry, not two. Removing a monitor is a bar
+   setting, not a disk operation: never delete the partition, never delete data on
+   it, never unmount it, never format it. If the captain wants the drive unmounted,
+   wiped, or retired, that is a separate ask with its own confirmation.
 4. **Record the decline** in the state file's `decisions` under that partition's
    `key`, as `declined`. Merge into the existing map, never replace it. Without
    this the next scan offers the same partition straight back.

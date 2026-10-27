@@ -33,7 +33,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 `lsblk` checks that skip when the mount or the tool is absent, a live check in
 `tests/click.test.mjs` that runs the notification service's own `parseExecArgv`
 against the plugin's hint (skips where the shell is not installed), the
-hostile-label regression in `tests/label-injection.test.mjs`, an install.sh
+hostile-label regression in `tests/label-injection.test.mjs`, the
+spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, an install.sh
 syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
@@ -78,6 +79,18 @@ The rest of the wiring is verified by reading it and by the captain on the rig.
   is not a list at all falls back to the documented default (root only, no agent
   override). An explicitly empty `mounts` list means no rings, not garbage.
   Never judge a setting with a bare array check in QML again.
+- **findmnt escapes; `parseRows` undoes it** (the bug PR #8 deferred): findmnt
+  hex-escapes every byte outside printable ASCII, and the backslash, inside its own
+  columns — `/mnt/my stick` prints as `/mnt/my\x20stick`, a tab as `\x09`, `Données`
+  as `Donn\xc3\xa9es`. That escaping is what makes splitting on whitespace safe; the
+  bug was keeping the escape in the value, where it could never match the `mounts`
+  entry or lsblk's real `MOUNTPOINT`. `Mounts.unescapeFindmnt` (with `utf8Decode`,
+  plain JS because QML's engine has no `TextDecoder`) decodes each column after the
+  split, so a spaced mountpoint is one `mounts` entry, one ring, one `mountId`, one
+  `target` key in the band memory, and one watched device for the onboarding filter.
+  A byte sequence that is not valid UTF-8 becomes U+FFFD rather than an invented
+  character. `tests/spaced-mountpoint.test.mjs` is the guard, including a live
+  round-trip of a real findmnt reading against findmnt's own escaping rule.
 - Only mounts listed in the widget's `mounts` setting draw rings, in that
   order. There is no auto-discovery on purpose: several btrfs subvolumes of one
   device would each draw an identical ring, and unconfigured partitions
