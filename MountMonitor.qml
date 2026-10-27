@@ -114,6 +114,10 @@ BarWidget {
   property int monitorRestarts: 0
   readonly property bool eventsEnabled:
     Mounts.normalizeBool(root.setting("detectEvents", true), true)
+  // The bar injects settings after Component.onCompleted has read the fallback,
+  // so the off switch cannot live in the start gate alone: the decision rides
+  // the setting, wherever and whenever it lands.
+  onEventsEnabledChanged: root.syncMonitor()
 
   function refresh(): void {
     root.broadcast("refreshSelf")
@@ -159,6 +163,21 @@ BarWidget {
 
   function settleRescan(): void {
     root.refresh()
+  }
+
+  // Keep the monitor in agreement with eventsEnabled. The start gate in
+  // Component.onCompleted reads the setting's fallback because the real value
+  // has not been injected yet, so a switch configured off engages here, when
+  // the value arrives; a stop exits through onExited, where !eventsEnabled
+  // keeps it from restarting. A switch turned back on starts the monitor and
+  // clears a give-up marker recorded while it was off.
+  function syncMonitor(): void {
+    if (!root.eventsEnabled) {
+      udevProc.running = false
+      return
+    }
+    udevProc.gaveUp = false
+    if (!udevProc.running) udevProc.running = true
   }
 
   function wantedMounts(): var {
