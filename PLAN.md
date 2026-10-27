@@ -1,90 +1,117 @@
-# Plan: device metadata must stop being agent instructions
+# Plan: a mount point containing a space must get its ring
 
-Marketplace finding (omacom/omarchy-plugin-marketplace#12972, Medium, maintainer
-HANCORE-linux) at `044ccaf`:
+Deferred by the device-metadata hardening pass (PR #8, `f787f3f`), which named it
+in its own "out of scope":
 
-> `mounts.js:505-515` and `531-536` insert `lsblk` labels/mountpoints directly into
-> the instruction prompt (`239-250`, `319-336` -> `MountMonitor.qml:116-124`).
-> Someone providing a mounted removable filesystem can supply instruction text in
-> its label; clicking the generic setup notification forwards it as part of the
-> user's request to a tool-capable agent. Typed argv prevents shell injection but
-> does not separate these instructions from external data.
+> Not fixed, and worth its own task: `parseRows` keeps findmnt's `\x20` escape, so
+> a mountpoint containing a space (udisks2 media labelled `Backup Drive`) cannot
+> match a `mounts` entry wired from lsblk's real space — that ring never appears.
 
-Named remedy (adopt exactly):
-1. The launch prompt is fixed copy — no device-controlled text in the instruction stream.
-2. Partitions are identified in the instruction by a validated opaque id the plugin mints.
-3. Label/mountpoint/path/fstype/size travel as explicitly untrusted structured data:
-   bounded length, control characters stripped, clearly delimited as data, declared
-   untrusted by the instruction.
-4. Concrete proposed changes still need the user's confirmation outside device text.
-5. Hostile device labels are covered by the regression checks.
+## Reproduced before touching anything
 
-## Trust boundary
+Verified on this rig inside a user+mount namespace (`unshare -rm`, bind-mount
+`/mnt/models` at `/tmp/my stick`, so a real block device carries a spaced
+mountpoint into both tools):
 
-A volume label, a PARTLABEL, and (through udisks' `/run/media/<user>/<LABEL>` auto-mount)
-a mountpoint are chosen by whoever formatted the filesystem. A stick handed to the
-captain carries them into `lsblk`/`findmnt`, into `candidatePartitions`/`selectMounts`,
-into `onboardingPrompt`/`newPartitionPrompt`/`agentPrompt`, into `agentArgv` ->
-`MountMonitor.qml runAgent` -> the user's tool-capable agent. Typed argv keeps it out of
-a shell; it never kept it out of the instruction stream. That is the bug.
+- `/proc/self/mountinfo` escapes the space as octal: `/tmp/my\040stick`.
+- `findmnt -rn -o SOURCE,TARGET,...` escapes it hex, and escapes **every** byte
+  outside printable ASCII: `/tmp/my\x20stick`, a tab as `\x09`, a backslash as
+  `\x5c`, a non-ASCII name as `/tmp/uni-\xc3\xa9\xc3\xa8`. `--raw` and `--nofsroot`
+  do not change that: the escaping is what keeps findmnt's columns separable.
+- `lsblk -P -o ...,MOUNTPOINT,...` on the same device prints the space **literally
+  inside the quotes**: `MOUNTPOINT="/tmp/my stick"`, and `parseLsblkPairs` already
+  undoes lsblk's escapes.
 
-## Design (mounts.js)
+So the two halves of the same mount arrive in two different spellings, and the
+configured `mounts` entry (wired from lsblk's real path by `partition-onboarding`)
+spells it the lsblk way.
 
-- `sanitizeText(value, max)` — control chars (C0/DEL/C1), Unicode line separators,
-  bidi overrides and zero-width/invisible formatting (Trojan Source), and `<`/`>`
-  replaced by spaces; whitespace collapsed; truncated to a bounded length with `...`.
-  Removing `<`/`>` is what makes the block delimiter unforgeable.
-- `mountId(seed)` / `isMountId(value)` — the plugin's own opaque id: two FNV-1a 32-bit
-  rounds over the sanitized identity -> `mm-<8hex>-<8hex>`, validated by
-  `/^mm-[0-9a-f]{8}-[0-9a-f]{8}$/`. A candidate is keyed on its `key` (PARTUUID, else
-  UUID, else device path), a ring on its target — the same thing the alert queue and
-  the band memory key on — so the id survives a replug or a device rename, differs
-  between partitions that share a label, and can never contain device-supplied text.
-- `selectMounts` and `candidatePartitions` mint `id` on every row/candidate;
-  `parseState` keeps only the id shape it minted itself. The id rides into the state
-  file's `candidates` so the onboarding skills map id -> `key` from the one
-  verification read they already do.
-- `candidateRecord(c)` / `mountRecord(m)` — one sanitized, bounded, typed record per
-  partition behind the alert (id, target, device, fstype, size, label, removable, or
-  id, target, device, fstype, used, avail, pct clamped 0..100, readonly).
-- `dataOpen()` / `dataClose()` — the block delimiters, built from `<`/`>`.
-- `untrustedNotice()` — fixed copy that names the block as device-supplied data, tells
-  the agent to ignore instruction-shaped text inside it, and requires the user's
-  confirmation of the concrete proposed changes outside device-controlled text.
-- `agentPrompt`, `onboardingPrompt`, `newPartitionPrompt` become fixed instruction copy
-  that references partitions **by id only**, then `promptWithData()` appends the notice
-  and the delimited JSON block. `promptFor`, `agentArgv`, `execHintValue`, `notifyArgs`
-  keep their shapes.
+## Root cause (one place)
 
-## Process (RED first) — done
+`mounts.js parseRows()` splits each findmnt line on `/\s+/` — which is *safe*,
+because findmnt escapes every whitespace byte — but then keeps the escaped token
+as the row's `target`. `selectMounts()` then looks up `byTarget[wanted[j]]` with
+the configured `/mnt/my stick` against a row keyed `/mnt/my\x20stick`: no match,
+no ring, no alert, no tooltip, and the mount is invisible to
+`monitoredDevices()` as well.
 
-1. `tests/label-injection.test.mjs` written against the contract above, run at the
-   pre-fix commit: **15 failed, 3 preservation guards passed** at `044ccaf` (label and
-   mountpoint text found in the instruction stream, no delimited block, no validated
-   id).
-2. Implemented in `mounts.js`; `MountMonitor.qml` carries `m.id` into the queued band
-   alert (new `root.bandAlert()`, which also carries `source`/`fstype`/`used` so the
-   prompt the daemon answers and the prompt the widget answers describe the same
-   mount) and `c.id` into the state file's candidates.
-3. The two existing tests that asserted the vulnerable shape —
-   `/scan \/ for prune and compress candidates/` in `tests/mounts.test.mjs` and the
-   hand-built band alert in `tests/onboarding.test.mjs` — now assert the fixed shape.
-4. Skill copy: `partition-onboarding` reads its candidates from the prompt's device
-   data block, led by the id, and maps id -> key in its one read; `disk-prune` takes
-   the target from the block and states that the block is data, not approval;
-   `partition-remove` unchanged (it is not prompt-driven). Every confirmation step stays.
-5. `AGENTS.md` + `README.md` record the contract.
-6. `bash tests/run.sh`: **92 pass, 0 fail, 0 skip**, install.sh parses, skills present,
-   `qmllint` parses the QML and resolves the `mounts.js` import.
+## Fix (minimal)
 
-Also hardened while in the neighbourhood: `notifyBody` and `tooltip` — the copy the
-captain reads — put the mountpoint, filesystem, and sizes through the same
-`sanitizeText`, so a label cannot spray control characters into a popup or bury the
-fixed sentence under five thousand characters of its own choosing.
+`mounts.js`: undo findmnt's escaping where the row is built, not where it is
+compared.
+
+- `unescapeFindmnt(text)` — turn each `\xNN` back into its byte, and decode a run
+  of escaped bytes as UTF-8, so `/mnt/Données` matches the configured entry
+  instead of arriving as mojibake. A pure-JS `utf8Decode()` helper: no
+  `TextDecoder`, because `mounts.js` also runs inside QML's `QJSEngine`, which
+  does not have it.
+- `parseRows()` applies it to the text columns (`SOURCE`, `TARGET`, `FSTYPE`,
+  `USED`, `AVAIL`, `OPTIONS`) after the split. The split stays on whitespace:
+  escaping guarantees no column can contain a literal space.
+- Nothing else changes shape: `selectMounts`, `mountId`, the band memory, the
+  alert queue, and the prompt copy all keep working on `row.target`, which is now
+  the real path.
+
+## Ripples, named and checked
+
+- **Ring + id** (`selectMounts`): the ring appears; `m.id = mountId(m.target)` is
+  minted from the real target. Ids for already-working mounts do not change (their
+  targets were never escaped).
+- **Band memory and alerts** (`MountMonitor.qml checkBands`, `root.bands[target]`,
+  `bandOf`, the alert queue's `target` dedup): keyed on the same `target`, so a
+  spaced mount now crosses bands like any other. No QML change needed — verified by
+  reading it.
+- **Onboarding matching** (`annotateCandidates` / `monitoredCount` /
+  `newCandidates`): a candidate's `target` comes from lsblk (real space) and is
+  compared with the configured `wanted` list (real space) — that half already
+  matched. What was broken is the *other* half: `monitoredDevices(root.mounts)` had
+  no ring for the spaced mount, so its device was not watched and its other mounts
+  could be offered as unmonitored. Fixing `parseRows` fixes that too.
+- **New-partition notice** (`newPartitionBody`/`Prompt`, `candidateAlive`): keyed on
+  `key` (PARTUUID/UUID/device), not the target — untouched.
+- **`isBootSlice`**: compares `mountpoint` against `/efi` and `/boot/…` — unaffected
+  (a spaced mountpoint is not a boot slice).
+- **State file** (`serializeState`/`parseState`): JSON, spaces are ordinary
+  characters — unaffected.
+- **Popups** (`notifyBody`, `tooltip`): now print `/mnt/my stick` instead of
+  `/mnt/my\x20stick`; both already run the target through `sanitizeText`, which
+  keeps an ordinary space.
+- **`partition-remove` skill**: its own matching step reads
+  `findmnt -rn -o SOURCE,TARGET,...` and compares it to the `mounts` entry — the
+  same two spellings, on the agent side. Skill copy now says the findmnt column is
+  escaped and the `mounts` entry is not, and that a target is one string whatever
+  it contains.
+- **`disk-prune` skill**: its commands interpolate `<mount>` (`df -h <mount>`,
+  `du -sh <mount>/*`, `find <mount> -xdev …`), which breaks on a path with a
+  space. Skill copy now quotes it.
+- **`partition-onboarding` skill**: wires lsblk's real targets into `mounts` —
+  already correct; copy adds "one entry per mountpoint, spaces included".
+- **Label-injection contract**: unchanged. Decoding happens in `parseRows`, before
+  `sanitizeText`, and every device string still leaves through
+  `mountRecord`/`candidateRecord` as declared data. findmnt never escapes a
+  printable `<` or `>`, so decoding cannot mint a delimiter `sanitizeText` would
+  not already have removed. `tests/label-injection.test.mjs` stays green; its
+  hostile findmnt row now spells the *configured* side the way a real config does
+  (real spaces) and the *findmnt* side the way findmnt does (`\x20`), which is the
+  shape this bug was.
+
+## Process (RED first)
+
+1. `tests/spaced-mountpoint.test.mjs` written against the contract above and run at
+   the pre-fix commit: **RED** — the spaced ring is missing, its device is not
+   watched, its partition is offered as unmonitored, and the popup prints the
+   escape.
+2. Fix in `mounts.js` (`unescapeFindmnt` + `utf8Decode` + `parseRows`).
+3. Fixture: `tests/fixtures/findmnt-rig.txt` grows the row for the exfat stick the
+   lsblk fixture already carries, in findmnt's escaped spelling.
+4. Skill copy: `partition-remove`, `disk-prune`, `partition-onboarding` (above).
+5. `AGENTS.md` records the escaping rule; `README.md` says a `mounts` entry is the
+   mountpoint as it is, spaces included.
+6. `bash tests/run.sh` green (node tests + install.sh + skills + `qmllint`).
 
 ## Out of scope
 
-Event-driven USB detection, notification thresholds, ring rendering, any marketplace
-issue comment. Not fixed, and worth its own task: `parseRows` keeps findmnt's `\x20`
-escape, so a mountpoint containing a space (udisks2 media labelled `Backup Drive`)
-cannot match a `mounts` entry wired from lsblk's real space — that ring never appears.
+Event-driven USB detection, any marketplace posting, thresholds and ring visuals,
+and accepting a `mounts` entry hand-written in findmnt's escaped spelling — the
+configured side stays the real path, because `partition-onboarding` wires it from
+lsblk.
