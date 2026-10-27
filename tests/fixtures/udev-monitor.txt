@@ -1,6 +1,10 @@
-# Real `udevadm monitor --kernel --subsystem-match=block` output, captured on
-# this rig as the ordinary user (no root). Events generated with
-# `udisksctl loop-setup` on a raw image in /tmp, then `loop-delete`.
+# Real `udevadm monitor` output captured on this rig as the ordinary user (no
+# root), events generated with `udisksctl loop-setup` on a raw image in /tmp,
+# then `loop-delete`. The file is a composite: the KERNEL lines are the capture
+# of the argv the plugin runs (`--kernel --subsystem-match=block`, which prints
+# kernel uevents only), while the UDEV-prefixed line was gathered separately
+# from an unfiltered run as forward-compat coverage for parseUdevEvent's UDEV
+# source - the shipped argv never prints it.
 #
 # First capture: an image with an MBR partition table, no filesystem on the
 # partition. One plug, four kernel lines, 13 ms apart - the burst the widget has

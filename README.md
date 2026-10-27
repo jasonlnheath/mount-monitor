@@ -176,9 +176,10 @@ All settings live on the widget's entry in `shell.json`:
   once for each partition that appears later. With it off it draws only the
   rings you configured and says nothing about the rest of your disks.
 - `detectEvents` — `true` unless you set it to `false`. With it on the widget runs
-  `udevadm monitor` as a long-running child process, so a plugged drive, a newly
-  mounted partition, or a drive you pulled gets its notice in seconds instead of
-  on the next 60-second sweep. With it off the sweep is the only detection path.
+  `udevadm monitor` as a long-running child process, so a plugged drive or a newly
+  mounted partition gets its notice in seconds instead of on the next 60-second
+  sweep, and a drive you pulled has its waiting notice withdrawn in seconds too.
+  With it off the sweep is the only detection path.
 - `agentCommand` — the command that receives the cleanup prompt when you
   click a notification. It is an argument list run directly, not a shell
   line, and the prompt is appended as the last argument. Default when unset:
