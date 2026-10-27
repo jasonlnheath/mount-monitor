@@ -5,9 +5,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Layout
 
 - `MountMonitor.qml` is the whole widget: QuickShell `BarWidget`, the alert
-  queue, the `findmnt` / `lsblk` / `notify-send` / agent `Process`es, the state
+  queue, the `findmnt` / `lsblk` / `notify-send` / agent `Process`es plus the
+  long-running `udevadm` monitor `Process` and its timers, the state
   `FileView`, and the ring drawing. It keeps state (bands, queues, `primed`, the
-  last scan) and decides *when* to ask mounts.js; it holds no decisions itself.
+  last scan, the event-burst and monitor-restart bookkeeping) and decides
+  *when* to ask mounts.js; it holds no decisions itself.
 - `mounts.js` holds the pure decisions: how a plugin setting value becomes a
   mount list, an argv, a flag, or a number, which findmnt row may draw a ring,
   the 80/90/98 bands, the notification body, its action label, the whole
