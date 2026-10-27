@@ -1,0 +1,40 @@
+# Real `udevadm monitor` output captured on this rig as the ordinary user (no
+# root), events generated with `udisksctl loop-setup` on a raw image in /tmp,
+# then `loop-delete`. The file is a composite: the KERNEL lines are the capture
+# of the argv the plugin runs (`--kernel --subsystem-match=block`, which prints
+# kernel uevents only), while the UDEV-prefixed line was gathered separately
+# from an unfiltered run as forward-compat coverage for parseUdevEvent's UDEV
+# source - the shipped argv never prints it.
+#
+# First capture: an image with an MBR partition table, no filesystem on the
+# partition. One plug, four kernel lines, 13 ms apart - the burst the widget has
+# to coalesce. The partition child arrives under the disk's own path and is a
+# block-subsystem device too.
+monitor will print the received events for:
+KERNEL - the kernel uevent
+
+KERNEL[204133.541265] change   /devices/virtual/block/loop0 (block)
+KERNEL[204133.554137] change   /devices/virtual/block/loop0 (block)
+KERNEL[204133.554193] add      /devices/virtual/block/loop0/loop0p1 (block)
+KERNEL[204133.554347] change   /devices/virtual/block/loop0 (block)
+#
+# Second capture: the same loop device set up again. The kernel already knows the
+# device, so a replug is a change-only burst - no `add` line anywhere. This is
+# why "add/change" cannot be read as "only add counts".
+KERNEL[204190.125016] change   /devices/virtual/block/loop0 (block)
+KERNEL[204190.143125] change   /devices/virtual/block/loop0 (block)
+KERNEL[204190.143271] change   /devices/virtual/block/loop0 (block)
+KERNEL[204190.143629] change   /devices/virtual/block/loop0 (block)
+KERNEL[204190.152203] change   /devices/virtual/block/loop0 (block)
+#
+# The other shapes udevadm prints for the same plug, and the lines that are not
+# events at all. A real USB stick's own device lines ride other subsystems -
+# the filter in udevArgs() is what keeps them from waking the widget.
+KERNEL[204133.540981] add      /devices/pci0000:00/0000:00:14.0/usb1/1-1 (usb)
+KERNEL[204133.553812] add      /devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1:1.0 (usb)
+KERNEL[204133.554001] add      /devices/virtual/block/loop0 (block)
+KERNEL[204133.554501] remove   /devices/virtual/block/loop0/loop0p1 (block)
+KERNEL[204133.554601] bind     /devices/virtual/block/loop0 (block)
+KERNEL[204133.554701] unbind   /devices/virtual/block/loop0 (block)
+UDEV  [204133.560012] add      /devices/virtual/block/loop0/loop0p1 (block)
+KERNEL[204133.560201] change   /devices/virtual/block/nvme0n1 (block)
