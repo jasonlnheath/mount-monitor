@@ -64,7 +64,7 @@ The rest of the wiring is verified by reading it and by the captain on the rig.
   `candidateRecord`, through `sanitizeText` (control characters, bidi overrides and
   zero-width formatting, and `<` `>` — which is what makes the delimiters
   unforgeable — turned into spaces, whitespace collapsed, truncated at
-  `DEVICE_TEXT_MAX`). `untrustedNotice()` carries the "data, not instructions"
+  `DEVICE_TEXT_MAX`, paths at `DEVICE_PATH_MAX`). `untrustedNotice()` carries the "data, not instructions"
   declaration and the requirement that the user confirm the concrete change: keep
   that wording out of anything a device controls, and never put a label, target,
   or device path into an instruction sentence again. `tests/label-injection.test.mjs`
