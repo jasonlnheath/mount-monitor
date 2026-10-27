@@ -119,6 +119,72 @@ function findmntArgs() {
   return ["-rn", "-o", "SOURCE,TARGET,FSTYPE,USED,AVAIL,USE%,OPTIONS"]
 }
 
+// findmnt's columns, back to the paths they name. findmnt hex-escapes every byte
+// outside printable ASCII - and the backslash too - so a mountpoint named
+// "/mnt/my stick" prints as /mnt/my\x20stick, a tab as \x09, DEL as \x7f, and a
+// name like Données as /mnt/Donn\xc3\xa9es. That escaping is what keeps its
+// whitespace-separated columns separable, so splitting on whitespace is right;
+// keeping the escape in the value is what broke the ring: lsblk -P pairs output -
+// and the plugin's `mounts` setting, which partition-onboarding wires from lsblk -
+// carry the real space, and a configured "/mnt/my stick" never matched a row
+// spelled /mnt/my\x20stick. Undo the escape where the row is built, so every
+// later decision (the ring, its id, the band memory, the watched devices, the
+// onboarding match, the copy the captain reads) works on the path on the disk.
+function unescapeFindmnt(text) {
+  var s = String(text === undefined || text === null ? "" : text)
+  if (s.indexOf("\\x") < 0) return s
+
+  var out = ""
+  var bytes = null
+  var i = 0
+  while (i < s.length) {
+    if (s.charAt(i) === "\\" && s.charAt(i + 1) === "x" &&
+        /^[0-9a-fA-F][0-9a-fA-F]$/.test(s.substring(i + 2, i + 4))) {
+      // A run of escaped bytes is one sequence: a non-ASCII character is printed
+      // as several \xNN, so they are decoded together, not one byte at a time.
+      if (bytes === null) bytes = []
+      bytes.push(parseInt(s.substring(i + 2, i + 4), 16))
+      i += 4
+      continue
+    }
+    if (bytes !== null) { out += utf8Decode(bytes); bytes = null }
+    out += s.charAt(i)
+    i++
+  }
+  if (bytes !== null) out += utf8Decode(bytes)
+  return out
+}
+
+// A run of bytes back into characters. mounts.js also runs inside QML's JS engine,
+// which has no TextDecoder, so this is the whole decoder: 1 to 4 byte sequences,
+// and U+FFFD for a truncated or malformed one rather than half a character. Escaped
+// bytes are only ever the bytes findmnt printed, so a name that really contains the
+// four characters \x20 arrives as \x5cx32... and stays itself.
+function utf8Decode(bytes) {
+  var out = ""
+  var i = 0
+  while (i < bytes.length) {
+    var b = bytes[i]
+    if (b < 0x80) { out += String.fromCharCode(b); i++; continue }
+    var extra = b >= 0xf0 ? 3 : (b >= 0xe0 ? 2 : (b >= 0xc0 ? 1 : 0))
+    var cp = b & (0xff >> (extra + 2))
+    var ok = extra > 0
+    for (var k = 1; ok && k <= extra; k++) {
+      var c = bytes[i + k]
+      if (c === undefined || c < 0x80 || c > 0xbf) ok = false
+      else cp = (cp << 6) | (c & 0x3f)
+    }
+    i += extra + 1
+    if (!ok || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) { out += "\ufffd"; continue }
+    if (cp <= 0xffff) out += String.fromCharCode(cp)
+    else {
+      cp -= 0x10000
+      out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+    }
+  }
+  return out
+}
+
 // One findmnt row, in the column order findmntArgs() asks for. Rows without a
 // target, or whose USE% is not a number (pseudo filesystems and filesystems
 // that report no usage print those columns empty), are dropped here.
@@ -128,19 +194,19 @@ function parseRows(text) {
   for (var i = 0; i < lines.length; i++) {
     var cols = lines[i].trim().split(/\s+/)
     if (cols.length < 7) continue
-    var target = cols[1]
+    var target = unescapeFindmnt(cols[1])
     if (!target) continue
     var pct = parseInt(String(cols[5]).replace("%", ""), 10)
     if (!isFinite(pct) || pct < 0 || pct > 100) continue
     rows.push({
-      source: cols[0],
+      source: unescapeFindmnt(cols[0]),
       target: target,
-      fstype: cols[2],
-      used: cols[3],
-      avail: cols[4],
+      fstype: unescapeFindmnt(cols[2]),
+      used: unescapeFindmnt(cols[3]),
+      avail: unescapeFindmnt(cols[4]),
       pct: pct,
       // findmnt lists mount options comma-separated and "ro"/"rw" first.
-      readonly: String(cols[6]).split(",")[0] === "ro"
+      readonly: unescapeFindmnt(cols[6]).split(",")[0] === "ro"
     })
   }
   return rows

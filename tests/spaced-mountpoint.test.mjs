@@ -115,8 +115,9 @@ test("every byte findmnt escapes comes back as the byte its hex stands for", () 
     ["/mnt/tab\\x09here", "/mnt/tab\there"],
     ["/mnt/back\\x5cslash", "/mnt/back\\slash"],
     ["/mnt/del\\x7fend", "/mnt/del\u007fend"],
-    ["/mnt/nbsp\\xa0here", "/mnt/nbsp\u00a0here"],
-    ["/mnt/Donn\\xe9es", "/mnt/Données"],
+    ["/mnt/nbsp\\xc2\\xa0here", "/mnt/nbsp\u00a0here"],
+    ["/mnt/Donn\\xc3\\xa9es", "/mnt/Données"],
+    ["/mnt/caf\\xc3\\xa9-\\xf0\\x9f\\x90\\xa9", "/mnt/café-🐩"],
     ["/mnt/uni-\\xc3\\xa9\\xc3\\xa8", "/mnt/uni-éè"],
     ["/mnt/pup\\xe2\\x80\\x8bdog", "/mnt/pup\u200bdog"],
     ["/mnt/\\xf0\\x9f\\x90\\xa9", "/mnt/🐩"],
@@ -134,6 +135,14 @@ test("decoding is a round trip, not a rewrite: a name that really contains \\x20
   // A directory actually named `\x20literal` prints with its backslash escaped, so
   // the four characters \ x 2 0 stay four characters.
   assert.equal(oneRow("/mnt/esc\\x5cx20literal").target, "/mnt/esc\\x20literal");
+});
+
+test("a byte sequence that is not valid UTF-8 becomes U+FFFD, not an invented character", () => {
+  // The kernel accepts bytes UTF-8 cannot represent (a filename made with
+  // `printf 'c\xa0b'` prints as c\xa0b). Nothing can be matched against such a
+  // name anyway, so the honest reading is the replacement character.
+  assert.equal(oneRow("/mnt/bad\\xa0byte").target, "/mnt/bad\ufffdbyte");
+  assert.equal(oneRow("/mnt/trunc\\xc3").target, "/mnt/trunc\ufffd");
 });
 
 test("the column split still needs no quoting, because findmnt escapes every whitespace byte", () => {
@@ -238,11 +247,12 @@ test("the agent prompt names the spaced mount by id and carries its real target 
   assert.equal(records[0].device, STICK_DEVICE);
 });
 
-test("a spaced target is one mountId, and the escaped spelling is a different one", () => {
-  // The id is minted from the decoded target, so the ring, the alert queue, and the
-  // band memory all name the same mount. The escaped spelling is what used to be
-  // the only one available, and it must not be what an id is keyed on.
-  assert.equal(Mounts.mountId(STICK), Mounts.mountId("/mnt/my stick"));
+test("a spaced target is one mountId, minted from the decoded path", () => {
+  // The ring, the alert queue, and the band memory all name the same mount, and the
+  // escaped spelling - what used to be the only one available - is not what an id is
+  // keyed on.
+  const stick = rings([STICK])[0];
+  assert.equal(stick.id, Mounts.mountId(STICK));
   assert.notEqual(Mounts.mountId(STICK), Mounts.mountId(STICK_PRINTED));
 });
 

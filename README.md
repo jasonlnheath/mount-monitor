@@ -155,10 +155,12 @@ All settings live on the widget's entry in `shell.json`:
 - `mounts` — which mounts get rings, in the order their rings appear. Any
   fixed, block-device-backed mount counts, not only btrfs: a second internal
   drive, an external disk, or a Windows partition mounted read-only at
-  `/mnt/models`. Default: `["/"]` (root only). An explicitly empty list means
-  no rings. Tell your agent to add or remove entries here whenever you want a
-  drive watched — that is what the `partition-onboarding` and
-  `partition-remove` skills do.
+  `/mnt/models`. Write each one as the mountpoint itself, spaces included —
+  `"/mnt/my stick"` is one entry (what `lsblk` and the onboarding skill give
+  you), not findmnt's escaped column (`/mnt/my\x20stick`). Default: `["/"]`
+  (root only). An explicitly empty list means no rings. Tell your agent to add
+  or remove entries here whenever you want a drive watched — that is what the
+  `partition-onboarding` and `partition-remove` skills do.
 - `onboarding` — `true` unless you set it to `false`. With it on, the widget
   scans the partition table with `lsblk`, notifies on first run, and notifies
   once for each partition that appears later. With it off it draws only the

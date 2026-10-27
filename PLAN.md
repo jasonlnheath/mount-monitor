@@ -95,19 +95,30 @@ compared.
   (real spaces) and the *findmnt* side the way findmnt does (`\x20`), which is the
   shape this bug was.
 
-## Process (RED first)
+## Process (RED first) — done
 
 1. `tests/spaced-mountpoint.test.mjs` written against the contract above and run at
-   the pre-fix commit: **RED** — the spaced ring is missing, its device is not
-   watched, its partition is offered as unmonitored, and the popup prints the
-   escape.
-2. Fix in `mounts.js` (`unescapeFindmnt` + `utf8Decode` + `parseRows`).
-3. Fixture: `tests/fixtures/findmnt-rig.txt` grows the row for the exfat stick the
+   the pre-fix commit `f787f3f`: **11 failed, 5 passed** (the guards that were
+   already true, and the counterexample test that records the old behaviour: the
+   configured stick reported as a partition needing a decision).
+2. Fixed in `mounts.js`: `unescapeFindmnt()` + `utf8Decode()`, applied to the text
+   columns in `parseRows()` after the whitespace split. No QML change: the widget
+   never renders or compares a target itself, it only keys its band memory on
+   `m.target`.
+3. Fixture: `tests/fixtures/findmnt-rig.txt` grew the row for the exfat stick the
    lsblk fixture already carries, in findmnt's escaped spelling.
-4. Skill copy: `partition-remove`, `disk-prune`, `partition-onboarding` (above).
-5. `AGENTS.md` records the escaping rule; `README.md` says a `mounts` entry is the
-   mountpoint as it is, spaces included.
-6. `bash tests/run.sh` green (node tests + install.sh + skills + `qmllint`).
+4. `tests/label-injection.test.mjs` now spells the hostile mount the way a real rig
+   does — the configured entry with its real spaces, the findmnt row with `\x20` —
+   and asserts the ring still matches. Its popup test compares the **fixed sentence**
+   against an ordinary mountpoint instead of asserting the hostile words are absent
+   from a body that legitimately prints the mountpoint.
+5. Skill copy: `partition-remove` (findmnt's column is escaped, the `mounts` entry is
+   not, one entry is one mountpoint), `disk-prune` (every `<mount>` quoted),
+   `partition-onboarding` (wire the block's target verbatim, spaces included).
+6. `AGENTS.md` records the escaping rule; `README.md` says a `mounts` entry is the
+   mountpoint as it is.
+7. `bash tests/run.sh`: **114 pass, 0 fail, 0 skip**, install.sh parses, skills
+   present, `qmllint` parses the QML and resolves the `mounts.js` import.
 
 ## Out of scope
 
