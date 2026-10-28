@@ -7,9 +7,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `MountMonitor.qml` is the whole widget: QuickShell `BarWidget`, the alert
   queue, the `findmnt` / `lsblk` / `notify-send` / agent `Process`es plus the
   long-running `udevadm` monitor `Process` and its timers, the state
-  `FileView`, and the ring drawing. It keeps state (bands, queues, `primed`, the
+  `FileView`s, and the ring drawing. It keeps state (bands, queues, `primed`, the
   last scan, the event-burst and monitor-restart bookkeeping) and decides
-  *when* to ask mounts.js; it holds no decisions itself.
+  *when* to ask mounts.js; it holds no decisions itself. It is also the
+  wallpaper's display half: it reads the meter the service writes, shows the
+  usage line on the indicator's tooltip, and relays the cap warning.
+- `StreetView.qml` is the wallpaper service (manifest kind `service` beside
+  `bar-widget`): the fetch half. A tick asks `StreetView.plan()` for one
+  action and executes it — wiring only, no URLs, no argv literals, no copy,
+  no counter mutation.
 - `mounts.js` holds the pure decisions: how a plugin setting value becomes a
   mount list, an argv, a flag, or a number, which findmnt row may draw a ring,
   the 80/90/98 bands, the notification body, its action label, the whole
@@ -26,10 +32,20 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the node tests through `node:vm`. It must stay plain top-level `function`
   declarations: no `export`, no `import`, no `.pragma library`, or one of the
   two consumers breaks.
+- `streetview.js` holds the wallpaper's pure decisions under the same
+  contract (imported as `StreetView`): the seven `streetview*` settings and
+  their paranoid fallbacks, `extractConfig` (the service reads the widget's
+  bar entry in shell.json live, because services get no injected settings),
+  the two meters and their calendar rollover, `plan()` / `imagePlan()` (the
+  quota guard), the metadata coverage parse, the rotation, `usageLine`, the
+  wallpaper's notification copy (cap warning via the `streetview-cap` kind in
+  mounts.js's dispatch, which carries alert-supplied copy for that kind only),
+  and the status popup argv. Same plain-functions rule as mounts.js.
 - `skills/` holds the agent skills `install.sh` copies to `~/.agents/skills/`:
   `disk-prune` (cleanup analysis), `partition-onboarding` (add a monitor),
-  `partition-remove` (unwire one). Notification copy and skill wording have to
-  agree — change both.
+  `partition-remove` (unwire one), `streetview-wallpaper` (report usage,
+  present the cap options, apply cap changes). Notification copy and skill
+  wording have to agree — change both.
 
 ## Tests
 
@@ -40,21 +56,25 @@ absent, a live check in `tests/click.test.mjs` that runs the notification
 service's own `parseExecArgv` against the plugin's hint (skips where the shell is
 not installed), the block-event detection decisions in `tests/detect.test.mjs`
 (including a live `udevadm monitor` + `udisksctl loop-setup` plug that skips where
-either is absent), the
+either is absent), the quota guard, meter math, settings recovery, and copy of
+the wallpaper in `tests/streetview.test.mjs` (no live network calls — a key or a
+reachability requirement would make the guard untestable), the
 hostile-label regression in `tests/label-injection.test.mjs`, the
 spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, an install.sh
-syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
-on the QML (syntax and import resolution; QuickShell-type warnings are expected
-outside a running shell). `testPct` in `shell.json` is the manual hook: it
-forces every ring to a percentage, alerts included. There is no way to test a
-real desktop notification or a real click headlessly. The tests cover the
-mounts.js decisions behind the notifications, the click argv, the settings
-recovery, and the trust boundary between the plugin's fixed prompt copy and what a
-device calls itself; the tests that look at `MountMonitor.qml` are delegation
-guards (the widget builds its findmnt command through `Mounts.findmntArgs`, its
-popup command through `Mounts.notifyArgs`, and its agent command through
-`Mounts.agentArgv`, and it carries `m.id` / `c.id` rather than inventing names).
-The rest of the wiring is verified by reading it and by the captain on the rig.
+syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint` on
+both QML entry points (syntax and import resolution; QuickShell-type warnings are
+expected outside a running shell). `testPct` in `shell.json` is the manual hook:
+it forces every ring to a percentage, alerts included. There is no way to test a
+real desktop notification, a real click, or a real wallpaper change headlessly.
+The tests cover the mounts.js decisions behind the notifications, the click argv,
+the settings recovery, the trust boundary between the plugin's fixed prompt copy
+and what a device calls itself, and the streetview.js quota guard; the tests that
+look at `MountMonitor.qml` and `StreetView.qml` are delegation guards (the widget
+builds its findmnt command through `Mounts.findmntArgs`, its popup command through
+`Mounts.notifyArgs`, and its agent command through `Mounts.agentArgv`, and it
+carries `m.id` / `c.id` rather than inventing names; the service executes
+`StreetView.plan()` outputs and builds no request itself). The rest of the wiring
+is verified by reading it and by the captain on the rig.
 
 ## Contracts worth not breaking
 
@@ -219,6 +239,35 @@ The rest of the wiring is verified by reading it and by the captain on the rig.
   under its "no list in the prompt" fallback.
 - `partition-remove` changes the `mounts` setting and records a decline, and
   must never touch the partition: no delete, no unmount, no format.
+- **The wallpaper's free tier is enforced by construction, not by promise**:
+  `StreetView.plan()` / `StreetView.imagePlan()` in `streetview.js` are the
+  only place a Street View request is ever built, and a capped plan carries
+  no argv field at all — the request is not refused, it is never built. The
+  billable image endpoint is reached only after the free, unlimited metadata
+  endpoint answered coverage, and `imagePlan` re-checks the meter anyway;
+  the incremented meter is persisted before the request goes out (a failed
+  download is never refunded — under-counting risks a real bill,
+  over-counting costs only free headroom). Two meters guard it: monthly
+  (the 10,000 free ceiling; a value above it in `streetviewMonthlyCap` is
+  the explicit paid unlock and is honored) and daily (`streetviewCapPerDay`,
+  ON at 100 out of the box; `0` pauses; only an explicit `-1` removes it).
+  Absent or garbage settings fall back toward the paranoid side, never
+  toward unlimited, and an unreadable clock reads as capped, never as free.
+  QML holds no URL, no argv literal, no copy, and no counter arithmetic.
+  `tests/streetview.test.mjs` is the guard.
+- **Every Street View file has exactly one writer**: the service writes the
+  meter (`streetview-meter.json`), the widget writes the warned-episode file
+  (`streetview-cap.json`), the user's shell.json is only ever edited by the
+  user or the agent at the user's word, and the API key lives only there —
+  never in a prompt, a notification, a log line, or a committed file. A
+  location name never enters a sentence (it rides the plan and the URL),
+  which is the device-text contract applied to user config.
+- The cap warning rides the existing notice lane as kind `streetview-cap`,
+  persistent and never-expiring like the onboarding questions; mounts.js's
+  dispatch honors alert-carried copy for that one kind only, checked by kind
+  first so no other alert can smuggle a prompt field past the fixed copy.
+  `streetviewCapPerDay: 0` and the off switch must stay able to make the
+  service send nothing at all — a cap of zero is a pause, not garbage.
 
 ## Release
 
