@@ -180,7 +180,7 @@ Item {
         root.writeMeter(StreetView.advanceCycle(root.meter, new Date().toISOString()))
         return
       }
-      var ip = StreetView.imagePlan(metadataProc.location, root.meter, new Date().toISOString(), root.home)
+      var ip = StreetView.imagePlan(metadataProc.location, root.meter, root.config, new Date().toISOString(), root.home)
       if (ip.action !== "image") {
         // The second gate. Reached here it means the meter turned between the
         // two calls; the fallback is the same as any capped tick: nothing.

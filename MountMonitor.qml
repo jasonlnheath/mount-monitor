@@ -1013,21 +1013,21 @@ BarWidget {
           }
         }
       }
+    }
 
-      // The wallpaper's own indicator: present only while the feature is on
-      // with a key, so nobody who has not opted in sees it. Hover shows the
-      // usage line; click sends the usage popup. It draws no ring - rings are
-      // disks, this is a meter the service owns.
-      BarIconButton {
-        id: svButton
-        visible: root.svFeatureOn
-        bar: root.bar
-        opticalSize: 22
-        text: "\uf03e"
-        tooltipText: root.svTooltip
-        onPressed: function(button) {
-          root.svStatus()
-        }
+    // The wallpaper's own indicator: present only while the feature is on
+    // with a key, so nobody who has not opted in sees it. Hover shows the
+    // usage line; click sends the usage popup. It draws no ring - rings are
+    // disks, this is a meter the service owns.
+    BarIconButton {
+      id: svButton
+      visible: root.svFeatureOn
+      bar: root.bar
+      opticalSize: 22
+      text: "\uf03e"
+      tooltipText: root.svTooltip
+      onPressed: function(button) {
+        root.svStatus()
       }
     }
   }
