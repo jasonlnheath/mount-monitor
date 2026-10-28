@@ -7,7 +7,9 @@ any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or above it
 throws a notification and glows red. Notifications are configured to go to your
 agent of choice with a skill that suggests files to prune / compress, or what
 to move off a read-only mount. It also finds the partitions on your machine and
-asks which ones you want watched.
+asks which ones you want watched. Optionally, a Street View wallpaper service
+rotates a panorama onto your desktop under a hard free-tier cap: it never sends
+a billable request unless the month's meter says there is free headroom.
 
 ![Mount Monitor in the Omarchy bar](bar-screenshot.png)
 

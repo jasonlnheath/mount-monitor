@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Mount Monitor checks: the node tests over mounts.js (mount filter, alert
-# bands, alert text, partition onboarding, block-event detection), an
+# bands, alert text, partition onboarding, block-event detection) and
+# streetview.js (the wallpaper's quota guard, meters, and copy), an
 # install.sh syntax check, a skills/ SKILL.md check, then a QML syntax/import
-# check over MountMonitor.qml when Qt's qmllint is on the box. Run from
-# anywhere: bash tests/run.sh
+# check over both QML entry points (MountMonitor.qml, StreetView.qml) when
+# Qt's qmllint is on the box. Run from anywhere: bash tests/run.sh
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

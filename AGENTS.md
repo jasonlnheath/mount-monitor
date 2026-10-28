@@ -258,7 +258,7 @@ is verified by reading it and by the captain on the rig.
   ON at 100 out of the box; `0` pauses — `capEpisode` mints no episode while
   paused so the cap warning never fires, and the widget sends one
   normal-urgency receipt per entered pause, its `paused` flag riding the same
-  single-writer cap-state file; only an explicit `-1` removes it).
+  single-writer cap-state file; only an explicit `-1` removes the daily cap).
   Absent or garbage settings fall back toward the paranoid side, never
   toward unlimited, and an unreadable clock reads as capped, never as free.
   QML holds no URL, no argv literal, no copy, and no counter arithmetic.
