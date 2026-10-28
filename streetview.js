@@ -374,10 +374,14 @@ function hasHeadroom(m, config, iso) {
 
 // The episode a cap warning fires once for: the daily cap names its day, the
 // monthly cap its month, and monthly wins when both are gone (it is the
-// bigger fact, and it outlasts the day). "" when there is room.
+// bigger fact, and it outlasts the day). "" when there is room — and ""
+// under an explicit 0 daily cap: a standing pause is a decided state, not a
+// cap-hit, so it mints no episode; the pause receipt is the one
+// acknowledgment.
 function capEpisode(m, config, iso) {
   var h = hasHeadroom(m, config, iso)
   if (h.ok) return ""
+  if (config && config.capPerDay === 0) return ""
   if (h.reason === "monthly") return "m:" + monthKeyOf(iso)
   if (h.reason === "daily") return "d:" + dayKeyOf(iso)
   return ""
@@ -577,6 +581,22 @@ function statusArgs(m, config, iso) {
   return ["notify-send", "-u", "normal", "-t", "8000", statusTitle(), statusBody(m, config, iso)]
 }
 
+// The pause receipt: an explicit 0 daily cap is a standing choice, so it is
+// acknowledged once and never re-asked. Like the status popup it reports
+// and asks for nothing - normal urgency, finite timeout, no action, no
+// agent - never the question lane the cap warning rides.
+function pauseTitle() {
+  return "Mount Monitor — Street View wallpaper paused"
+}
+
+function pauseBody() {
+  return "Street View wallpaper: the daily cap is set to 0, so the wallpaper keeps your last Street View image and sends nothing. To resume, set streetviewCapPerDay above 0 (or to -1 for no daily limit) in the widget's entry in ~/.config/omarchy/shell.json."
+}
+
+function pauseArgs() {
+  return ["notify-send", "-u", "normal", "-t", "8000", pauseTitle(), pauseBody()]
+}
+
 // Which cap is spent, for the copy: "daily", "monthly", or "" (including
 // when the clock is unreadable - a broken clock must not nag, it must only
 // refuse to spend).
@@ -594,16 +614,19 @@ function capStatePath(home) {
 }
 
 function parseCapState(text) {
-  var fresh = { episode: "" }
+  var fresh = { episode: "", paused: false }
   var raw = String(text === undefined || text === null ? "" : text).trim()
   if (raw === "") return fresh
   var parsed = null
   try { parsed = JSON.parse(raw) } catch (e) { return fresh }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fresh
-  return { episode: typeof parsed.episode === "string" ? parsed.episode : "" }
+  return {
+    episode: typeof parsed.episode === "string" ? parsed.episode : "",
+    paused: parsed.paused === true
+  }
 }
 
 function serializeCapState(state) {
   var s = state || {}
-  return JSON.stringify({ version: 1, episode: typeof s.episode === "string" ? s.episode : "" }, null, 2) + "\n"
+  return JSON.stringify({ version: 1, episode: typeof s.episode === "string" ? s.episode : "", paused: s.paused === true }, null, 2) + "\n"
 }

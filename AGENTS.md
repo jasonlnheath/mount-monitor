@@ -39,8 +39,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the two meters and their calendar rollover, `plan()` / `imagePlan()` (the
   quota guard), the metadata coverage parse, the rotation, `usageLine`, the
   wallpaper's notification copy (cap warning via the `streetview-cap` kind in
-  mounts.js's dispatch, which carries alert-supplied copy for that kind only),
-  and the status popup argv. Same plain-functions rule as mounts.js.
+  mounts.js's dispatch, which carries alert-supplied copy for that kind only;
+  the pause receipt for an explicit 0 daily cap, a transient popup that asks
+  for nothing), and the status popup argv. Same plain-functions rule as mounts.js.
 - `skills/` holds the agent skills `install.sh` copies to `~/.agents/skills/`:
   `disk-prune` (cleanup analysis), `partition-onboarding` (add a monitor),
   `partition-remove` (unwire one), `streetview-wallpaper` (report usage,
@@ -73,7 +74,11 @@ look at `MountMonitor.qml` and `StreetView.qml` are delegation guards (the widge
 builds its findmnt command through `Mounts.findmntArgs`, its popup command through
 `Mounts.notifyArgs`, and its agent command through `Mounts.agentArgv`, and it
 carries `m.id` / `c.id` rather than inventing names; the service executes
-`StreetView.plan()` outputs and builds no request itself). The rest of the wiring
+`StreetView.plan()` outputs and builds no request itself; the guards pin the
+shapes the wiring depends on — the service's `imagePlan` call carries all five
+arguments with the recovered config in the config slot, and the wallpaper
+indicator is declared beside the mounts `Repeater`, never inside it — because
+presence alone let two wiring bugs through). The rest of the wiring
 is verified by reading it and by the captain on the rig.
 
 ## Contracts worth not breaking
@@ -250,7 +255,10 @@ is verified by reading it and by the captain on the rig.
   over-counting costs only free headroom). Two meters guard it: monthly
   (the 10,000 free ceiling; a value above it in `streetviewMonthlyCap` is
   the explicit paid unlock and is honored) and daily (`streetviewCapPerDay`,
-  ON at 100 out of the box; `0` pauses; only an explicit `-1` removes it).
+  ON at 100 out of the box; `0` pauses — `capEpisode` mints no episode while
+  paused so the cap warning never fires, and the widget sends one
+  normal-urgency receipt per entered pause, its `paused` flag riding the same
+  single-writer cap-state file; only an explicit `-1` removes it).
   Absent or garbage settings fall back toward the paranoid side, never
   toward unlimited, and an unreadable clock reads as capped, never as free.
   QML holds no URL, no argv literal, no copy, and no counter arithmetic.

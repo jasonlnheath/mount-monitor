@@ -141,6 +141,7 @@ BarWidget {
   readonly property bool svFeatureOn: root.svConfig.enabled && root.svConfig.key !== ""
   onSvConfigChanged: {
     root.updateSvTooltip()
+    root.relayPauseAck()
     root.relayCapWarning()
   }
 
@@ -166,6 +167,7 @@ BarWidget {
   function loadSvCapState(raw): void {
     root.svCapState = StreetView.parseCapState(raw)
     root.svCapLoaded = true
+    root.relayPauseAck()
     root.relayCapWarning()
   }
 
@@ -201,7 +203,7 @@ BarWidget {
       body: StreetView.capWarningBody(usage, reason),
       action: StreetView.capWarningAction()
     })
-    root.writeSvCapState({ episode: episode })
+    root.writeSvCapState({ episode: episode, paused: root.svCapState.paused })
     root.fireNextNotice()
   }
 
@@ -211,6 +213,24 @@ BarWidget {
     if (payload === root.svLastCapWrite) return
     root.svLastCapWrite = payload
     svCapFile.setText(payload)
+  }
+
+  // A pause is a standing choice, so it is acknowledged once per entered
+  // pause: the flag rides the same single-writer file as the warned episode
+  // (a restart never repeats it), it clears when the pause ends so a later
+  // pause earns its own receipt, and the receipt itself asks for nothing.
+  function relayPauseAck(): void {
+    if (!root.svFeatureOn || !root.svCapLoaded) return
+    if (root.reloadPending || !root.stateDirDone) return
+    if (root.svConfig.capPerDay !== 0) {
+      if (root.svCapState.paused)
+        root.writeSvCapState({ episode: root.svCapState.episode, paused: false })
+      return
+    }
+    if (root.svCapState.paused) return
+    root.writeSvCapState({ episode: root.svCapState.episode, paused: true })
+    svPauseProc.command = StreetView.pauseArgs()
+    svPauseProc.running = true
   }
 
   function svStatus(): void {
@@ -727,6 +747,16 @@ BarWidget {
     command: ["true"]
     stderr: StdioCollector {
       onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: streetview status:", this.text.trim())
+    }
+  }
+
+  // The pause receipt rides its own transient process for the same reason:
+  // it reports, it never asks.
+  Process {
+    id: svPauseProc
+    command: ["true"]
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: streetview pause:", this.text.trim())
     }
   }
 

@@ -246,12 +246,19 @@ test("serializeMeter round-trips through parseMeter", () => {
 });
 
 test("cap state: the widget's own bookkeeping file round-trips and reads garbage as fresh", () => {
-  assert.deepEqual(StreetView.parseCapState("").episode, "");
+  const fresh = StreetView.parseCapState("");
+  assert.equal(fresh.episode, "");
+  assert.equal(fresh.paused, false);
   for (const text of ["{", "null", "[1]", "42", "nope"]) {
     assert.equal(StreetView.parseCapState(text).episode, "");
+    assert.equal(StreetView.parseCapState(text).paused, false);
   }
-  const text = StreetView.serializeCapState({ episode: "d:2026-10-27" });
-  assert.equal(StreetView.parseCapState(text).episode, "d:2026-10-27");
+  const back = StreetView.parseCapState(
+    StreetView.serializeCapState({ episode: "d:2026-10-27", paused: true }));
+  assert.equal(back.episode, "d:2026-10-27");
+  assert.equal(back.paused, true);
+  assert.equal(StreetView.parseCapState(StreetView.serializeCapState({ episode: "m:2026-10" })).paused, false,
+    "an absent pause flag reads as false, never as acknowledged");
   assert.equal(StreetView.capStatePath("/home/u"),
     "/home/u/.local/state/mount-monitor/streetview-cap.json");
 });
@@ -337,6 +344,12 @@ test("hasHeadroom: a full day caps even with monthly room", () => {
   assert.equal(h.reason, "daily");
 });
 
+test("hasHeadroom: an explicit 0 daily cap refuses at zero usage — the pause still gates", () => {
+  const h = StreetView.hasHeadroom(meter({ dailyUsed: 0 }), cfg({ capPerDay: 0 }), NOW);
+  assert.equal(h.ok, false, "a pause refuses every fetch");
+  assert.equal(h.reason, "daily");
+});
+
 test("hasHeadroom: a raised monthly cap is honored — the unlock is real", () => {
   const h = StreetView.hasHeadroom(meter({ monthlyUsed: 12000 }), cfg({ monthlyCap: 50000, capPerDay: -1 }), NOW);
   assert.equal(h.ok, true, "the user's explicit unlock must not be second-guessed");
@@ -359,6 +372,11 @@ test("capEpisode names the episode the warning fires once for", () => {
   assert.match(monthly, /^m:2026-10$/, "monthly takes precedence when both caps are gone");
   assert.equal(StreetView.capEpisode(meter(), cfg(), NOW), "", "room in both caps is no episode");
   assert.equal(StreetView.capEpisode(meter(), cfg(), "garbage"), "");
+  const paused = cfg({ capPerDay: 0 });
+  assert.equal(StreetView.capEpisode(meter(), paused, NOW), "",
+    "a deliberate pause is a decided state, not a cap-hit - no episode, no daily nag");
+  assert.equal(StreetView.capEpisode(meter({ monthlyUsed: 10000 }), paused, NOW), "",
+    "the pause silences even a spent month");
 });
 
 test("usageLine is the captain's example, word for word in shape", () => {
@@ -466,6 +484,17 @@ test("imagePlan: a capped meter never gets an image argv, even after a coverage 
   assert.equal(p.argv, undefined, "the second gate holds even when the metadata said covered");
 });
 
+test("a paused meter builds no request and mints no episode", () => {
+  const p = StreetView.plan(meter(), cfg({ capPerDay: 0 }), NOW);
+  assert.equal(p.action, "capped");
+  assert.equal(p.argv, undefined, "the pause is a hard refusal");
+  assert.equal(p.episode, "");
+  const ip = StreetView.imagePlan("Eiffel Tower, Paris", meter(), cfg({ capPerDay: 0 }), NOW, "/home/u");
+  assert.equal(ip.action, "capped");
+  assert.equal(ip.argv, undefined);
+  assert.equal(ip.episode, "");
+});
+
 test("imagePlan: the heading varies with the cycle so one location is not one photo forever", () => {
   const urls = [];
   for (const cycle of [0, 1, 2, 4]) {
@@ -534,6 +563,29 @@ test("status body carries the usage line, the daily count, and the interval", ()
   assert.ok(body.indexOf("30") >= 0, "the change interval is visible");
 });
 
+test("under a pause the usage line keeps the honest counts", () => {
+  assert.equal(StreetView.todayLine(meter({ dailyUsed: 0 }), cfg({ capPerDay: 0 }), NOW), "0/0 today");
+  assert.equal(StreetView.todayLine(meter(), cfg({ capPerDay: 0 }), NOW), "12/0 today",
+    "loads already spent today stay on the line");
+  assert.equal(StreetView.usageLine(meter(), cfg({ capPerDay: 0 }), NOW),
+    "3,214 / 10,000 free loads (32% this month)");
+});
+
+test("the pause receipt reports the standing choice and asks for nothing", () => {
+  const args = StreetView.pauseArgs();
+  assert.equal(args[0], "notify-send");
+  const u = args.indexOf("-u");
+  assert.ok(u >= 0 && args[u + 1] === "normal", "a receipt is not a critical question");
+  const t = args.indexOf("-t");
+  assert.ok(t >= 0 && Number(args[t + 1]) > 0, "a receipt expires on its own");
+  const text = args.join(" ");
+  assert.ok(text.indexOf("streetviewCapPerDay") >= 0, "the resume instruction names the exact setting");
+  assert.ok(text.indexOf("shell.json") >= 0, "the resume instruction names the settings surface");
+  assert.ok(text.indexOf("-A") < 0 && text.indexOf("omarchy-exec-argv") < 0,
+    "no action and no agent ride on a receipt");
+  assert.equal(text.indexOf("AIza"), -1, "the key never enters copy");
+});
+
 // --- mounts.js dispatch: the streetview-cap kind -----------------------------
 
 function svAlert() {
@@ -570,6 +622,48 @@ test("only the streetview-cap kind may carry its own copy — a band alert's pro
 });
 
 // --- QML delegation guards ---------------------------------------------------
+//
+// Presence alone proved nothing twice: an imagePlan call missing its config
+// argument and a second Repeater child both passed a grep for the right
+// function name. These guards therefore pin the shapes the wiring depends
+// on — argument lists and declaration placement, extracted brace-aware.
+
+function blockOf(src, opening) {
+  const start = src.indexOf(opening);
+  if (start < 0) return null;
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") { depth--; if (depth === 0) return { start, end: i, text: src.slice(start, i + 1) }; }
+  }
+  return null;
+}
+
+function fnBody(src, name) {
+  const b = blockOf(src, "function " + name);
+  return b ? b.text : "";
+}
+
+function callArgs(src, name) {
+  let from = 0;
+  for (;;) {
+    const open = src.indexOf(name + "(", from);
+    if (open < 0) return null;
+    let depth = 0;
+    for (let i = open + name.length; i < src.length; i++) {
+      if (src[i] === "(") depth++;
+      else if (src[i] === ")") {
+        depth--;
+        if (depth === 0) {
+          const args = src.slice(open + name.length + 1, i).trim();
+          if (args !== "") return args;
+          break;
+        }
+      }
+    }
+    from = open + name.length;
+  }
+}
 
 test("MountMonitor.qml relays the cap warning through streetview.js and builds no copy of its own", () => {
   const qml = readFileSync(path.join(repo, "MountMonitor.qml"), "utf8");
@@ -578,12 +672,18 @@ test("MountMonitor.qml relays the cap warning through streetview.js and builds n
   assert.ok(qml.indexOf("StreetView.parseMeter(") >= 0);
   assert.ok(qml.indexOf("StreetView.capEpisode(") >= 0, "the episode decision comes from the module");
   assert.ok(qml.indexOf("StreetView.parseCapState(") >= 0, "the warned-episode memory comes from the module");
-  assert.ok(qml.indexOf("StreetView.capWarningPrompt(") >= 0);
-  assert.ok(qml.indexOf("StreetView.capWarningBody(") >= 0);
   assert.ok(qml.indexOf("StreetView.usageLine(") >= 0, "the tooltip usage line comes from the module");
   assert.ok(qml.indexOf("streetview-cap") >= 0);
   assert.ok(qml.indexOf("10,000") < 0, "no hardcoded cap numbers in QML");
   assert.ok(qml.indexOf("maps.googleapis.com") < 0, "no URLs in QML");
+  const relay = fnBody(qml, "relayCapWarning");
+  assert.ok(relay.indexOf("StreetView.capWarningPrompt(") >= 0 && relay.indexOf("StreetView.capWarningBody(") >= 0,
+    "every warning sentence comes from the module, inside the relay itself");
+  assert.ok(relay.indexOf("noticeQueue.push") >= 0, "a cap question rides the never-expiring lane");
+  const ack = fnBody(qml, "relayPauseAck");
+  assert.ok(ack.indexOf("StreetView.pauseArgs(") >= 0, "the pause receipt's argv comes from the module");
+  assert.ok(ack.indexOf("noticeQueue") < 0 && ack.indexOf("noticeProc") < 0,
+    "a receipt asks for nothing, so it never rides the question lane");
 });
 
 test("StreetView.qml executes plans and builds no request itself", () => {
@@ -591,6 +691,9 @@ test("StreetView.qml executes plans and builds no request itself", () => {
   assert.ok(qml.indexOf('import "streetview.js" as StreetView') >= 0);
   assert.ok(qml.indexOf("StreetView.plan(") >= 0, "every tick goes through the gate");
   assert.ok(qml.indexOf("StreetView.imagePlan(") >= 0);
+  assert.deepEqual(callArgs(qml, "StreetView.imagePlan").split(",").map(s => s.trim()),
+    ["metadataProc.location", "root.meter", "root.config", "new Date().toISOString()", "root.home"],
+    "five arguments with the recovered config in the config slot - the arity is the wiring");
   assert.ok(qml.indexOf("StreetView.coveredFromMetadata(") >= 0);
   assert.ok(qml.indexOf("StreetView.advanceCycle(") >= 0, "a no-coverage answer turns the rotation through the module");
   assert.ok(qml.indexOf("StreetView.extractConfig(") >= 0, "config comes from the module's parser");
@@ -602,6 +705,17 @@ test("StreetView.qml executes plans and builds no request itself", () => {
   assert.ok(qml.indexOf('"curl"') < 0, "no argv literals in QML");
   assert.ok(qml.indexOf("omarchy-theme-bg-set") < 0, "the setter argv comes from the module");
   assert.ok(qml.indexOf("StreetView.statusArgs(") >= 0, "the status popup argv comes from the module");
+});
+
+test("the wallpaper indicator is declared beside the mounts Repeater, never inside it", () => {
+  const qml = readFileSync(path.join(repo, "MountMonitor.qml"), "utf8");
+  const rep = blockOf(qml, "Repeater {");
+  assert.ok(rep, "the mounts Repeater exists");
+  assert.ok(rep.text.indexOf("id: ringButton") >= 0, "ringButton is the delegate that draws the rings");
+  const sv = qml.indexOf("id: svButton");
+  assert.ok(sv >= 0, "the wallpaper indicator exists");
+  assert.ok(sv < rep.start || sv > rep.end,
+    "a second declared child inside a Repeater becomes the delegate and the rings vanish");
 });
 
 test("both entry points are declared in the manifest", () => {
