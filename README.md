@@ -7,9 +7,7 @@ any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or above it
 throws a notification and glows red. Notifications are configured to go to your
 agent of choice with a skill that suggests files to prune / compress, or what
 to move off a read-only mount. It also finds the partitions on your machine and
-asks which ones you want watched. Optionally, a Street View wallpaper service
-rotates a panorama onto your desktop under a hard free-tier cap: it never sends
-a billable request unless the month's meter says there is free headroom.
+asks which ones you want watched.
 
 ![Mount Monitor in the Omarchy bar](bar-screenshot.png)
 
@@ -63,7 +61,8 @@ question.
 
 A plugged drive is noticed in seconds, not on the next sweep: the widget keeps
 `udevadm monitor --kernel --subsystem-match=block` open for the life of the shell
-and rescans when a block device appears, changes, or goes away. One plug is a burst of kernel lines, so they coalesce into a single rescan, and a second rescan
+and rescans when a block device appears, changes, or goes away. One plug is a
+burst of kernel lines, so they coalesce into a single rescan, and a second rescan
 follows it because the automount lands just after the last event. The 60-second
 sweep stays as the fallback — without `udevadm`, or if the monitor will not stay
 up, detection is the sweep again and nothing else about the widget changes. Set
@@ -72,61 +71,6 @@ path and only mounts you configure are shown. A
 configured mount that is not currently mounted simply has no ring. Virtual
 filesystems — tmpfs, proc, sysfs, cgroup2, overlay, and anything else without a
 device behind it — never draw a ring, even when configured.
-
-## Street View wallpaper — free forever, enforced
-
-The plugin also ships an optional wallpaper service that rotates a Google Street
-View panorama onto your desktop, and it is built around one rule: **the wallpaper
-never sends a billable request unless the month's meter says there is free
-headroom.** No credit card, no surprise bill — when the cap is reached the
-request is never even built; your desktop keeps the last cached image (or your
-own wallpaper, before the first fetch), and a warning notice offers the two
-options: stay capped, or unlock paid usage at your own risk.
-
-How the free tier is guaranteed:
-
-- **Two meters, one gate.** A monthly meter guards the free tier itself
-  (10,000 free loads/month, then Google bills $7 per 1,000) and a daily meter
-  guards the day, defaulting ON at 100/day so cautious users are hard-limited
-  out of the box. A fetch needs headroom in both; when either is spent, the
-  next tick builds nothing at all.
-- **The free metadata endpoint gates every load.** Before any billable image
-  fetch, the always-free, unlimited metadata endpoint is asked whether the
-  location has coverage at all. No coverage costs nothing — the rotation just
-  moves to the next location.
-- **Count before send.** The meter records the load before the request goes
-  out, so a failed download never under-counts. The meter survives restarts
-  and resets on the calendar (a suspend across midnight or month's end cannot
-  leak last period's budget); a clock that cannot be read is treated as "no
-  headroom", never as free.
-
-What you see:
-
-- While the feature is on, a small indicator sits beside your rings. Hover it
-  for `3,214 / 10,000 free loads (32% this month) · 12/100 today`; click for a
-  usage popup. No key, no indicator.
-- When a cap is hit, a persistent warning names the number and offers the two
-  options. Clicking it sends your agent the `streetview-wallpaper` skill, which
-  reports the usage and applies only the option you pick.
-
-To turn it on, set your own API key ([enable the Street View Static API for the
-key in Google Cloud console](https://console.cloud.google.com/apis/library/streetview-backend.googleapis.com))
-and optionally tune the caps:
-
-```json
-{ "id": "io.github.jasonlnheath.mount-monitor", "streetviewKey": "AIza..." }
-```
-
-The key stays in your `shell.json`; it is never committed, never logged, and
-never appears in a notification or an agent prompt. The free-tier guarantee
-holds for your key because the gate consults only the meter.
-
-Fetch locations rotate through `streetviewLocations` (default: a built-in list
-of famous landmarks) with a different heading each pass, and the wallpaper
-changes on `streetviewIntervalMinutes`. Manual controls:
-`omarchy-shell io.github.jasonlnheath.mount-monitor status` (usage popup) and
-`... next` (one fetch cycle now — still through the meter; a click is not a
-loophole).
 
 ## What a clicked alert sends your agent
 
@@ -155,9 +99,7 @@ table, `notify-send` from libnotify for the alerts, and `udevadm` from systemd t
 notice a plugged drive right away. Without `notify-send` the rings still draw,
 nothing alerts. Without `lsblk` the rings still draw, no onboarding notices.
 Without `udevadm` the rings still draw and still alert — detection just falls back
-to the 60-second sweep. The Street View wallpaper additionally uses `curl` and
-the `omarchy-theme-bg-set` command Omarchy ships; without them it stays
-off-screen and sends nothing.
+to the 60-second sweep.
 
 ## Install
 
@@ -169,8 +111,8 @@ omarchy restart shell
 ```
 
 `install.sh` copies the skills in `skills/` — `disk-prune`,
-`partition-onboarding`, `partition-remove`, `streetview-wallpaper` — into
-`~/.agents/skills/` and prints the bar wiring line. `omarchy plugin add
+`partition-onboarding`, `partition-remove` — into `~/.agents/skills/` and prints
+the bar wiring line. `omarchy plugin add
 https://github.com/jasonlnheath/mount-monitor --enable` also installs and
 enables the widget and manages updates for you, but it does not run
 `install.sh` and does not install the skills — without also running
@@ -197,20 +139,16 @@ shell:
 ```bash
 rm -rf ~/.config/omarchy/plugins/io.github.jasonlnheath.mount-monitor \
   ~/.agents/skills/disk-prune ~/.agents/skills/partition-onboarding ~/.agents/skills/partition-remove \
-  ~/.agents/skills/streetview-wallpaper \
   ~/.local/state/mount-monitor
 omarchy restart shell
 ```
 
-Mount Monitor writes nothing outside those folders, your `shell.json`, and its
-state directory `~/.local/state/mount-monitor/`: the onboarding state file
-(`onboarding.json` — the list of partitions it found and what you decided about
-each one), the wallpaper's `streetview-meter.json` (the two usage counters),
-`streetview-cap.json` (which cap warnings have fired), and the `streetview/`
-cache holding the current wallpaper image. Delete a file and restart the shell
-to reset that part: the onboarding file re-runs the first-run notice, the meter
-file re-arms the full free tier (it counts loads Google may already have billed
-for — delete it honestly), the cap file lets the cap warning fire again.
+Mount Monitor writes nothing outside those folders, your `shell.json`, and the
+onboarding state file at `~/.local/state/mount-monitor/onboarding.json` — the
+list of partitions it found and what you decided about each one. Delete that
+file and run `omarchy restart shell`, and the first-run notice fires again
+(restart while the widget is live would not: it holds the state in memory and
+writes it back).
 
 ## Configuration
 
@@ -250,34 +188,6 @@ All settings live on the widget's entry in `shell.json`:
   listens on — an inbox script, a CLI, a webhook. Every notification kind
   rides this same path: a disk alert and a partition notice differ in the
   prompt, not the plumbing.
-- `streetview` — `true` unless you set it to `false`: the wallpaper service.
-  Inert until `streetviewKey` is set, so on it costs nothing by default.
-- `streetviewKey` — your own Google API key with the Street View Static API
-  enabled. Never committed, never logged, never echoed into a prompt or a
-  notification.
-- `streetviewCapPerDay` — the daily cap, **ON by default at 100** (the
-  paranoid default). A fetch needs headroom in the daily and the monthly
-  meter both. `0` pauses the wallpaper entirely; `-1` removes the daily
-  limit (the monthly cap still applies). Anything else unusable falls back
-  to 100, never to unlimited.
-- `streetviewMonthlyCap` — the monthly cap, default `10000`: Google's free
-  ceiling, hard. Setting it **above 10,000** is the explicit paid unlock —
-  overage is $7 per 1,000 loads, your billing, your risk. Zero, negative, or
-  garbage falls back to the free ceiling.
-- `streetviewIntervalMinutes` — how often the wallpaper may change. Default
-  `30`, floored at 5.
-- `streetviewSize` — requested image size as `"<w>x<h>"`, default
-  `"1920x1080"`.
-- `streetviewLocations` — the rotation, in addresses or `lat,lng`. Default:
-  a built-in list of famous landmarks.
-
-The wallpaper's state lives beside the onboarding state:
-`~/.local/state/mount-monitor/streetview-meter.json` (the counters, which the
-service writes and nothing else does) and `streetview-cap.json` (which cap
-warnings have fired). Delete the meter file while the shell is stopped to
-re-arm the free tier — honestly, that is: the counters exist so the plugin can
-keep its promise to you; deleting them cannot un-bill what Google already
-counted on your key.
 
 ## Skills
 
@@ -297,19 +207,12 @@ Everything a clicked notification asks for lives in `skills/`, agent-agnostic
 - **`partition-remove`** — how to take a mount off the bar and record it as
   declined so it is not offered again. It changes the `mounts` setting only:
   never deletes data, never unmounts, never formats.
-- **`streetview-wallpaper`** — how to report the wallpaper's usage from the
-  meter, present the two options on a cap warning (stay capped, or unlock
-  paid usage), and apply cap changes the captain asks for. It edits the
-  wallpaper settings only: never the meter's counters, never the key, and it
-  never sends a request to Google itself.
 
 ## Development
 
 The mount filter, the 80/90/98 bands, the alert text, the partition onboarding
-decisions, and the block-event detection timings live in `mounts.js`; the
-wallpaper's meter math, cap logic, metadata-vs-paid gating, fallback choice,
-and copy live in `streetview.js` — both plain top-level-function modules that
-the QML imports and the tests load directly:
+decisions, and the block-event detection timings live in `mounts.js`, which
+`MountMonitor.qml` imports and the tests load directly:
 
 ```bash
 bash tests/run.sh
@@ -318,10 +221,10 @@ bash tests/run.sh
 That runs `node --test tests/` against the fixtures in `tests/fixtures/` (plus
 live `findmnt` and `lsblk` checks that skip when a mount or the tool is not
 present) and, when Qt's `qmllint` is installed, checks that `MountMonitor.qml`
-and `StreetView.qml` parse and their imports resolve. `testPct` is a setting
-for trying a band out: `{ "id": "io.github.jasonlnheath.mount-monitor",
-"testPct": 98 }` reports every ring at 98% — display and alerts alike. Remove
-it when you are done.
+parses and its `mounts.js` import resolves. `testPct` is a setting for trying a
+band out: `{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }`
+reports every ring at 98% — display and alerts alike. Remove it when you are
+done.
 
 ## Feedback
 

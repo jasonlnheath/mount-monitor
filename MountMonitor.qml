@@ -4,7 +4,6 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "mounts.js" as Mounts
-import "streetview.js" as StreetView
 
 // Mount Monitor — one ring per configured disk mount.
 // Bright arc = used, dim ring = available, percent inside, mount details on hover.
@@ -59,18 +58,6 @@ import "streetview.js" as StreetView
 // Qt list, not a JavaScript Array, and a plain array check rejects it - which is
 // how a correctly configured bar used to draw one ring and refuse its
 // agentCommand.
-// Street View wallpaper: the fetching half is the plugin's service entry
-// (StreetView.qml); this widget is the display half. It reads the meter the
-// service writes (never the reverse), shows the usage line on the indicator's
-// tooltip, sends a usage popup on demand, and relays the cap warning once per
-// episode - a persistent, never-expiring notice whose click offers the
-// captain the two options: stay capped, or unlock paid usage at their own
-// risk. The wallpaper NEVER sends a billable request unless the month's meter
-// says there is free headroom; that guard lives in streetview.js, and this
-// widget builds no copy of its own. The settings (streetview, streetviewKey,
-// streetviewCapPerDay, streetviewMonthlyCap, streetviewIntervalMinutes,
-// streetviewSize, streetviewLocations) ride this entry in shell.json like
-// every other setting, and the service reads them from the same file.
 BarWidget {
   id: root
   moduleName: "io.github.jasonlnheath.mount-monitor"
@@ -118,126 +105,6 @@ BarWidget {
     Mounts.normalizeBool(root.setting("onboarding", true), true)
   readonly property string onboardingStatePath: Mounts.statePath(Quickshell.env("HOME"))
 
-  // --- Street View wallpaper -------------------------------------------------
-  // The meter the service writes and this widget only reads; the warned-
-  // episode memory is this widget's own file, so neither file has two
-  // writers.
-  property var svMeter: StreetView.parseMeter("")
-  property var svCapState: StreetView.parseCapState("")
-  property string svLastCapWrite: ""
-  property bool svMeterLoaded: false
-  property bool svCapLoaded: false
-  // A FileView cannot watch a file that has never been created, so a fresh
-  // install's failed load leaves the watcher dead; these flags say so, and
-  // the 60-second sweep retries the load until the service creates the file.
-  property bool svMeterFileOk: false
-  property bool svCapFileOk: false
-  property string svTooltip: ""
-  readonly property string svHome: Quickshell.env("HOME")
-  // The same settings the service extracts from shell.json, built from this
-  // widget's injected entry, so a cap change reaches the warning relay
-  // without a restart.
-  readonly property var svConfig: StreetView.configFromSettings(root.svSettingsRaw())
-  readonly property bool svFeatureOn: root.svConfig.enabled && root.svConfig.key !== ""
-  onSvConfigChanged: {
-    root.updateSvTooltip()
-    root.relayPauseAck()
-    root.relayCapWarning()
-  }
-
-  function svSettingsRaw(): var {
-    return {
-      streetview: root.setting("streetview", null),
-      streetviewKey: root.setting("streetviewKey", null),
-      streetviewCapPerDay: root.setting("streetviewCapPerDay", null),
-      streetviewMonthlyCap: root.setting("streetviewMonthlyCap", null),
-      streetviewIntervalMinutes: root.setting("streetviewIntervalMinutes", null),
-      streetviewSize: root.setting("streetviewSize", null),
-      streetviewLocations: root.setting("streetviewLocations", null)
-    }
-  }
-
-  function loadSvMeter(raw): void {
-    root.svMeter = StreetView.parseMeter(raw)
-    root.svMeterLoaded = true
-    root.updateSvTooltip()
-    root.relayCapWarning()
-  }
-
-  function loadSvCapState(raw): void {
-    root.svCapState = StreetView.parseCapState(raw)
-    root.svCapLoaded = true
-    root.relayPauseAck()
-    root.relayCapWarning()
-  }
-
-  function updateSvTooltip(): void {
-    if (!root.svFeatureOn) {
-      root.svTooltip = ""
-      return
-    }
-    var now = new Date().toISOString()
-    root.svTooltip = StreetView.usageLine(root.svMeter, root.svConfig, now)
-      + " · " + StreetView.todayLine(root.svMeter, root.svConfig, now)
-  }
-
-  // The cap warning, once per episode. The episode and every sentence come
-  // from streetview.js; this relay only decides that the popup has not fired
-  // for this episode yet and hands it to the notice lane the onboarding
-  // questions already ride - critical, never-expiring, on its own process so
-  // it cannot hold a full-drive warning behind it.
-  function relayCapWarning(): void {
-    if (!root.svFeatureOn || !root.svMeterLoaded || !root.svCapLoaded) return
-    if (root.reloadPending || !root.stateDirDone) return
-    var now = new Date().toISOString()
-    var episode = StreetView.capEpisode(root.svMeter, root.svConfig, now)
-    if (episode === "" || episode === root.svCapState.episode) return
-    var reason = StreetView.capReason(root.svMeter, root.svConfig, now)
-    // A broken clock must only refuse to spend, never nag.
-    if (reason === "") return
-    var usage = StreetView.usageLine(root.svMeter, root.svConfig, now)
-    root.noticeQueue.push({
-      kind: "streetview-cap",
-      prompt: StreetView.capWarningPrompt(usage, reason),
-      title: StreetView.capWarningTitle(),
-      body: StreetView.capWarningBody(usage, reason),
-      action: StreetView.capWarningAction()
-    })
-    root.writeSvCapState({ episode: episode, paused: root.svCapState.paused })
-    root.fireNextNotice()
-  }
-
-  function writeSvCapState(next): void {
-    root.svCapState = StreetView.parseCapState(StreetView.serializeCapState(next))
-    var payload = StreetView.serializeCapState(next)
-    if (payload === root.svLastCapWrite) return
-    root.svLastCapWrite = payload
-    svCapFile.setText(payload)
-  }
-
-  // A pause is a standing choice, so it is acknowledged once per entered
-  // pause: the flag rides the same single-writer file as the warned episode
-  // (a restart never repeats it), it clears when the pause ends so a later
-  // pause earns its own receipt, and the receipt itself asks for nothing.
-  function relayPauseAck(): void {
-    if (!root.svFeatureOn || !root.svCapLoaded) return
-    if (root.reloadPending || !root.stateDirDone) return
-    if (root.svConfig.capPerDay !== 0) {
-      if (root.svCapState.paused)
-        root.writeSvCapState({ episode: root.svCapState.episode, paused: false })
-      return
-    }
-    if (root.svCapState.paused) return
-    root.writeSvCapState({ episode: root.svCapState.episode, paused: true })
-    svPauseProc.command = StreetView.pauseArgs()
-    svPauseProc.running = true
-  }
-
-  function svStatus(): void {
-    svStatusProc.command = StreetView.statusArgs(root.svMeter, root.svConfig, new Date().toISOString())
-    svStatusProc.running = true
-  }
-
   // --- block events ---------------------------------------------------------
   // The burst being coalesced, in wall-clock milliseconds, 0 when nothing is
   // pending. Milliseconds since the epoch do not fit in an int.
@@ -263,10 +130,6 @@ BarWidget {
     // it each cycle would race this widget's own write and re-offer what it has
     // already offered.
     if (root.onboardingEnabled && !scanProc.running) scanProc.running = true
-    // The wallpaper files may not exist yet on a fresh install; retry those
-    // loads until they land, then the watchers keep them fresh.
-    if (root.stateDirDone && !root.svMeterFileOk) svMeterFile.reload()
-    if (root.stateDirDone && !root.svCapFileOk) svCapFile.reload()
   }
 
   // One line from udevadm monitor. Only a block-device line is answered, and the
@@ -396,7 +259,7 @@ BarWidget {
     while (root.noticeQueue.length > 0) {
       var notice = root.noticeQueue.shift()
       if (notice.kind === "new-partition" && !Mounts.candidateAlive(root.candidates, notice.key)) continue
-      if (notice.kind !== "streetview-cap") root.recordDelivered(notice)
+      root.recordDelivered(notice)
       return notice
     }
     return null
@@ -654,10 +517,8 @@ BarWidget {
     }
   }
 
-  // The state directory has to exist before any file in it can be read or
-  // watched: FileView cannot observe a file that has never been created. The
-  // Street View meter and cap files live here too, so the mkdir runs whether
-  // or not onboarding is on.
+  // The state directory has to exist before the file can be read or watched:
+  // FileView cannot observe a file that has never been created.
   Process {
     id: stateDirProc
     command: ["mkdir", "-p", Mounts.stateDir(Quickshell.env("HOME"))]
@@ -665,14 +526,10 @@ BarWidget {
       onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: state dir:", this.text.trim())
     }
     onExited: function(exitCode, exitStatus) {
-      if (exitCode !== 0) console.warn("mount-monitor: could not create the state dir, onboarding stays in memory and the wallpaper cannot write its meter")
-      // Nothing may write a state file before its directory is known to
-      // exist, and FileView cannot watch a file that has never been created:
-      // all three files reload here, and their watchers take it from there.
+      if (exitCode !== 0) console.warn("mount-monitor: could not create the onboarding state dir, onboarding stays in memory")
+      // Nothing may write the state file before its directory is known to exist.
       root.stateDirDone = true
       stateFile.reload()
-      svMeterFile.reload()
-      svCapFile.reload()
     }
   }
 
@@ -695,68 +552,6 @@ BarWidget {
     onLoadFailed: {
       root.reloadPending = false
       root.loadState("")
-    }
-  }
-
-  // The meter the service writes; this widget never writes it. The reload on
-  // change is what keeps the tooltip and the cap relay honest while the
-  // service counts.
-  FileView {
-    id: svMeterFile
-    path: StreetView.meterPath(root.svHome)
-    watchChanges: true
-    printErrors: false
-    onLoaded: {
-      root.svMeterFileOk = true
-      root.svMeterLoaded = true
-      root.loadSvMeter(text())
-    }
-    onFileChanged: reload()
-    onLoadFailed: {
-      root.svMeterFileOk = false
-      root.svMeterLoaded = true
-      root.loadSvMeter("")
-    }
-  }
-
-  // Which cap-warning episodes have already fired: this widget's own file,
-  // its own writer, so a warning fires once per episode across restarts.
-  FileView {
-    id: svCapFile
-    path: StreetView.capStatePath(root.svHome)
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: {
-      root.svCapFileOk = true
-      root.svCapLoaded = true
-      root.loadSvCapState(text())
-    }
-    onFileChanged: reload()
-    onLoadFailed: {
-      root.svCapFileOk = false
-      root.svCapLoaded = true
-      root.loadSvCapState("")
-    }
-  }
-
-  // The on-demand usage popup: it reports and asks for nothing, so no action
-  // rides on it and it needs no lane of its own.
-  Process {
-    id: svStatusProc
-    command: ["true"]
-    stderr: StdioCollector {
-      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: streetview status:", this.text.trim())
-    }
-  }
-
-  // The pause receipt rides its own transient process for the same reason:
-  // it reports, it never asks.
-  Process {
-    id: svPauseProc
-    command: ["true"]
-    stderr: StdioCollector {
-      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: streetview pause:", this.text.trim())
     }
   }
 
@@ -932,7 +727,7 @@ BarWidget {
   }
 
   Component.onCompleted: {
-    stateDirProc.running = true
+    if (root.onboardingEnabled) stateDirProc.running = true
     if (root.eventsEnabled && !udevProc.running) udevProc.running = true
   }
 
@@ -1042,22 +837,6 @@ BarWidget {
             }
           }
         }
-      }
-    }
-
-    // The wallpaper's own indicator: present only while the feature is on
-    // with a key, so nobody who has not opted in sees it. Hover shows the
-    // usage line; click sends the usage popup. It draws no ring - rings are
-    // disks, this is a meter the service owns.
-    BarIconButton {
-      id: svButton
-      visible: root.svFeatureOn
-      bar: root.bar
-      opticalSize: 22
-      text: "\uf03e"
-      tooltipText: root.svTooltip
-      onPressed: function(button) {
-        root.svStatus()
       }
     }
   }

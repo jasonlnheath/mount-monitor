@@ -2,8 +2,8 @@
 //
 // Imported by MountMonitor.qml (import "mounts.js" as Mounts) and loaded by
 // tests/mounts.test.mjs, tests/onboarding.test.mjs, tests/settings.test.mjs,
-// tests/click.test.mjs, tests/label-injection.test.mjs,
-// tests/spaced-mountpoint.test.mjs, and tests/streetview.test.mjs, so the plugin
+// tests/click.test.mjs, tests/label-injection.test.mjs, and
+// tests/spaced-mountpoint.test.mjs, so the plugin
 // settings recovery, the mount filter, the alert bands, the alert text, the argv
 // a clicked notification runs, the partition scan, the once-only onboarding
 // memory, and the trust boundary between the plugin's own instructions and what
@@ -855,10 +855,6 @@ function newPartitionPrompt(candidate) {
 // there was before onboarding existed.
 function promptFor(alert) {
   if (!alert) return ""
-  // Only the Street View cap warning carries its own copy (written in
-  // streetview.js and handed up by the widget); the kind check comes first so
-  // no other alert can smuggle a prompt field past the fixed copy.
-  if (alert.kind === "streetview-cap") return String(alert.prompt || "")
   if (alert.kind === "onboarding") return onboardingPrompt(alert)
   if (alert.kind === "new-partition") return newPartitionPrompt(alert.candidate)
   return agentPrompt(alert)
@@ -869,7 +865,6 @@ function promptFor(alert) {
 // are critical and never expire (isPersistent); a 80s or 90s warning is normal.
 function titleFor(alert) {
   if (!alert) return "Mount Monitor"
-  if (alert.kind === "streetview-cap") return String(alert.title || "")
   if (alert.kind === "onboarding") return "Mount Monitor — partitions found"
   if (alert.kind === "new-partition") return "Mount Monitor — new partition"
   return "Mount Monitor — " + (alert.band === 3 ? "CRITICAL" : "warning")
@@ -877,7 +872,6 @@ function titleFor(alert) {
 
 function actionFor(alert) {
   if (!alert) return "Run cleanup analysis"
-  if (alert.kind === "streetview-cap") return String(alert.action || "")
   if (alert.kind === "onboarding") return onboardingAction()
   if (alert.kind === "new-partition") return newPartitionAction()
   return notifyAction(alert)
@@ -885,7 +879,6 @@ function actionFor(alert) {
 
 function bodyFor(alert) {
   if (!alert) return ""
-  if (alert.kind === "streetview-cap") return String(alert.body || "")
   if (alert.kind === "onboarding") return onboardingBody(alert)
   if (alert.kind === "new-partition") return newPartitionBody(alert.candidate)
   return notifyBody(alert)
@@ -908,12 +901,10 @@ function timeoutFor(alert) {
   return isPersistent(alert) ? "0" : "6000"
 }
 
-// A full drive, every onboarding question, and the Street View cap warning
-// persist. A 80s or 90s warning is a heads-up, not a decision that has to be
-// answered.
+// A full drive and every onboarding question persist. A 80s or 90s warning is a
+// heads-up, not a decision that has to be answered.
 function isPersistent(alert) {
   return alert.band === 3 || alert.kind === "onboarding" || alert.kind === "new-partition"
-    || alert.kind === "streetview-cap"
 }
 
 // --- block events: how fast a plugged drive is noticed ----------------------
