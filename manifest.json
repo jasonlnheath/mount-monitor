@@ -5,12 +5,14 @@
   "version": "1.0.0",
   "author": "jasonlnheath",
   "license": "MIT",
-  "description": "A simple visualizer of hd usage that monitors when space gets too high, on any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or more it throws a notification and glows red. Notifications are configured to go to your agent of choice with a skill that suggests files to prune / compress, or what to move off a read-only mount. On first run it scans your partitions and asks which to monitor, and a partition that appears later notifies once.",
+  "description": "A simple visualizer of hd usage that monitors when space gets too high, on any disk mount you configure (btrfs, NTFS, ext4, ...). At 98% or more it throws a notification and glows red. Notifications are configured to go to your agent of choice with a skill that suggests files to prune / compress, or what to move off a read-only mount. On first run it scans your partitions and asks which to monitor, and a partition that appears later notifies once. Optionally, a Street View wallpaper service that rotates a panorama onto your desktop under a hard free-tier cap: it never sends a billable request unless the month's meter says there is free headroom.",
   "kinds": [
-    "bar-widget"
+    "bar-widget",
+    "service"
   ],
   "entryPoints": {
-    "barWidget": "MountMonitor.qml"
+    "barWidget": "MountMonitor.qml",
+    "service": "StreetView.qml"
   },
   "barWidget": {
     "displayName": "Mount Monitor",
