@@ -869,7 +869,7 @@ function promptFor(alert) {
 // are critical and never expire (isPersistent); a 80s or 90s warning is normal.
 function titleFor(alert) {
   if (!alert) return "Mount Monitor"
-  if (alert.kind === "streetview-cap") return String(alert.title || capWarningFallbackTitle())
+  if (alert.kind === "streetview-cap") return String(alert.title || "")
   if (alert.kind === "onboarding") return "Mount Monitor — partitions found"
   if (alert.kind === "new-partition") return "Mount Monitor — new partition"
   return "Mount Monitor — " + (alert.band === 3 ? "CRITICAL" : "warning")
@@ -877,7 +877,7 @@ function titleFor(alert) {
 
 function actionFor(alert) {
   if (!alert) return "Run cleanup analysis"
-  if (alert.kind === "streetview-cap") return String(alert.action || capWarningFallbackAction())
+  if (alert.kind === "streetview-cap") return String(alert.action || "")
   if (alert.kind === "onboarding") return onboardingAction()
   if (alert.kind === "new-partition") return newPartitionAction()
   return notifyAction(alert)
@@ -914,17 +914,6 @@ function timeoutFor(alert) {
 function isPersistent(alert) {
   return alert.band === 3 || alert.kind === "onboarding" || alert.kind === "new-partition"
     || alert.kind === "streetview-cap"
-}
-
-// Fallbacks for a streetview-cap alert whose copy did not arrive: they name
-// the situation without promising either option's outcome, which is
-// streetview.js's sentence to make.
-function capWarningFallbackTitle() {
-  return "Mount Monitor — Street View cap reached"
-}
-
-function capWarningFallbackAction() {
-  return "Street View usage"
 }
 
 // --- block events: how fast a plugged drive is noticed ----------------------

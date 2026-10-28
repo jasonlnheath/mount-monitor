@@ -25,7 +25,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the onboarding state file, the block-event detection decisions (the `udevadm`
   argv, what counts as a block event, how a burst coalesces into one rescan and why
   a settle rescan follows it, the restart backoff), and the copy for every
-  notification kind. Put
+  notification kind except the Street View cap warning's (streetview.js writes
+  that copy; the dispatch only hands it through). Put
   filter, threshold, candidate, setting, and alert-wording changes there so they
   are covered by the tests.
 - `mounts.js` is imported by QML (`import "mounts.js" as Mounts`) and loaded by
