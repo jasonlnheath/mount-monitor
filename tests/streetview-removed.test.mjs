@@ -16,7 +16,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";import path from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
