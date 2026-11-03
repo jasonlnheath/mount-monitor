@@ -45,7 +45,7 @@ Folded from `memory-monitor-plan-attack/report.md`:
   dropping or deferring RingKit; the plugin aligning oomd's limits; normalising the spec's
   `System Ram`/`System RAM` copy without the captain's word.
 - **Prior-attack findings this plan had missed are now open in the plan**: prior majors 15,
-  16, 18, 10, 11 and 21 (see *Fold list, corrected*).
+  16, 10 and 11, plus prior minors 18 and 21 (see *Fold list, corrected*).
 
 ---
 
@@ -221,9 +221,12 @@ Rules, decided here:
    it survived, and a dead arm surfaces as a failed guard — never as a silent absence.
 5. **The toast may not claim what did not happen.** The verbatim critical copy — "Agent has
    been notified and is guarding against OOM." — is emitted **only when the arm actually
-   started**. The three states where it did not are decided now, in the plan, not at
-   implementation, because the rest of the toast surface is pinned verbatim copy and these
-   are the most important words in the product:
+   started**. The three states where that claim does not hold are decided now, in the plan,
+   not at implementation, because the rest of the toast surface is pinned verbatim copy and
+   these are the most important words in the product. Two are queue-time decisions, taken
+   because the arm never started; the third — the dead arm — is discovered after emission,
+   which is why its copy and its log row are written by the arm lifecycle, not chosen at
+   queue time:
 
    - Standing guard declined at onboarding (title `Memory Monitor`):
      ```
@@ -259,7 +262,11 @@ Rules, decided here:
    `["qs", "ipc", "call", "memory-monitor", "openDetail"]` — `parseExecArgv` accepts it
    (`qs` has no leading dash), it survives a shell restart because the handler is re-created
    with the shell, and it never starts an agent. The live `-A default=` action calls the same
-   handler. Amber and red keep the agent-prompt click the spec's copy describes.
+   handler. Amber and red keep the agent-prompt click the spec's copy describes. The three
+   no-guard critical kinds (guard-off, guard-refused, guard-died) click the agent prompt too:
+   in those states no agent is armed — that is what makes them those states — so the
+   never-a-second-agent rationale does not apply, and the single-flight lane is free. The
+   detail-window pin holds for every critical kind that has an armed agent.
 
 ### B5 — coexistence: one HD owner, one onboarding surface, one alert per drive
 
@@ -320,7 +327,7 @@ like on day one.
   then `focusApp`). The spec copy is already one-action compliant. No multi-button toasts
   anywhere in v1. Rung choices, if the captain wants them later, live in the widget-owned
   detail panel, never in a notification.
-- **Measurement gaps (prior majors 4–9, 19–20) — labelled honestly.** **Folded:** 5 (swap
+- **Measurement gaps (prior majors 4–9, prior minors 19–20) — labelled honestly.** **Folded:** 5 (swap
   absent from the RAM design — now in the RAM set), 9 (the measurement cannot see the
   compositor — the clamped unattributed VRAM row), 19 (its polling-cost claim held; the
   number is re-measured at 22 ms here, and the jitter premise it rejects is dropped with it —
@@ -360,13 +367,13 @@ like on day one.
 - **Marketplace-shipped skills (prior major 12).** v1 ships only generic, analysis-only skill
   seeds; **Strata-specific action instructions never ship from the plugin** — Q6 makes skills
   something developed WITH the user during onboarding and normal use.
-- **Rig facts age (prior major 20).** Every rig number quoted here was measured live (2026-11-02
+- **Rig facts age (prior minor 20).** Every rig number quoted here was measured live (2026-11-02
   by the prior attack, 2026-11-03 by this fold pass and by the attack on this plan). None is
   load-bearing for a shipped threshold until the baseline week confirms it.
-- **Process lifecycle (prior major 22a).** Every child process gets Mount Monitor's
+- **Process lifecycle (prior minor 22a).** Every child process gets Mount Monitor's
   hardening: timeouts, watchdog release, one-at-a-time lanes, restart backoff. A wedged
   `nvidia-smi` must not wedge the bar.
-- **Finding 22's other sub-items, each with a disposition.** 22b (no validation phase) is
+- **Prior minor 22's other sub-items, each with a disposition.** 22b (no validation phase) is
   answered by the baseline-week design: values ship provisional in PR 2 and PR 7 re-anchors
   them from the log before any band is treated as final — the validation phase the finding
   demands, run on install week one. 22c (no non-quickshell alert path) is the *Out of scope*
@@ -387,26 +394,26 @@ The previous revision's fold list claimed more than it delivered. Corrected abov
 withdrawn and replaced. Prior findings the previous plan never addressed are now named in
 this plan:
 
-- **prior 16 — the widget is silent in exactly the resting state the captain most wants
+- **prior major 16 — the widget is silent in exactly the resting state the captain most wants
   reported.** Addressed by B1's standing-vs-event rule plus the onboarding resting-band
   report: the resting state is carried by the badge, the detail window and the log, and the
   toast stream is reserved for crossings.
-- **prior 18 — the colour-blind defence covers red only.** Addressed in the bar contract:
+- **prior minor 18 — the colour-blind defence covers red only.** Addressed in the bar contract:
   severity carries **shape as well as hue** — amber is a partial/hollow ring fill with a
   steady badge, red is a full badge plus a warning glyph, critical adds the pulse and halo.
   Amber-versus-red (the deuteranopia pair) is distinguishable without colour, and the glyph
   carries type. Verified by the pixel-diff loop, not by prose.
-- **prior 15 — RingKit vendoring is weaker than claimed for marketplace installs, and global
+- **prior major 15 — RingKit vendoring is weaker than claimed for marketplace installs, and global
   auto-merge removes the human gate.** Addressed by narrowing the claim: v1 ships RingKit as
   an in-repo module with one consumer and **no vendoring and no sync script**; the
   marketplace vendoring question is the captain's ship-time call (open question 1), and this
   plan assumes no automatic merge gate anywhere.
-- **prior 10 and 11 — the levers.** Still out of v1 (Q1: monitor-first), but now named as an
+- **prior majors 10 and 11 — the levers.** Still out of v1 (Q1: monitor-first), but now named as an
   open lever inventory the captain arms explicitly later, including the finding that rung-1
   is documented by the engine as blocking or failing exactly when pressure is highest, and
   that automatic yield levers already exist on both sides. v1's contribution is the baseline
   log those decisions will be made from.
-- **prior 21 — "never drop caches" reasoning is weaker than stated.** Not carried: this plan
+- **prior minor 21 — "never drop caches" reasoning is weaker than stated.** Not carried: this plan
   makes no claim about dropping caches. If PR 7's re-anchoring wants one, it is measured then,
   not asserted now.
 
@@ -423,7 +430,7 @@ this plan:
 | 12 — copy fidelity pins the wrong things | **folded, with the normalisation rejected** | `XX%` = the live reading; the parenthetical's type words named; onboarding and guard copy pinned in the plan; the spec's `System Ram`/`System RAM` kept verbatim and flagged (open question 4), as is the resource-less critical line. |
 | 13 — the insist-guard re-fires a restart-surviving notice | **folded** | Stable `mem-guard-ask` identity, re-fired at shell start only, replaced via `notify-send -p` + `-r <id>`, recorded when delivered — Mount Monitor's `onboarded` discipline. |
 | 14 — RingKit has one consumer and its bands will disagree | **folded, RingKit kept** | Framed as a bet, not a fact; a RingKit ↔ `mounts.js bandFor` conformance test pins the shared band semantics; contracts with no v1 consumer labelled as such. |
-| 15 — the fold list claims more than it delivers | **folded** | The fold list is re-labelled: deferred items marked deferred and kept open, major 4's withdrawn fix named, and prior majors 15, 16, 18, 10, 11, 21 opened in *Fold list, corrected*. |
+| 15 — the fold list claims more than it delivers | **folded** | The fold list is re-labelled: deferred items marked deferred and kept open, major 4's withdrawn fix named, and prior majors 15, 16, 10, 11 plus prior minors 18, 21 opened in *Fold list, corrected*. |
 
 ## Rejected, and why (named, not silently dropped)
 
@@ -470,7 +477,7 @@ this plan:
   size (~22 px). Color carries severity: red `#ff2d2d` (Mount Monitor's `alertRed`, reused),
   amber `#fbbf24` — a new RingKit palette token, since Mount Monitor ships only `alertRed`
   (`MountMonitor.qml:78`) — and critical glowing red (v1's pulse + halo treatment, reused).
-- **Severity also carries shape** (prior major 18): amber = partial/hollow ring fill, steady
+- **Severity also carries shape** (prior minor 18): amber = partial/hollow ring fill, steady
   badge; red = full badge plus a warning glyph; critical = the pulse and halo on top. A
   latched band renders as latched. Color-blind redundancy: glyph = type, shape = severity,
   pulse = critical, and the tooltip and detail window always carry the numbers in text.
@@ -587,11 +594,17 @@ by this plan alone. The threshold is shown in the detail window, the tooltip, an
   never-expiring notice lane. critical = critical urgency, timeout 0, never-expiring notice
   lane, and **band escalation preempts an unanswered lower-band toast**.
 - **Critical's arm happens at queue time** (B4): the widget launches the agent prompt itself,
-  single-flight and budget-gated, so the copy's claim is true *when it is emitted*; the
-  guard-off, guard-refused and guard-died variants are what the widget emits when it is not.
-- **Click actions:** amber and red = the agent prompt. critical = open the detail window
-  through `["qs","ipc","call","memory-monitor","openDetail"]` — never a second agent on top of
-  the armed one.
+  single-flight and budget-gated, so the copy's claim is true *when it is emitted*. Guard-off
+  and guard-refused are the queue-time variants, emitted because the arm never started.
+  Guard-died is not a queue-time alternative: it is a post-start state, discovered after the
+  claim has been emitted, and its copy and its log row are written by the arm lifecycle when
+  the death is found (B4 rule 4).
+- **Click actions:** amber and red = the agent prompt. critical with an armed agent = open the
+  detail window through `["qs","ipc","call","memory-monitor","openDetail"]` — never a second
+  agent on top of the armed one. The three no-guard critical kinds (guard-off, guard-refused,
+  guard-died) are exempt from that pin and click the agent argv instead: no agent is armed in
+  those states, so the rationale does not apply and the single-flight lane is free.
+  Single-flight stays machine-wide whatever kind of click launches an agent (B4).
 - The dual click path is carried verbatim from Mount Monitor:
   `-h STRING:omarchy-exec-argv:<json argv>` hint (survives shell restarts via persisted
   history) plus the live `-A default=` action. The argv is a typed list through `agentArgv` —
@@ -742,7 +755,7 @@ live instances produce one alert event, one log row, and one arm.
 | 2 | **Measurement + band decisions**: parsers and argvs (findmnt HD rows; meminfo/PSI/swaps/zramctl; nvidia-smi memory + compute apps + clamped unattributed remainder), `ramUsedPct` numerator, `validateThresholds` with unset critical, band evaluation + measured hysteresis, `psiStallFloor` re-alert gate, swap/zram escalation, `hdDeviceKey` device dedup, absent-mount rule, `mostSevere`, `pollIntervalMs`, oomd discovery/parse, baseline record schema (absolute numbers) + append/rotate rules, toast templates + dispatch (`promptFor`/`titleFor`/`actionFor`/`bodyFor`/`urgencyFor`/`timeoutFor`), `agentArgv` | memory.js |
 | 3 | **Bar widget**: MM logo ring (white, plain), three graphic badges, severity-by-shape (amber hollow / red glyph / critical pulse+halo), most-severe display with the absent-mount rule, adaptive-poll timers, child-process timeout/watchdog/backoff hardening, state FileView, baseline logging wired to every sample, band-escalation preemption + 120 s watchdog in the alert queue, **screen-count-independent queue/append/arm guards**, **the visual verification loop** (install to the plugins directory, `omarchy restart shell`, grim pixel-diff of the bar against the previous render — plugin QML does not hot-reload, and eyeballing two unchanged screenshots reads as a change) | MemoryMonitor.qml |
 | 4 | **Detail window**: click-to-open panel with the full per-type picture (absolute GiB/MiB beside every percent, swap/zram, PSI, oomd block, clamped unattributed VRAM row, "your ceiling" vs "the kernel's ceiling", "Alerts you did not see", latched/unavailable visibility), threshold value boxes with the **named** widget and key mapping for all three input modes, live validation, persistence to the settings state file | MemoryMonitor.qml + memory.js validators |
-| 5 | **Toasts + agent routing**: notify-send plumbing with the dual click path, verbatim copy emission (character-pinned per kind at defaults), amber normal-urgency + DND-silenced-but-recorded, red critical-urgency/timeout-0 bypass, critical timeout-0 law, `notifications.json` `dnd` read, critical proactive arm on the single-flight budget-gated lane with the guard-off, guard-refused and guard-died copies, `--inline` versus terminal measured on the rig, `qs ipc call` click for critical | memory.js copy + QML lanes |
+| 5 | **Toasts + agent routing**: notify-send plumbing with the dual click path, verbatim copy emission (character-pinned per kind at defaults), amber normal-urgency + DND-silenced-but-recorded, red critical-urgency/timeout-0 bypass, critical timeout-0 law, `notifications.json` `dnd` read, critical proactive arm on the single-flight budget-gated lane with the guard-off, guard-refused and guard-died copies, `--inline` versus terminal measured on the rig, `qs ipc call` click for armed critical (agent argv for the no-guard kinds) | memory.js copy + QML lanes |
 | 6 | **Onboarding + skills**: the ceiling question (per-type report → recommendation → ask → record `setBy`), the insist-guard ask with its pinned copy and its delivered-at-queue-time identity, health-check run + verified arm, `memory-health` skill seed, sibling `install.sh`, **the visual verification loop for the onboarding notices** | memory.js onboarding + skills/ |
 | 7 | **Week-two re-anchor** (time-gated: after one week of baseline logs): distributions from the log → **recommended** thresholds, descent margins, `psiStallFloor`, VRAM anchors, and the arm budget; report to the captain; approved values applied only as defaults for ceilings the user never set, and as proposals the user accepts in the detail window | report + memory.js defaults |
 
