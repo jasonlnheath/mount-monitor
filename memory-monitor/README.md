@@ -211,5 +211,25 @@ conformance check, the hostile-label regression, the multi-instance
 one-alert/one-log-row/one-arm check, the install-layout check, an `install.sh`
 syntax check, a `SKILL.md` check, and `qmllint` on the QML. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
-the gates, and the visual deliverables are verified by installing, restarting
-the shell, and pixel-diffing the bar against the previous render.
+the gates.
+
+### Verifying a change on the rig
+
+Plugin QML does not hot-reload, and a bar change is only proven once the bar is
+actually drawn. The loop:
+
+```bash
+memory-monitor/install.sh
+# add { "id": "io.github.jasonlnheath.memory-monitor" } to the bar section of
+# ~/.config/omarchy/shell.json, then:
+omarchy restart shell
+grim /tmp/mm-bar.png                      # the bar, unmodified
+magick compare -metric AE /tmp/mm-bar.png memory-monitor/bar-screenshot.png null:   # 0 pixels
+```
+
+`compare -metric AE` reports the count of pixels that differ: an unrelated change
+must report `0`. `memory-monitor/bar-screenshot.png` is the saved render the next
+change is diffed against, so a verified change updates it. Force a band without waiting for a real emergency with
+`"testPct": 91` on the widget's `shell.json` entry, and force the resource the
+badge names by leaving the real readings in place. Remove `testPct` and restart
+the shell again before the render counts as verified.
