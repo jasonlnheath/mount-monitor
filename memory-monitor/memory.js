@@ -2144,6 +2144,54 @@ function mib(kb) {
   return (value / 1024).toFixed(0) + " MiB";
 }
 
+// Panel copy. The detail window draws; every sentence it prints is this file's,
+// so one sentence never lives in two places and drifts. Numbers a measurement
+// produced are passed in; none of these take a device's own words.
+function vramUnattributedText(valueMib) {
+  const value = asNumber(valueMib);
+  return (
+    "desktop / compositor (unattributed): " + (value === null ? "unknown" : value) +
+    " MiB - nvidia-smi cannot see the compositor; this remainder is not a process list"
+  );
+}
+
+function hdRowNote(ro, fstype) {
+  return normalizeBool(ro, false)
+    ? "read-only - only what can be moved off it"
+    : sanitizeText(fstype, 32);
+}
+
+function noWatchedDrivesText() {
+  return "no watched drives - Mount Monitor's mounts setting decides which drives are watched";
+}
+
+function twoCeilingsNote() {
+  return "Your ceiling is when Memory Monitor alerts. The kernel's is when oomd kills. "
+    + "They are different numbers, and only one of them is yours.";
+}
+
+function guardNoteText() {
+  return "The guard is the agent Memory Monitor asks to run when your critical line is crossed. "
+    + "It monitors and reports; it does not kill anything. "
+    + "Arming it is refused when this machine has no headroom for it.";
+}
+
+function guardArmTooltip() {
+  return "Let Memory Monitor arm the guard at your critical line";
+}
+
+function guardDeclineTooltip() {
+  return "Record a decline: a critical still notifies you, with the guard-off copy";
+}
+
+function healthCheckTooltip() {
+  return "Ask the agent to read the baseline log and report";
+}
+
+function setCeilingUnavailableText() {
+  return "the monitor is not ready";
+}
+
 function kernelCeilingText(oomd) {
   const o = oomd || {};
   if (!normalizeBool(o.oomdActive, false)) return "systemd-oomd is not active - no kernel ceiling is in force";
@@ -2602,6 +2650,10 @@ var DEGRADATIONS = {
   "claim-unretractable": {
     surface: "detail window + log",
     text: "A guard died and its claim toast carried no captured id, so the claim could not be retracted. A fresh notice was sent instead.",
+  },
+  "arm-orphaned": {
+    surface: "toast (guard-died copy) + detail window + log",
+    text: "The shell restarted while the guard was live. The guard did not survive.",
   },
   "wedged-process": {
     surface: "console + detail window",

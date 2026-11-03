@@ -105,9 +105,11 @@ test("a dead guard retracts its claim by the captured id", () => {
   assert.equal(died.args[died.args.indexOf("-r") + 1], "99");
   assert.match(died.args[died.args.length - 1], /The guard did not survive/);
 
-  const noId = Memory.retractClaimFor({ outcome: "died", claimId: "", pct: 98 });
+  const noId = Memory.retractClaimFor({ outcome: "died", type: "ram", key: "ram", id: Memory.memId("ram"), claimId: "", pct: 98 });
   assert.equal(noId.replaceable, false);
-  assert.equal(noId.args, null);
+  assert.equal(noId.args.includes("-r"), false, "nothing to replace: the widget sends a fresh notice");
+  assert.equal(noId.args[0], "notify-send", "the fresh notice is memory.js's argv, not one the widget builds");
+  assert.match(noId.args[noId.args.length - 1], /The guard did not survive/);
   assert.match(Memory.degradationText("claim-unretractable"), /could not be retracted/);
 
   assert.equal(Memory.retractClaimFor({ outcome: "survived", claimId: "99" }), null);

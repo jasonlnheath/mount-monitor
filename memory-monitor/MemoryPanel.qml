@@ -49,7 +49,7 @@ Panel {
   }
 
   function setCeiling(type, level, value) {
-    var result = callMonitor("setCeiling", [type, level, value], { ok: false, errors: ["the monitor is not ready"] })
+    var result = callMonitor("setCeiling", [type, level, value], { ok: false, errors: [Memory.setCeilingUnavailableText()] })
     ceilingError = result.ok ? "" : result.errors.join("; ")
     if (result.ok) ceilingError = ""
   }
@@ -181,9 +181,7 @@ Panel {
         }
         Text {
           visible: root.vram !== null
-          text: root.vram === null ? "" : "desktop / compositor (unattributed): "
-            + root.vram.vramUnattributedMib + " MiB - nvidia-smi cannot see the compositor; "
-            + "this remainder is not a process list"
+          text: root.vram === null ? "" : Memory.vramUnattributedText(root.vram.vramUnattributedMib)
           color: root.dim
           wrapMode: Text.Wrap
           font.pixelSize: Style.font.bodySmall
@@ -217,7 +215,7 @@ Panel {
               Layout.fillWidth: true
             }
             Text {
-              text: modelData.device + "   " + (modelData.ro ? "read-only - only what can be moved off it" : modelData.fstype)
+              text: modelData.device + "   " + Memory.hdRowNote(modelData.ro, modelData.fstype)
               color: root.dim
               font.pixelSize: Style.font.caption
               Layout.fillWidth: true
@@ -226,7 +224,7 @@ Panel {
         }
         Text {
           visible: root.devices.length === 0
-          text: "no watched drives - Mount Monitor's mounts setting decides which drives are watched"
+          text: Memory.noWatchedDrivesText()
           color: root.dim
           wrapMode: Text.Wrap
           font.pixelSize: Style.font.bodySmall
@@ -317,7 +315,7 @@ Panel {
           Layout.fillWidth: true
         }
         Text {
-          text: "Your ceiling is when Memory Monitor alerts. The kernel's is when oomd kills. They are different numbers, and only one of them is yours."
+          text: Memory.twoCeilingsNote()
           color: root.dim
           wrapMode: Text.Wrap
           font.pixelSize: Style.font.caption
@@ -338,7 +336,7 @@ Panel {
           Layout.fillWidth: true
         }
         Text {
-          text: "The guard is the agent Memory Monitor asks to run when your critical line is crossed. It monitors and reports; it does not kill anything. Arming it is refused when this machine has no headroom for it."
+          text: Memory.guardNoteText()
           color: root.dim
           wrapMode: Text.Wrap
           font.pixelSize: Style.font.caption
@@ -349,13 +347,13 @@ Panel {
           Item { Layout.fillWidth: true }
           PanelActionButton {
             iconText: "turn guard on"
-            tooltipText: "Let Memory Monitor arm the guard at your critical line"
+            tooltipText: Memory.guardArmTooltip()
             foreground: root.fg
             onClicked: if (monitor) monitor.applyGuardAnswer()
           }
           PanelActionButton {
             iconText: "turn guard off"
-            tooltipText: "Record a decline: a critical still notifies you, with the guard-off copy"
+            tooltipText: Memory.guardDeclineTooltip()
             foreground: root.fg
             onClicked: if (monitor) monitor.declineGuardAsk()
           }
@@ -384,7 +382,7 @@ Panel {
           }
           PanelActionButton {
             iconText: "health check"
-            tooltipText: "Ask the agent to read the baseline log and report"
+            tooltipText: Memory.healthCheckTooltip()
             foreground: root.fg
             onClicked: root.runHealthCheck()
           }

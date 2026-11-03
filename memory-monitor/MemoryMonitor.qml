@@ -649,7 +649,7 @@ BarWidget {
     for (var i = arms.length - 1; i >= 0 && i >= arms.length - 5; i--) {
       var record = arms[i];
       if (record && record.outcome === "started") {
-        finishArm("died", false, ["the shell restarted while the arm was live"]);
+        finishArm("died", false, [Memory.degradationText("arm-orphaned")]);
         return;
       }
     }
