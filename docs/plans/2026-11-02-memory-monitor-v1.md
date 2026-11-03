@@ -204,8 +204,11 @@ Rules, decided here:
 1. **Single-flight, machine-wide arm lane.** One agent arm at a time across the whole
    machine, keyed by an event identity (resource type + band + measurement epoch), with a
    watchdog kill at a named timeout and a log row recording the pid, the outcome, and whether
-   the arm survived. A second critical while an arm is live does not start a second agent; it
-   appends to the live arm's record and re-notifies.
+   the arm survived. The arm record also carries the claim toast's notification id (rule 5)
+   and is written to the plugin state file, so a widget generation that starts up and finds
+   an arm whose guard did not survive can still retract the standing claim by the persisted
+   id. A second critical while an arm is live does not start a second agent; it appends to
+   the live arm's record and re-notifies.
 2. **An arm budget gate.** Before launching, `memory.js` reads `MemAvailable`, PSI, and swap
    against the arm's measured cost (agent RSS plus the terminal it opens). If the machine has
    no headroom for the guard, the widget **does not launch** — it emits the guard-refused
@@ -252,8 +255,14 @@ Rules, decided here:
      (`mem-guard-claim`, captured from `notify-send -p`/`--print-id` at emission), and the
      arm lifecycle re-sends the died notice with `-r <id>` — the insist-guard's replacement
      mechanism — at the moment it records the death, so a sentence claiming an agent is
-     guarding cannot outlive the arm it names. The death's log row records both the claim
-     and the retraction.
+     guarding cannot outlive the arm it names. The captured id is a field of the arm record
+     (rule 1), written to the plugin state file, so the retraction survives the shell the way
+     the toast it retracts does: a widget that starts up and finds an arm whose guard did not
+     survive emits the died notice and replaces the standing claim by that persisted id. When
+     no id was captured — the claim's emission failed, or an older record predates the field —
+     the claim cannot be replaced: the widget emits a fresh died notice and its log row says
+     the claim could not be retracted, rather than leaving the guarantee unmet in silence.
+     The death's log row records both the claim and the retraction.
    `97%` is the live reading (see *Copy*, below). The dead arm carries its own line: "The
    guard could not start." is the refused state's sentence, and said of an arm that started
    and was killed it would deny the start that happened. These variants are the plan's copy,
@@ -607,7 +616,8 @@ by this plan alone. The threshold is shown in the detail window, the tooltip, an
   Guard-died is not a queue-time alternative: it is a post-start state, discovered after the
   claim has been emitted, and its copy and its log row are written by the arm lifecycle when
   the death is found (B4 rule 4) — where it also replaces the standing claim toast by
-  notification identity (`mem-guard-claim`, `-r <id>`), so the claim that an agent is
+  notification identity (`mem-guard-claim`, `-r <id>`; the id persists with the arm record,
+  so the retraction survives a shell restart), so the claim that an agent is
   guarding cannot outlive the arm.
 - **Click actions:** amber and red = the agent prompt. critical = open the detail window
   through `["qs","ipc","call","memory-monitor","openDetail"]` — every critical kind, with or
@@ -633,7 +643,7 @@ by this plan alone. The threshold is shown in the detail window, the tooltip, an
   used, available (kB), used%, PSI `some`/`full` avg10/60/300, swap used/total per device,
   zram disk/data/compr/total; VRAM total/used/free MiB, per-app sums, unattributed remainder;
   oomd block; the widget's band decisions, hysteresis state, poll interval, arm records (pid,
-  outcome, survived), and every alert event with its delivery verdict (`shown |
+  outcome, survived, claim-toast id), and every alert event with its delivery verdict (`shown |
   silenced-dnd | unknown`). A percent-only log cannot answer "how fast did it climb", and PR 7
   and the fleet side both need the raw numbers.
 - Logging never blocks monitoring — a failed log append is logged to the console and monitoring
