@@ -3,7 +3,10 @@
 # bands, hysteresis, the available-based RAM signal, swap escalation, oomd
 # visibility, VRAM, drive dedup, toast copy, DND routing, the guard arm, the
 # baseline log, onboarding, the trust boundary), a conformance check that pins
-# RingKit against memory.js and mounts.js, an install.sh syntax check, a skills/
+# RingKit against memory.js and mounts.js, the multi-instance gate (two live
+# widgets produce one alert, one log row, one arm), a check that install.sh
+# really installs a self-contained plugin at the one level the shell's registry
+# scans, an install.sh syntax check, a skills/
 # SKILL.md check, then a QML syntax/import check over MemoryMonitor.qml and
 # MemoryPanel.qml when Qt's qmllint is on the box.
 #
