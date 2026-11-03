@@ -67,8 +67,10 @@ actually get. On this rig, measured 2026-11-03 by this fold pass, `MemAvailable`
 `MemFree` (2,051,652 kB against 3,473,948 kB of 65,588,588 kB total) because the reclaimable
 cache is not reclaimable and the low watermarks subtract: the kernel's own estimate is worse
 than the naive one, which is exactly the direction a monitor must not be wrong in.
-`MemAvailable` is also the quantity the captain's own detail window already promises
-("available (absolute + %)"), so the band and the picture read the same number.
+`MemAvailable` is also the quantity this plan's own detail-window section already promises
+("available (absolute + %)" — this plan's earlier revision's wording, not the captain's; the
+spec itself promises only "a window showing ALL fine details"), so the band and the picture
+read the same number.
 
 **Why not PSI as the band:** PSI is a stall measure, not a capacity measure. On this rig it
 reads `avg10=0.00` through 40 minutes of a pressure-free machine and `some avg10=1.02` when
@@ -206,8 +208,8 @@ Rules, decided here:
    appends to the live arm's record and re-notifies.
 2. **An arm budget gate.** Before launching, `memory.js` reads `MemAvailable`, PSI, and swap
    against the arm's measured cost (agent RSS plus the terminal it opens). If the machine has
-   no headroom for the guard, the widget **does not launch** — it emits the guard-failed copy
-   below and logs `arm: skipped (no headroom)`. The floor is provisional in PR 2 and
+   no headroom for the guard, the widget **does not launch** — it emits the guard-refused
+   copy below and logs `arm: skipped (no headroom)`. The floor is provisional in PR 2 and
    re-anchored from the baseline log in PR 5/7; the gate exists in the design from day one.
 3. **The arm's terminal is a named cost, and `--inline` is the tested lever.**
    `omarchy agent prompt --inline` skips `omarchy-launch-tui`. Whether the default agent's
@@ -219,7 +221,7 @@ Rules, decided here:
    it survived, and a dead arm surfaces as a failed guard — never as a silent absence.
 5. **The toast may not claim what did not happen.** The verbatim critical copy — "Agent has
    been notified and is guarding against OOM." — is emitted **only when the arm actually
-   started**. The two states where it did not are decided now, in the plan, not at
+   started**. The three states where it did not are decided now, in the plan, not at
    implementation, because the rest of the toast surface is pinned verbatim copy and these
    are the most important words in the product:
 
@@ -229,14 +231,23 @@ Rules, decided here:
      Device has reached 97% usage.
      The standing guard is off. Click to open an agent, otherwise ignore.
      ```
-   - Arm refused for no headroom, or the arm died (title `Memory Monitor`):
+   - Arm refused for no headroom — the guard never started (title `Memory Monitor`):
      ```
      CRITICAL ALERT!
      Device has reached 97% usage.
      The guard could not start. Click to open an agent, otherwise ignore.
      ```
-   `97%` is the live reading (see *Copy*, below). These variants are the plan's copy, are
-   pinned in tests, and are flagged for the captain's word as a change to the spec's copy
+   - The arm started and died — killed with the emergency it guards against (title
+     `Memory Monitor`):
+     ```
+     CRITICAL ALERT!
+     Device has reached 97% usage.
+     The guard did not survive. Click to open an agent, otherwise ignore.
+     ```
+   `97%` is the live reading (see *Copy*, below). The dead arm carries its own line: "The
+   guard could not start." is the refused state's sentence, and said of an arm that started
+   and was killed it would deny the start that happened. These variants are the plan's copy,
+   are pinned in tests, and are flagged for the captain's word as a change to the spec's copy
    family (open question 5) — but the plan does not ship a sentence that is false.
 
 6. **Critical's click opens the detail window, and it is a real mechanism.** The previous
@@ -309,15 +320,16 @@ like on day one.
   then `focusApp`). The spec copy is already one-action compliant. No multi-button toasts
   anywhere in v1. Rung choices, if the captain wants them later, live in the widget-owned
   detail panel, never in a notification.
-- **Measurement gaps (prior majors 4–9, 19–20, 22b) — labelled honestly.** **Folded:** 5
-  (swap in the RAM set), 9 (unattributed VRAM), 19 (poll cost, corrected number), 20 (rig
-  facts age), 22a (process lifecycle), 13 (queue and watchdog law), 12 (skills gate), 14
-  (cursor-marker rule written for future consumers only). **Deliberately deferred to PR 7,
-  still open:** 6, 7, 8 (the VRAM anchors — the baseline week must speak before any VRAM
-  number is treated as final). **Changed by this revision, not deferred:** 4 — the previous
-  revision claimed the 2 pp descent margin fixed the latching failure; B1 shows it is
-  unreachable on this rig, so the fix is now the PSI re-alert gate plus measured margins, and
-  the claim is withdrawn.
+- **Measurement gaps (prior majors 4–9, 19–20) — labelled honestly.** **Folded:** 5 (swap
+  absent from the RAM design — now in the RAM set), 9 (the measurement cannot see the
+  compositor — the clamped unattributed VRAM row), 19 (its polling-cost claim held; the
+  number is re-measured at 22 ms here, and the jitter premise it rejects is dropped with it —
+  v1 carries no jitter defense), 20 (rig facts age). **Deliberately deferred to PR 7, still
+  open:** 6, 7, 8 (the VRAM anchors — the baseline week must speak before any VRAM number is
+  treated as final). **Changed by this revision, not deferred:** 4 — the previous revision
+  claimed the 2 pp descent margin fixed the latching failure; B1 shows it is unreachable on
+  this rig, so the fix is now the PSI re-alert gate plus measured margins, and the claim is
+  withdrawn.
 - **Swap in the RAM picture (prior major 5, and this attack's minor 1).** The recorded
   emergency was a **swap** rule firing at 100% swap. The RAM measurement set is MemAvailable +
   PSI + swap used% + zram fill% + zram compression ratio (`/proc/swaps`, `zramctl`,
@@ -354,6 +366,16 @@ like on day one.
 - **Process lifecycle (prior major 22a).** Every child process gets Mount Monitor's
   hardening: timeouts, watchdog release, one-at-a-time lanes, restart backoff. A wedged
   `nvidia-smi` must not wedge the bar.
+- **Finding 22's other sub-items, each with a disposition.** 22b (no validation phase) is
+  answered by the baseline-week design: values ship provisional in PR 2 and PR 7 re-anchors
+  them from the log before any band is treated as final — the validation phase the finding
+  demands, run on install week one. 22c (no non-quickshell alert path) is the *Out of scope*
+  entry named and rejected with minor 11. 22d (multi-GPU) is the out-of-scope
+  first-card-only rule, named honestly in the detail window. 22e (the widgets' own memory
+  footprint) is **noted, not folded**: v1 makes no footprint claim — the widget is QML inside
+  the shell's existing quickshell process and adds no resident process of its own; a
+  footprint number, if the captain ever wants one, comes from the baseline week, not from
+  this plan.
 - **Latching (prior major 4).** A latched band is visible as latched in the bar and the detail
   window; a stuck band must never read as healthy; an unreachable descent margin is reported
   as unreachable (B1 rule 4).
@@ -453,6 +475,16 @@ this plan:
   latched band renders as latched. Color-blind redundancy: glyph = type, shape = severity,
   pulse = critical, and the tooltip and detail window always carry the numbers in text.
 
+**The swap-ring tension, named for the captain (open question 7).** The ask this revision is
+contracted against names "a System Ram ring and a System Swap ring in the bar"; the captured
+spec's design sections name exactly three badges — "hard drive badge, RAM badge, VRAM badge"
+— and exactly three thresholded controls ("hard drive, VRAM, system RAM"), and no captured
+artifact contains a swap ring. That tension is the captain's to resolve, not the plan's to
+decide by silence: until his word, swap ships as this plan already designs it — in the RAM
+*picture* (swap used%, zram, in the detail window, tooltip and log) and as the RAM alert's
+**escalator** — with **no fourth badge and no fourth thresholded control**. A System Swap
+ring would be a fourth badge: a bar-contract change taken only on his ruling.
+
 ### Thresholds
 
 - **Amber = 80% default. Red = 90% default. Critical = user-set, unset until set** — any value
@@ -530,8 +562,14 @@ as captured and flagged for the captain (open question 4).
 **`XX%` is the live reading, rounded up to a whole percent — not the threshold.** The previous
 revision interpolated the threshold, which understates the emergency by exactly the margin
 that matters (a mount at 97% against a 95% ceiling was told "reached 95%"). Amber and red
-have the same problem when a poll jumps past the line: the copy reports what was measured.
-The threshold is shown in the detail window, the tooltip, and the log.
+have the same problem when a poll jumps past the line: the copy reports what was measured —
+at 81.3% the amber body says "82% usage." Stated plainly: that rule **reinterprets the
+captured amber and red lines**, which bake the default threshold numbers in ("has reached
+80% usage." / "has reached 90% usage."), so under it the captured line is emitted verbatim
+only when the reading is exactly the threshold. The table below keeps the capture; at
+emission the number position carries the live reading. That is a product-copy ruling, and it
+is listed for the captain with the other copy rulings (open question 4) rather than decided
+by this plan alone. The threshold is shown in the detail window, the tooltip, and the log.
 
 | Kind | Title | Body (verbatim template) |
 |---|---|---|
@@ -539,7 +577,8 @@ The threshold is shown in the detail window, the tooltip, and the log.
 | red | `Memory Monitor` | `WARNING: RED ALERT` ⏎ `Device (HD/VRAM/System RAM) has reached 90% usage.` ⏎ `Click to open an agent to actively monitor/guard against OOM, otherwise ignore.` |
 | critical | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `Agent has been notified and is guarding against OOM.` |
 | critical, guard off | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The standing guard is off. Click to open an agent, otherwise ignore.` |
-| critical, guard failed | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard could not start. Click to open an agent, otherwise ignore.` |
+| critical, guard refused (no headroom) | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard could not start. Click to open an agent, otherwise ignore.` |
+| critical, guard died | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard did not survive. Click to open an agent, otherwise ignore.` |
 
 - Toast on every amber, red, and critical **alert event** (spec Q2), where an event is a band
   ascent or one of B1's re-fire conditions — not a standing state. `primed` is carried.
@@ -549,7 +588,7 @@ The threshold is shown in the detail window, the tooltip, and the log.
   lane, and **band escalation preempts an unanswered lower-band toast**.
 - **Critical's arm happens at queue time** (B4): the widget launches the agent prompt itself,
   single-flight and budget-gated, so the copy's claim is true *when it is emitted*; the
-  guard-off and guard-failed variants are what the widget emits when it is not.
+  guard-off, guard-refused and guard-died variants are what the widget emits when it is not.
 - **Click actions:** amber and red = the agent prompt. critical = open the detail window
   through `["qs","ipc","call","memory-monitor","openDetail"]` — never a second agent on top of
   the armed one.
@@ -654,7 +693,8 @@ prose:
 ```
 ringkit.js                     ← shared pure-decision module (repo root)
 tests/ringkit*.test.mjs        ← its tests, wired into tests/run.sh
-memory-monitor/                ← the sibling plugin, self-contained
+memory-monitor/                ← the sibling plugin (source layout only; installed by copy
+                                  with ringkit.js into its own top-level plugin directory)
   manifest.json                ← io.github.jasonlnheath.memory-monitor, kinds [bar-widget]
   MemoryMonitor.qml            ← bar widget + detail panel: state, processes, timers, drawing
   memory.js                    ← all v1 decisions (the mounts.js of this plugin)
@@ -665,14 +705,20 @@ memory-monitor/                ← the sibling plugin, self-contained
 ```
 
 **Installability is a PR 1 fact, not a PR 4 discovery** (major 9). `PluginRegistry.qml`'s
-`scan_thirdparty` reads only `~/.config/omarchy/plugins/*/manifest.json` — "Third-party
-plugins stay at the top level" — so a manifest at `memory/memory-monitor/manifest.json` inside
-this checkout is **invisible to the shell**. The plugin therefore installs at its own top-level
-directory, `~/.config/omarchy/plugins/io.github.jasonlnheath.memory-monitor/`, its `install.sh`
-hard-checks that its own path matches that directory (the way Mount Monitor's `install.sh`
-does), and `omarchy plugin add <git-url>` is only viable if the repo layout the shell sees has
-the manifest at the top level. The panel lives in the same widget directory as the two
-third-party precedents put theirs.
+`scan_thirdparty` reads exactly one level — `~/.config/omarchy/plugins/*/manifest.json`, no
+deeper — so a manifest at `memory-monitor/manifest.json` inside this checkout is **invisible
+to the shell**, and a clone-in-place of this repository cannot serve both plugins: the repo
+root's manifest is Mount Monitor's, one directory yields exactly one registration, and
+`omarchy plugin add <git-url>` of this repo would register Mount Monitor a second time and
+never the sibling. **The pinned install mechanism:** the in-repo `memory-monitor/` directory
+is source layout only; its `install.sh` runs from the checkout and copies `memory-monitor/*`
+plus `ringkit.js` — the module the widget imports — into the plugin's own top-level
+directory, `~/.config/omarchy/plugins/io.github.jasonlnheath.memory-monitor/`, with
+`manifest.json` at that directory's root, so what the shell scans is a self-contained plugin,
+registered exactly once. That install-time copy of the repo's one RingKit source beside its
+one consumer is not the separate marketplace RingKit listing with a sync script that prior
+major 15 rejected; separate-repo-versus-subdirectory stays open question 1. The panel lives
+in the same widget directory as the two third-party precedents put theirs.
 
 `memory.js` owns every decision — thresholds, numerators, parsers, bands, hysteresis, PSI gate,
 swap escalation, device dedup, severity, poll intervals, oomd discovery, toast templates,
@@ -692,11 +738,11 @@ live instances produce one alert event, one log row, and one arm.
 
 | PR | Delivers | Owns the decisions in |
 |---|---|---|
-| 1 | Scaffolding + **RingKit**: `ringkit.js`, repo-root tests wired into `tests/run.sh`, `memory-monitor/` skeleton (manifest, empty widget shell, run.sh), **the install layout proven** (top-level plugin directory, `install.sh` path guard) and **a panel proven to open from a `bar-widget`-only manifest** using `qs.Ui.Panel` / `PanelController` and the `open()`/`close()`/`opened` contract | ringkit.js, install.sh |
+| 1 | Scaffolding + **RingKit**: `ringkit.js`, repo-root tests wired into `tests/run.sh`, `memory-monitor/` skeleton (manifest, empty widget shell, run.sh), **the install layout proven** (top-level plugin directory, the `install.sh` copy install) and **a panel proven to open from a `bar-widget`-only manifest** using `qs.Ui.Panel` / `PanelController` and the `open()`/`close()`/`opened` contract | ringkit.js, install.sh |
 | 2 | **Measurement + band decisions**: parsers and argvs (findmnt HD rows; meminfo/PSI/swaps/zramctl; nvidia-smi memory + compute apps + clamped unattributed remainder), `ramUsedPct` numerator, `validateThresholds` with unset critical, band evaluation + measured hysteresis, `psiStallFloor` re-alert gate, swap/zram escalation, `hdDeviceKey` device dedup, absent-mount rule, `mostSevere`, `pollIntervalMs`, oomd discovery/parse, baseline record schema (absolute numbers) + append/rotate rules, toast templates + dispatch (`promptFor`/`titleFor`/`actionFor`/`bodyFor`/`urgencyFor`/`timeoutFor`), `agentArgv` | memory.js |
 | 3 | **Bar widget**: MM logo ring (white, plain), three graphic badges, severity-by-shape (amber hollow / red glyph / critical pulse+halo), most-severe display with the absent-mount rule, adaptive-poll timers, child-process timeout/watchdog/backoff hardening, state FileView, baseline logging wired to every sample, band-escalation preemption + 120 s watchdog in the alert queue, **screen-count-independent queue/append/arm guards**, **the visual verification loop** (install to the plugins directory, `omarchy restart shell`, grim pixel-diff of the bar against the previous render — plugin QML does not hot-reload, and eyeballing two unchanged screenshots reads as a change) | MemoryMonitor.qml |
 | 4 | **Detail window**: click-to-open panel with the full per-type picture (absolute GiB/MiB beside every percent, swap/zram, PSI, oomd block, clamped unattributed VRAM row, "your ceiling" vs "the kernel's ceiling", "Alerts you did not see", latched/unavailable visibility), threshold value boxes with the **named** widget and key mapping for all three input modes, live validation, persistence to the settings state file | MemoryMonitor.qml + memory.js validators |
-| 5 | **Toasts + agent routing**: notify-send plumbing with the dual click path, verbatim copy emission (character-pinned per kind at defaults), amber normal-urgency + DND-silenced-but-recorded, red critical-urgency/timeout-0 bypass, critical timeout-0 law, `notifications.json` `dnd` read, critical proactive arm on the single-flight budget-gated lane with the guard-off and guard-failed copies, `--inline` versus terminal measured on the rig, `qs ipc call` click for critical | memory.js copy + QML lanes |
+| 5 | **Toasts + agent routing**: notify-send plumbing with the dual click path, verbatim copy emission (character-pinned per kind at defaults), amber normal-urgency + DND-silenced-but-recorded, red critical-urgency/timeout-0 bypass, critical timeout-0 law, `notifications.json` `dnd` read, critical proactive arm on the single-flight budget-gated lane with the guard-off, guard-refused and guard-died copies, `--inline` versus terminal measured on the rig, `qs ipc call` click for critical | memory.js copy + QML lanes |
 | 6 | **Onboarding + skills**: the ceiling question (per-type report → recommendation → ask → record `setBy`), the insist-guard ask with its pinned copy and its delivered-at-queue-time identity, health-check run + verified arm, `memory-health` skill seed, sibling `install.sh`, **the visual verification loop for the onboarding notices** | memory.js onboarding + skills/ |
 | 7 | **Week-two re-anchor** (time-gated: after one week of baseline logs): distributions from the log → **recommended** thresholds, descent margins, `psiStallFloor`, VRAM anchors, and the arm budget; report to the captain; approved values applied only as defaults for ceilings the user never set, and as proposals the user accepts in the detail window | report + memory.js defaults |
 
@@ -781,12 +827,23 @@ back up.
    normalise; and should the critical toast name the resource — the spec's critical line names
    none, and "guarding against OOM" is the wrong failure mode for a full disk. Proposed minimal
    change, needing the captain's word: `Device has reached XX% usage.` →
-   `System RAM has reached XX% usage.`
-5. **Guard-off and guard-failed copy** (B4): the plan has written both; they change the spec's
-   copy family and need the captain's blessing.
+   `System RAM has reached XX% usage.`; and the amber/red live-reading rule (*Copy*, above):
+   the plan's ruling is the live reading rounded up — "82% usage." at 81.3% — which
+   reinterprets the captured "has reached 80% usage." / "has reached 90% usage." lines whose
+   numbers are the default thresholds; the alternative is the captured threshold-number
+   wording.
+5. **Guard-off, guard-refused and guard-died copy** (B4): the plan has written all three, and
+   the dead arm carries its own line — "The guard did not survive." — because the refused
+   state's "The guard could not start." would be false of an arm that started and was killed.
+   They change the spec's copy family and need the captain's blessing.
 6. **DND policy for amber:** the plan's answer is *silenced but recorded*, with an "Alerts you
    did not see" section. If the captain wants amber to bypass silence too, that is a one-line
    urgency change with the never-expiring-toast consequences spelled out in B3.
+7. **The System Swap ring:** the ask for this revision names "a System Swap ring in the bar";
+   the spec's design sections name exactly three badges and exactly three thresholded controls
+   and no swap ring anywhere. Until the captain rules, swap ships as picture-plus-escalator
+   (see *Bar display*) with no fourth badge and no fourth thresholded control; adding the ring
+   is a fourth badge and a change to the bar contract.
 
 ## Minor findings folded into this revision
 
