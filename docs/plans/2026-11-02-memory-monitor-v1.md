@@ -232,21 +232,28 @@ Rules, decided here:
      ```
      CRITICAL ALERT!
      Device has reached 97% usage.
-     The standing guard is off. Click to open an agent, otherwise ignore.
+     The standing guard is off. Click to open Memory Monitor, otherwise ignore.
      ```
    - Arm refused for no headroom — the guard never started (title `Memory Monitor`):
      ```
      CRITICAL ALERT!
      Device has reached 97% usage.
-     The guard could not start. Click to open an agent, otherwise ignore.
+     The guard could not start. Click to open Memory Monitor, otherwise ignore.
      ```
    - The arm started and died — killed with the emergency it guards against (title
      `Memory Monitor`):
      ```
      CRITICAL ALERT!
      Device has reached 97% usage.
-     The guard did not survive. Click to open an agent, otherwise ignore.
+     The guard did not survive. Click to open Memory Monitor, otherwise ignore.
      ```
+     This notice **replaces the standing claim toast**. The claim — "Agent has been notified
+     and is guarding against OOM." — carries a stable notification identity
+     (`mem-guard-claim`, captured from `notify-send -p`/`--print-id` at emission), and the
+     arm lifecycle re-sends the died notice with `-r <id>` — the insist-guard's replacement
+     mechanism — at the moment it records the death, so a sentence claiming an agent is
+     guarding cannot outlive the arm it names. The death's log row records both the claim
+     and the retraction.
    `97%` is the live reading (see *Copy*, below). The dead arm carries its own line: "The
    guard could not start." is the refused state's sentence, and said of an arm that started
    and was killed it would deny the start that happened. These variants are the plan's copy,
@@ -262,11 +269,12 @@ Rules, decided here:
    `["qs", "ipc", "call", "memory-monitor", "openDetail"]` — `parseExecArgv` accepts it
    (`qs` has no leading dash), it survives a shell restart because the handler is re-created
    with the shell, and it never starts an agent. The live `-A default=` action calls the same
-   handler. Amber and red keep the agent-prompt click the spec's copy describes. The three
-   no-guard critical kinds (guard-off, guard-refused, guard-died) click the agent prompt too:
-   in those states no agent is armed — that is what makes them those states — so the
-   never-a-second-agent rationale does not apply, and the single-flight lane is free. The
-   detail-window pin holds for every critical kind that has an armed agent.
+   handler. Amber and red keep the agent-prompt click the spec's copy describes. Critical's
+   click is uniform — every kind, armed or not, with no exemption: the budget gate stays
+   authoritative, since no click path may launch the agent in exactly the states where the
+   gate found no headroom or the guard is off (rule 2), and there is never a second agent on
+   top of the armed one. The three no-guard bodies therefore name Memory Monitor — not an
+   agent — as what the click opens (open question 5).
 
 ### B5 — coexistence: one HD owner, one onboarding surface, one alert per drive
 
@@ -389,10 +397,10 @@ like on day one.
 
 ## Fold list, corrected (this attack's major 15)
 
-The previous revision's fold list claimed more than it delivered. Corrected above: majors 6,
-7 and 8 are **deferred to PR 7, deliberately, and stay open**; major 4's claimed fix is
-withdrawn and replaced. Prior findings the previous plan never addressed are now named in
-this plan:
+The previous revision's fold list claimed more than it delivered. Corrected above: prior
+majors 6, 7 and 8 are **deferred to PR 7, deliberately, and stay open**; prior major 4's
+claimed fix is withdrawn and replaced. Prior findings the previous plan never addressed are
+now named in this plan:
 
 - **prior major 16 — the widget is silent in exactly the resting state the captain most wants
   reported.** Addressed by B1's standing-vs-event rule plus the onboarding resting-band
@@ -583,9 +591,9 @@ by this plan alone. The threshold is shown in the detail window, the tooltip, an
 | amber | `Memory Monitor` | `Caution: Amber Alert` ⏎ `Device (HD/VRAM/System Ram) has reached 80% usage.` ⏎ `Click to address with agent, otherwise ignore.` |
 | red | `Memory Monitor` | `WARNING: RED ALERT` ⏎ `Device (HD/VRAM/System RAM) has reached 90% usage.` ⏎ `Click to open an agent to actively monitor/guard against OOM, otherwise ignore.` |
 | critical | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `Agent has been notified and is guarding against OOM.` |
-| critical, guard off | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The standing guard is off. Click to open an agent, otherwise ignore.` |
-| critical, guard refused (no headroom) | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard could not start. Click to open an agent, otherwise ignore.` |
-| critical, guard died | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard did not survive. Click to open an agent, otherwise ignore.` |
+| critical, guard off | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The standing guard is off. Click to open Memory Monitor, otherwise ignore.` |
+| critical, guard refused (no headroom) | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard could not start. Click to open Memory Monitor, otherwise ignore.` |
+| critical, guard died | `Memory Monitor` | `CRITICAL ALERT!` ⏎ `Device has reached XX% usage.` ⏎ `The guard did not survive. Click to open Memory Monitor, otherwise ignore.` |
 
 - Toast on every amber, red, and critical **alert event** (spec Q2), where an event is a band
   ascent or one of B1's re-fire conditions — not a standing state. `primed` is carried.
@@ -598,13 +606,15 @@ by this plan alone. The threshold is shown in the detail window, the tooltip, an
   and guard-refused are the queue-time variants, emitted because the arm never started.
   Guard-died is not a queue-time alternative: it is a post-start state, discovered after the
   claim has been emitted, and its copy and its log row are written by the arm lifecycle when
-  the death is found (B4 rule 4).
-- **Click actions:** amber and red = the agent prompt. critical with an armed agent = open the
-  detail window through `["qs","ipc","call","memory-monitor","openDetail"]` — never a second
-  agent on top of the armed one. The three no-guard critical kinds (guard-off, guard-refused,
-  guard-died) are exempt from that pin and click the agent argv instead: no agent is armed in
-  those states, so the rationale does not apply and the single-flight lane is free.
-  Single-flight stays machine-wide whatever kind of click launches an agent (B4).
+  the death is found (B4 rule 4) — where it also replaces the standing claim toast by
+  notification identity (`mem-guard-claim`, `-r <id>`), so the claim that an agent is
+  guarding cannot outlive the arm.
+- **Click actions:** amber and red = the agent prompt. critical = open the detail window
+  through `["qs","ipc","call","memory-monitor","openDetail"]` — every critical kind, with or
+  without an armed agent, no exemption: the budget gate stays authoritative (B4 rule 2 — no
+  click path launches the agent in the states where it found no headroom), there is never a
+  second agent on top of the armed one, and the three no-guard bodies name Memory Monitor to
+  match what the click opens.
 - The dual click path is carried verbatim from Mount Monitor:
   `-h STRING:omarchy-exec-argv:<json argv>` hint (survives shell restarts via persisted
   history) plus the live `-A default=` action. The argv is a typed list through `agentArgv` —
@@ -755,7 +765,7 @@ live instances produce one alert event, one log row, and one arm.
 | 2 | **Measurement + band decisions**: parsers and argvs (findmnt HD rows; meminfo/PSI/swaps/zramctl; nvidia-smi memory + compute apps + clamped unattributed remainder), `ramUsedPct` numerator, `validateThresholds` with unset critical, band evaluation + measured hysteresis, `psiStallFloor` re-alert gate, swap/zram escalation, `hdDeviceKey` device dedup, absent-mount rule, `mostSevere`, `pollIntervalMs`, oomd discovery/parse, baseline record schema (absolute numbers) + append/rotate rules, toast templates + dispatch (`promptFor`/`titleFor`/`actionFor`/`bodyFor`/`urgencyFor`/`timeoutFor`), `agentArgv` | memory.js |
 | 3 | **Bar widget**: MM logo ring (white, plain), three graphic badges, severity-by-shape (amber hollow / red glyph / critical pulse+halo), most-severe display with the absent-mount rule, adaptive-poll timers, child-process timeout/watchdog/backoff hardening, state FileView, baseline logging wired to every sample, band-escalation preemption + 120 s watchdog in the alert queue, **screen-count-independent queue/append/arm guards**, **the visual verification loop** (install to the plugins directory, `omarchy restart shell`, grim pixel-diff of the bar against the previous render — plugin QML does not hot-reload, and eyeballing two unchanged screenshots reads as a change) | MemoryMonitor.qml |
 | 4 | **Detail window**: click-to-open panel with the full per-type picture (absolute GiB/MiB beside every percent, swap/zram, PSI, oomd block, clamped unattributed VRAM row, "your ceiling" vs "the kernel's ceiling", "Alerts you did not see", latched/unavailable visibility), threshold value boxes with the **named** widget and key mapping for all three input modes, live validation, persistence to the settings state file | MemoryMonitor.qml + memory.js validators |
-| 5 | **Toasts + agent routing**: notify-send plumbing with the dual click path, verbatim copy emission (character-pinned per kind at defaults), amber normal-urgency + DND-silenced-but-recorded, red critical-urgency/timeout-0 bypass, critical timeout-0 law, `notifications.json` `dnd` read, critical proactive arm on the single-flight budget-gated lane with the guard-off, guard-refused and guard-died copies, `--inline` versus terminal measured on the rig, `qs ipc call` click for armed critical (agent argv for the no-guard kinds) | memory.js copy + QML lanes |
+| 5 | **Toasts + agent routing**: notify-send plumbing with the dual click path, verbatim copy emission (character-pinned per kind at defaults), amber normal-urgency + DND-silenced-but-recorded, red critical-urgency/timeout-0 bypass, critical timeout-0 law, `notifications.json` `dnd` read, critical proactive arm on the single-flight budget-gated lane with the guard-off, guard-refused and guard-died copies, `--inline` versus terminal measured on the rig, `qs ipc call` click for critical, every kind | memory.js copy + QML lanes |
 | 6 | **Onboarding + skills**: the ceiling question (per-type report → recommendation → ask → record `setBy`), the insist-guard ask with its pinned copy and its delivered-at-queue-time identity, health-check run + verified arm, `memory-health` skill seed, sibling `install.sh`, **the visual verification loop for the onboarding notices** | memory.js onboarding + skills/ |
 | 7 | **Week-two re-anchor** (time-gated: after one week of baseline logs): distributions from the log → **recommended** thresholds, descent margins, `psiStallFloor`, VRAM anchors, and the arm budget; report to the captain; approved values applied only as defaults for ceilings the user never set, and as proposals the user accepts in the detail window | report + memory.js defaults |
 
