@@ -26,16 +26,32 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the node tests through `node:vm`. It must stay plain top-level `function`
   declarations: no `export`, no `import`, no `.pragma library`, or one of the
   two consumers breaks.
+- `ringkit.js` is the repo-root shared module the two widgets import: the palette,
+  the band step function, the hysteresis and descent-reachability rules, the
+  most-severe tie-break, the adaptive-poll step, the badge shape/glyph decision,
+  the trust primitives, and the cursor-marker rule (kept, labelled unconsumed, for
+  the next plugin). It carries no cursor state and no mount-specific rule, and it
+  is a plain module like `mounts.js` for the same reason. `tests/ringkit.test.mjs`
+  is its contract; `memory-monitor/tests/ringkit-conformance.test.mjs` proves it
+  and `mounts.js bandFor` cannot disagree.
+- `memory-monitor/` is the sibling plugin (System RAM / VRAM / drive severity,
+  user-set ceilings, the detail window, the baseline log, the guard ask). It has
+  its own `manifest.json`, `install.sh`, `README.md`, `skills/` and `tests/`; its
+  `install.sh` copies `ringkit.js` beside the widget because the shell's plugin
+  registry scans exactly one level. Its decisions live in
+  `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`.
 - `skills/` holds the agent skills `install.sh` copies to `~/.agents/skills/`:
   `disk-prune` (cleanup analysis), `partition-onboarding` (add a monitor),
   `partition-remove` (unwire one). Notification copy and skill wording have to
   agree — change both.
 
-This plugin is disk/drive monitoring only. A wallpaper service briefly lived
-here (PRs 11–12) and was reverted 2026-10-28 on the captain's ruling that the
+Mount Monitor itself is disk/drive monitoring only. A wallpaper service briefly
+lived here (PRs 11–12) and was reverted 2026-10-28 on the captain's ruling that the
 wallpaper and the drive monitor are two separate plugins with two separate
 jobs; that feature belongs to the wallpaper project. Keep it out — the removal
-guard in `tests/` pins the state after the revert.
+guard in `tests/` pins the state after the revert. The same ruling is why the
+memory monitor is a second plugin directory rather than more rings on this bar:
+two plugins, two jobs, one shared `ringkit.js`.
 
 ## Tests
 
@@ -48,7 +64,11 @@ not installed), the block-event detection decisions in `tests/detect.test.mjs`
 (including a live `udevadm monitor` + `udisksctl loop-setup` plug that skips where
 either is absent), the
 hostile-label regression in `tests/label-injection.test.mjs`, the
-spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, an install.sh
+spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, the RingKit
+contract in `tests/ringkit.test.mjs` (shared-module shape, band numbers, thresholds,
+hysteresis, most-severe tie-break, poll step, badge shape, trust primitives), a
+check that the root `install.sh` copies `ringkit.js` into the installed plugin, an
+install.sh
 syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
@@ -61,6 +81,13 @@ guards (the widget builds its findmnt command through `Mounts.findmntArgs`, its
 popup command through `Mounts.notifyArgs`, and its agent command through
 `Mounts.agentArgv`, and it carries `m.id` / `c.id` rather than inventing names).
 The rest of the wiring is verified by reading it and by the captain on the rig.
+
+Memory Monitor's suite is `bash memory-monitor/tests/run.sh`: the same shape of
+tests over `memory-monitor/memory.js` (parsers against fixtures, character-pinned
+toast copy per kind, thresholds and hysteresis, the guard budget gate and arm
+lifecycle, the baseline log, onboarding, the multi-instance gate, the install
+layout, the delegation guards) plus the RingKit conformance check that runs
+`ringkit.js`, `mounts.js bandFor` and `memory.js` against one set of band cases.
 
 ## Contracts worth not breaking
 
@@ -225,6 +252,22 @@ The rest of the wiring is verified by reading it and by the captain on the rig.
   under its "no list in the prompt" fallback.
 - `partition-remove` changes the `mounts` setting and records a decline, and
   must never touch the partition: no delete, no unmount, no format.
+
+- **The two plugins share `ringkit.js`, so band numbers are one contract.**
+  `mounts.js bandFor`, `memory.js bandForPct` and `ringkit.js bandFor` must agree
+  on what a percentage means; `memory-monitor/tests/ringkit-conformance.test.mjs`
+  is the guard. Memory Monitor reads Mount Monitor's `mounts` list and its widget
+  settings through `qs.Config.layout()` (never through `qs.Config.shell()`),
+  suppresses its own HD toast for any target Mount Monitor already alerts on, and
+  runs no `udevadm monitor` of its own — Mount Monitor's is the machine's one
+  block-event watcher. Changing Mount Monitor's `mounts` handling, its alert
+  targets, or its notification lane changes Memory Monitor's behaviour.
+- **Every Memory Monitor threshold is a ceiling the user set, and critical ships
+  unset.** No default, no recommendation, and no measured distribution may seed
+  one: a critical band, a critical toast, and the bar glow cannot exist for a
+  ceiling nobody chose. Memory Monitor never writes a system limit (`MemoryHigh`,
+  `MemoryMax`, a unit drop-in, a sysctl) — the kernel's oomd ceilings are read and
+  displayed as a second, different number.
 
 ## Release
 
