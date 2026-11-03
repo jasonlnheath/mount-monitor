@@ -1,0 +1,2 @@
+NVIDIA-SMI has failed because it could not communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running.
+
