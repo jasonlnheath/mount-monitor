@@ -1191,6 +1191,27 @@ BarWidget {
     onTriggered: root.startSample()
   }
 
+  // One timer per monitored resource. Every timer starts the same single shared
+  // sample (startSample guards against overlap), so the resource that most
+  // recently earned a short interval is the one that decides when the next
+  // sample runs; the others simply re-arm. A resource with no timer of its own
+  // is a resource that stops being sampled while its ring keeps drawing.
+  Timer {
+    id: vramTimer
+    interval: 60000
+    repeat: true
+    running: true
+    onTriggered: root.startSample()
+  }
+
+  Timer {
+    id: hdTimer
+    interval: 60000
+    repeat: true
+    running: true
+    onTriggered: root.startSample()
+  }
+
   Timer {
     id: readWatchdog
     interval: 8000
