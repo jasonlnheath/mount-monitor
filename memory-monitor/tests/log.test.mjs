@@ -75,14 +75,14 @@ test("an empty log appends one row and stays parseable", () => {
 });
 
 test("append and rotation are typed argv, never a redirect string", () => {
-  same(Memory.logAppendArgs("/home/jason/.local/state/memory-monitor/baseline.jsonl"), [
+  same(Memory.logAppendArgs("/home/jason/.local/state/memory-monitor/baseline.log"), [
     "dd",
-    "of=/home/jason/.local/state/memory-monitor/baseline.jsonl",
+    "of=/home/jason/.local/state/memory-monitor/baseline.log",
     "oflag=append",
     "conv=notrunc",
   ]);
-  same(Memory.logRotateArgs("/home/jason/.local/state/memory-monitor/baseline.jsonl", 500), ["tail", "-n", "500", "/home/jason/.local/state/memory-monitor/baseline.jsonl"]);
-  const joined = Memory.logAppendArgs("/home/jason/.local/state/memory-monitor/baseline.jsonl").join(" ");
+  same(Memory.logRotateArgs("/home/jason/.local/state/memory-monitor/baseline.log", 500), ["tail", "-n", "500", "/home/jason/.local/state/memory-monitor/baseline.log"]);
+  const joined = Memory.logAppendArgs("/home/jason/.local/state/memory-monitor/baseline.log").join(" ");
   assert.equal(joined.includes(">"), false, "no shell redirect, so no shell");
   assert.equal(joined.includes("|"), false);
 });

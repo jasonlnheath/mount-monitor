@@ -32,7 +32,7 @@ test("first run is decided by the state file, not by the wall clock", () => {
 test("the state lives in its own directory, and deleting it is the reset hook", () => {
   assert.equal(Memory.stateDir("/home/jason"), "/home/jason/.local/state/memory-monitor");
   assert.equal(Memory.settingsPath("/home/jason"), "/home/jason/.local/state/memory-monitor/settings.json");
-  assert.equal(Memory.logPath("/home/jason"), "/home/jason/.local/state/memory-monitor/baseline.jsonl");
+  assert.equal(Memory.logPath("/home/jason"), "/home/jason/.local/state/memory-monitor/baseline.log");
 });
 
 test("the ceiling question reports the reading before it asks anything", () => {

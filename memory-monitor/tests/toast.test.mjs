@@ -119,7 +119,7 @@ test("a silenced amber is recorded, not lost", () => {
 test("the notify-send argv is typed, carries the app name, and carries the click hint", () => {
   const argv = Memory.notifyArgs(ramAlert(2, 91), null, {
     clickArgv: Memory.ipcOpenDetailArgv(),
-    logPath: "/home/jason/.local/state/memory-monitor/baseline.jsonl",
+    logPath: "/home/jason/.local/state/memory-monitor/baseline.log",
   });
   assert.equal(argv[0], "notify-send");
   assert.equal(argv[1], "-a");

@@ -14,11 +14,12 @@
 // migration onto RingKit is out of v1 scope — its decisions stay in mounts.js.
 // That is a bet paid now and cashed in later, not a fact, and the divergence
 // risk it creates is closed by a test rather than by prose:
-// tests/ringkit-conformance.test.mjs pins RingKit's band resolver against
-// mounts.js `bandFor` (the 80/90/98 step function) and against memory.js's band
+// memory-monitor/tests/ringkit-conformance.test.mjs pins RingKit's band resolver
+// against mounts.js `bandFor` (the 80/90/98 step function) and against memory.js's band
 // evaluation on the same fixtures, so the alert engines running on the same
 // drives cannot disagree about which band a percentage is. RingKit's hysteresis
 // is additive on top of the same step function, not a different step function.
+// tests/ringkit.test.mjs pins the contracts RingKit owns on its own.
 //
 // Why memory.js carries its own copy of the trust primitives instead of
 // importing this file: a QML JavaScript module cannot import another one (the

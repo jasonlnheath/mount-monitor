@@ -134,7 +134,7 @@ var GUARD_ASK_ID = "mem-guard-ask";
 
 var STATE_DIR_NAME = "memory-monitor";
 var SETTINGS_FILE_NAME = "settings.json";
-var LOG_FILE_NAME = "baseline.jsonl";
+var LOG_FILE_NAME = "baseline.log";
 var LOG_MAX_BYTES = 4 * 1024 * 1024;
 var LOG_MAX_LINES = 20000;
 
