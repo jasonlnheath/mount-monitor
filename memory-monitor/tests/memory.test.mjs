@@ -120,9 +120,8 @@ test("Memory Monitor suppresses an HD alert Mount Monitor already sends for the 
   assert.equal(Memory.hdAlertSuppressed("/home", ["/srv/models"]), false);
 });
 
-test("the sibling plugin id and widget name are the real ones", () => {
+test("the sibling plugin id is the real one", () => {
   assert.equal(Memory.mountMonitorPluginId(), "io.github.jasonlnheath.mount-monitor");
-  assert.equal(Memory.mountMonitorWidgetName(), "mount-monitor");
 });
 
 // ---------------------------------------------------------------------------

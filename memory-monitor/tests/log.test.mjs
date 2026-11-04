@@ -40,40 +40,6 @@ test("a log row never carries a device-supplied name it could have been given", 
   assert.equal(record.hd[0].id.includes("END"), false, "the id is minted, never derived from the label");
 });
 
-test("the log is a window: the oldest rows go, the newest stay", () => {
-  const lines = [];
-  for (let i = 0; i < 10; i++) lines.push(JSON.stringify({ n: i }));
-  const capped = Memory.capLog(lines.join("\n"), 1024 * 1024, 4);
-  assert.equal(capped.length, 4);
-  same(capped.map(l => JSON.parse(l).n), [6, 7, 8, 9]);
-});
-
-test("the byte cap bites the oldest rows too", () => {
-  const lines = [];
-  for (let i = 0; i < 200; i++) lines.push(JSON.stringify({ n: i, pad: "x".repeat(200) }));
-  const capped = Memory.capLog(lines.join("\n"), 8000, 10000);
-  assert.ok(capped.length < 200);
-  assert.ok(capped.join("\n").length <= 8000);
-  assert.equal(JSON.parse(capped[capped.length - 1]).n, 199, "the newest reading is never the one dropped");
-  assert.ok(JSON.parse(capped[0]).n > 0, "the oldest readings are the ones dropped");
-});
-
-test("appending caps before and after, and reports what it dropped", () => {
-  const existing = [];
-  for (let i = 0; i < 8; i++) existing.push(JSON.stringify({ n: i }));
-  const out = Memory.appendBaseline(existing.join("\n"), { at: "t", n: 8 }, { maxLines: 5 });
-  const kept = out.text.trim().split("\n").map(line => JSON.parse(line).n);
-  same(kept, [4, 5, 6, 7, 8]);
-  assert.equal(out.dropped, 4, "3 rows the window could not hold, plus the one the append pushed out");
-  assert.equal(out.text.endsWith("\n"), true, "every row is one line, and the file ends on a newline");
-});
-
-test("an empty log appends one row and stays parseable", () => {
-  const out = Memory.appendBaseline("", { at: "t", n: 1 }, { maxLines: 5 });
-  assert.equal(out.text.trim().split("\n").length, 1);
-  assert.equal(out.dropped, 0);
-});
-
 test("append and rotation are typed argv, never a redirect string", () => {
   same(Memory.logAppendArgs("/home/jason/.local/state/memory-monitor/baseline.log"), [
     "dd",

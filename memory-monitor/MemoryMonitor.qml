@@ -543,6 +543,7 @@ BarWidget {
       oomd: oomd,
       thresholds: state.thresholds,
       logPath: baselinePath,
+      resting: alert.resting === undefined ? null : alert.resting,
     });
     var args = Memory.notifyArgs(alert, agentCommandArgv(), {
       clickArgv: clickArgv,
@@ -586,12 +587,6 @@ BarWidget {
       budgetOk: budget.ok,
       armDied: false,
     });
-  }
-
-  function dropUnstartedNotice(reason): void {
-    if (noticeQueue.length === 0) return;
-    console.warn("memory-monitor: dropped a notice:", reason);
-    noticeQueue = noticeQueue.slice(1);
   }
 
   // ---------------------------------------------------------------------------
@@ -789,6 +784,7 @@ BarWidget {
       pct: ramReading === null ? null : ramReading.pct,
       guardState: "off",
       title: "Memory Monitor - your ceilings",
+      resting: resting,
       body: Memory.ceilingsQuestion("ram", ramReading, oomd, state.thresholds, resting)
         + "\n\n" + Memory.ceilingsQuestion("vram", vramReading, oomd, state.thresholds, resting)
         + "\n\n" + Memory.ceilingsQuestion("hd", hdRows.length > 0 ? hdRows[0] : null, oomd, state.thresholds, resting),
@@ -1081,13 +1077,11 @@ BarWidget {
     onExited: function(exitCode, exitStatus) {
       alertWatchdog.stop();
       root.activeAlert = null;
-      if (exitCode !== 0 && root.activeAlertWasCritical) console.warn("memory-monitor: notify-send failed for an alert");
+      if (exitCode !== 0) console.warn("memory-monitor: notify-send failed for an alert");
       root.alertQueue = root.alertQueue.slice(1);
       root.fireNextAlert();
     }
   }
-
-  property bool activeAlertWasCritical: false
 
   Process {
     id: noticeProc
@@ -1104,6 +1098,12 @@ BarWidget {
           root.noticePrintedId = id;
           if (root.arm !== null && root.arm.outcome === "started") {
             root.arm = Memory.armRecord(Object.assign({}, root.arm, { claimId: id }));
+            var next = JSON.parse(JSON.stringify(state));
+            var patched = Memory.patchArmClaimId(next.arms, root.arm.eventKey, id);
+            if (patched !== next.arms) {
+              next.arms = patched;
+              writeState(next);
+            }
           }
         }
       }

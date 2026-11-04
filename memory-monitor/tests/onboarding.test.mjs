@@ -21,13 +21,6 @@ const OOMD = {
   oomdWatchedCgroup: "/user.slice/user-1000.slice/user@1000.service/app.slice",
 };
 
-test("first run is decided by the state file, not by the wall clock", () => {
-  assert.equal(Memory.firstRunNeeded({}), true);
-  assert.equal(Memory.firstRunNeeded(Memory.normalizeSettings({})), true);
-  assert.equal(Memory.firstRunNeeded({ firstRunAt: "2026-11-02T00:00:00.000Z" }), false);
-  assert.equal(Memory.firstRunNeeded(Memory.normalizeSettings({ firstRunAt: "2026-11-02T00:00:00.000Z" })), false);
-});
-
 test("the state lives in its own directory, and deleting it is the reset hook", () => {
   assert.equal(Memory.stateDir("/home/jason"), "/home/jason/.local/state/memory-monitor");
   assert.equal(Memory.settingsPath("/home/jason"), "/home/jason/.local/state/memory-monitor/settings.json");
@@ -95,30 +88,8 @@ test("a recommendation is a recommendation: derived from the resting reading, ca
   assert.equal(none.restingPct, null);
 });
 
-test("a recommendation fills only the ceilings he never set, and is refused rather than applied broken", () => {
-  const settings = Memory.setCeiling({}, "ram", "critical", 96);
-  // This machine rests at 93%, so the recommendation is amber 95 / red 98 / critical 99.
-  const resting = Memory.recommendCeilings("ram", { ram: 93 });
-  const buried = Memory.applyRecommendation(settings.thresholds, "ram", resting);
-  assert.equal(buried.ok, false);
-  assert.match(buried.errors.join(" "), /critical must sit above red/);
-  assert.equal(buried.thresholds, null, "a recommendation that would sit over his critical is refused, not applied and left invalid");
-
-  const gentle = Memory.applyRecommendation(settings.thresholds, "ram", { amber: 85, red: 92, critical: 97 });
-  assert.equal(gentle.ok, true);
-  assert.equal(gentle.thresholds.ram.amber, 85);
-  assert.equal(gentle.thresholds.ram.red, 92);
-  assert.equal(gentle.thresholds.ram.critical, 96, "a recommendation never becomes a ceiling the captain did not set");
-  assert.equal(gentle.thresholds.ram.criticalSetBy, "user");
-
-  const fresh = Memory.applyRecommendation({}, "ram", { amber: 85, red: 92, critical: 97 });
-  assert.equal(fresh.thresholds.ram.amber, 85);
-  assert.equal(fresh.thresholds.ram.amberSetBy, "default");
-  assert.equal(fresh.thresholds.ram.critical, null, "a recommendation never invents a critical line for him");
-});
-
 test("the onboarding prompt carries the readings as data and never a device name in an instruction", () => {
-  const prompt = Memory.onboardingPrompt(RAM, OOMD, {});
+  const prompt = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", { ram: 93 });
   assert.match(prompt, /Memory Monitor first run\. Report what this machine is resting at, then ask for the ceilings\./);
   assert.match(prompt, /critical stays unset until he sets it/);
   assert.match(prompt, /Never set a ceiling yourself, and never write over one the user has set\./);
@@ -129,9 +100,24 @@ test("the onboarding prompt carries the readings as data and never a device name
 });
 
 test("the onboarding prompt's data block is the same block a hostile device cannot forge", () => {
-  const prompt = Memory.onboardingPrompt(RAM, OOMD, {});
+  const prompt = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", null);
   assert.equal(prompt.split(Memory.dataOpen()).length - 1, 1, "the delimiter appears exactly once");
   assert.equal(prompt.split(Memory.dataClose()).length - 1, 1);
+});
+
+test("the ceilings click-through prompt is honest about what the log can say", () => {
+  const withheld = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", null);
+  assert.match(withheld, /Read the baseline log at \/log/);
+  assert.match(withheld, /no resting claim yet/);
+  assert.equal(withheld.includes("This machine rests at"), false, "a single reading is never a resting claim");
+  assert.match(withheld, /no ceiling recommendation derived from a single reading/);
+  assert.match(withheld, /recommend the defaults and say plainly they are defaults/);
+
+  const measured = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", { ram: 93 });
+  assert.match(measured, /Read the baseline log at \/log/);
+  assert.match(measured, /This machine rests at 93%\./);
+  assert.match(measured, /derived from that resting distribution/);
+  assert.equal(measured.includes("no resting claim yet"), false);
 });
 
 test("settings survive the round trip, and garbage does not become a ceiling", () => {
@@ -212,7 +198,7 @@ test("a question is not an emergency: neither onboarding notice arms the guard",
 });
 
 test("the ceiling question's click opens the agent that reports the reading and asks for the numbers", () => {
-  const argv = Memory.clickArgvFor({ kind: "ceilings", band: 3 }, null, { reading: RAM, oomd: OOMD, thresholds: {} });
+  const argv = Memory.clickArgvFor({ kind: "ceilings", band: 3 }, null, { reading: RAM, oomd: OOMD, thresholds: {}, logPath: "/log", resting: null });
   same(argv.slice(0, 3), ["omarchy", "agent", "prompt"]);
   assert.equal(argv.length, 4);
   assert.match(argv[3], /Memory Monitor first run\./);

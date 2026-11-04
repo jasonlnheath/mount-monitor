@@ -65,7 +65,7 @@ test("two live instances produce one log row for one sample", () => {
     let log = "";
     for (const entry of instances(count)) {
       if (!entry.writer) continue;
-      log = Memory.appendBaseline(log, Memory.logRecord(SAMPLE)).text;
+      log = log + (log.length > 0 ? "\n" : "") + Memory.logLine(Memory.logRecord(SAMPLE));
     }
     const rows = Memory.parseBaseline(log);
     assert.equal(rows.length, 1, `${count} instance(s): one sample is one log row`);

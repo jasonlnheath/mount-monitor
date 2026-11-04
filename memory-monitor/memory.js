@@ -109,7 +109,6 @@ var IPC_OPEN_DETAIL = "openDetail";
 // The machine's other HD alert engine, and the only setting Memory Monitor is
 // allowed to read from it.
 var MOUNT_MONITOR_PLUGIN_ID = "io.github.jasonlnheath.mount-monitor";
-var MOUNT_MONITOR_WIDGET_NAME = "mount-monitor";
 
 // ---------------------------------------------------------------------------
 // The guard. `omarchy agent prompt` runs `omarchy-agent --prompt`, which by
@@ -295,25 +294,6 @@ function dataBlock(records) {
 // is told to act on.
 // ---------------------------------------------------------------------------
 
-function candidateRecord(entry) {
-  const e = entry || {};
-  return {
-    id: isMemId(e.id) ? e.id : memId(e.key),
-    type: sanitizeText(e.type, 16),
-    target: sanitizePath(e.target),
-    device: sanitizePath(e.device),
-    fstype: sanitizeText(e.fstype, 32),
-    label: sanitizeText(e.label),
-    partlabel: sanitizeText(e.partlabel),
-    sizeKb: asNumber(e.sizeKb),
-    usedKb: asNumber(e.usedKb),
-    availKb: asNumber(e.availKb),
-    pct: asNumber(e.pct),
-    band: asNumber(e.band),
-    monitored: normalizeBool(e.monitored, false),
-  };
-}
-
 function alertRecord(alert) {
   const a = alert || {};
   const base = {
@@ -365,24 +345,6 @@ function readingRecord(reading) {
     oomdPsiLimitPct: asNumber(r.oomdPsiLimitPct),
     oomdSwapLimitPct: asNumber(r.oomdSwapLimitPct),
     oomdWatchedCgroup: sanitizePath(r.oomdWatchedCgroup),
-  };
-}
-
-function mountRecord(entry) {
-  const e = entry || {};
-  return {
-    id: isMemId(e.id) ? e.id : memId(e.key),
-    target: sanitizePath(e.target),
-    device: sanitizePath(e.device),
-    fstype: sanitizeText(e.fstype, 32),
-    label: sanitizeText(e.label),
-    partlabel: sanitizeText(e.partlabel),
-    sizeKb: asNumber(e.sizeKb),
-    usedKb: asNumber(e.usedKb),
-    availKb: asNumber(e.availKb),
-    pct: asNumber(e.pct),
-    band: asNumber(e.band),
-    ro: normalizeBool(e.ro, false),
   };
 }
 
@@ -525,18 +487,6 @@ function normalizeAgentCommand(value) {
   return argv.length > 0 ? argv : null;
 }
 
-function defaultThresholds() {
-  return {
-    amber: DEFAULT_AMBER,
-    amberSetBy: null,
-    red: DEFAULT_RED,
-    redSetBy: null,
-    critical: DEFAULT_CRITICAL,
-    criticalSetBy: null,
-    updatedAt: null,
-  };
-}
-
 function normalizeThresholds(value) {
   const out = {};
   const kinds = ["hd", "vram", "ram"];
@@ -673,10 +623,6 @@ function setCeiling(settings, type, level, value) {
 
 function mountMonitorPluginId() {
   return MOUNT_MONITOR_PLUGIN_ID;
-}
-
-function mountMonitorWidgetName() {
-  return MOUNT_MONITOR_WIDGET_NAME;
 }
 
 function hdWatchList(mountMonitorMounts, ownMounts) {
@@ -1462,11 +1408,6 @@ function pollIntervalMs(type, band, opts) {
   return escalated;
 }
 
-function pollIntervalFor(reading, thresholds, opts) {
-  const type = sanitizeText(reading && reading.type, 16);
-  return pollIntervalMs(type, asNumber(reading && reading.band), opts);
-}
-
 // ---------------------------------------------------------------------------
 // Copy. The spec's copy is the acceptance contract and ships verbatim, including
 // the amber "System Ram" and the red "System RAM" - the inconsistency is flagged
@@ -1500,10 +1441,6 @@ function typeWord(type, band) {
   return table[key] || "Device";
 }
 
-function amberTitle() {
-  return NOTIFIER_APP;
-}
-
 function amberBody(opts) {
   const o = opts || {};
   const pct = readingPct(o.pct);
@@ -1512,10 +1449,6 @@ function amberBody(opts) {
     "Device (" + typeWord(o.type, 1) + ") has reached " + pct + "% usage.",
     "Click to address with agent, otherwise ignore.",
   ].join("\n");
-}
-
-function redTitle() {
-  return NOTIFIER_APP;
 }
 
 function redBody(opts) {
@@ -1733,7 +1666,7 @@ function clickArgvFor(alert, agentCommand, opts) {
   // asks for the numbers - not by the detail window, and never by arming a guard
   // over a question nobody has answered yet.
   if (kind === "ceilings") {
-    const prompt = onboardingPrompt(o.reading, o.oomd, o.thresholds);
+    const prompt = onboardingPrompt(o.reading, o.oomd, o.thresholds, o.logPath, o.resting);
     if (normalizeBool(o.inline, false)) return agentArgvWithInline(prompt, agentCommand);
     return agentArgv(prompt, agentCommand);
   }
@@ -1830,12 +1763,6 @@ function notifyReplaceArgs(id, title, body) {
   return ["notify-send", "-a", NOTIFIER_APP, "-e", "-r", claimId, "-u", "critical", asString(title), asString(body)];
 }
 
-function printIdArgs(args) {
-  const list = asList(args) || [];
-  if (list.indexOf("-p") >= 0 || list.indexOf("--print-id") >= 0) return list;
-  return list.slice(0, 1).concat(["-p"], list.slice(1));
-}
-
 function parsePrintedId(text) {
   const lines = asString(text).split(/\r?\n/);
   for (const line of lines) {
@@ -1919,13 +1846,24 @@ function healthCheckPrompt(logPath, thresholds, oomd) {
   return fixed.join("\n") + "\n" + dataBlock(records);
 }
 
-function onboardingPrompt(reading, oomd, thresholds) {
+function onboardingPrompt(reading, oomd, thresholds, logPath, resting) {
   const fixed = [];
   fixed.push("Memory Monitor first run. Report what this machine is resting at, then ask for the ceilings.");
-  fixed.push("Report the measured first-run reading: System RAM resting percent and MemAvailable in GiB, PSI memory,");
+  fixed.push("Read the baseline log at " + sanitizePath(logPath) + " - the resting level is measured from it, never from one reading.");
+  const sitting = restingPctFor(resting, "ram");
+  if (sitting === null) {
+    fixed.push("The log holds fewer than " + RESTING_MIN_SAMPLES + " samples, so there is no resting claim yet: say so plainly.");
+  } else {
+    fixed.push("This machine rests at " + readingPct(sitting) + "%. Report that measured resting band, and each resource's resting band from the log,");
+  }
+  fixed.push("Report the current readings as data: System RAM percent and MemAvailable in GiB, PSI memory,");
   fixed.push("swap and zram fill, VRAM used and free in MiB, and each watched drive's percent and size.");
   fixed.push("State oomd's live limits and watched cgroup as the kernel's ceiling, beside the ceilings this plugin uses.");
-  fixed.push("Give a recommended amber, red and critical for each of Hard Drive, VRAM and System RAM, derived from that reading,");
+  if (sitting === null) {
+    fixed.push("Give no ceiling recommendation derived from a single reading: recommend the defaults and say plainly they are defaults");
+  } else {
+    fixed.push("Give a recommended amber, red and critical for each of Hard Drive, VRAM and System RAM, derived from that resting distribution");
+  }
   fixed.push("and say what each line means on this machine. Say plainly when a chosen line sits inside the resting band.");
   fixed.push("Then ask the user to set them. Amber and red default to " + DEFAULT_AMBER + "% and " + DEFAULT_RED + "% if he does not");
   fixed.push("touch them; critical stays unset until he sets it, and until he does there is no critical band.");
@@ -1955,59 +1893,11 @@ function guardAskBody(settings) {
   ].join("\n");
 }
 
-function guardAskArgs(settings) {
-  return [
-    "notify-send",
-    "-a",
-    NOTIFIER_APP,
-    "-e",
-    "-u",
-    "critical",
-    "-A",
-    "default:Turn the guard on",
-    "-h",
-    "STRING:" + EXEC_HINT_KEY + ":" + execHintValue(["qs", "ipc", "call", IPC_TARGET, "answerGuardAsk"]),
-    guardAskTitle(),
-    guardAskBody(settings),
-  ];
-}
-
-// A restart-surviving notice must not accumulate: the ask carries a stable
-// identity, is re-fired at shell start only, and replaces the notice it answers.
-function guardAskReplaceArgs(previousId, settings) {
-  const id = sanitizeText(previousId, 64);
-  if (id.length === 0) return guardAskArgs(settings);
-  const args = guardAskArgs(settings);
-  return args.slice(0, 4).concat(["-r", id], args.slice(4));
-}
-
-function claimArgs(title, body) {
-  return [
-    "notify-send",
-    "-a",
-    NOTIFIER_APP,
-    "-e",
-    "-u",
-    "critical",
-    "-p",
-    "-A",
-    "default:" + actionFor({ band: 3 }),
-    "-h",
-    "STRING:" + EXEC_HINT_KEY + ":" + execHintValue(ipcOpenDetailArgv()),
-    title,
-    body,
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // The guard arm. Single-flight and machine-wide, keyed by an event identity,
 // budget-gated before launch, watchdog-killed at a named timeout, and logged with
 // its pid, its outcome, whether it survived, and the claim toast's id.
 // ---------------------------------------------------------------------------
-
-function guardArmCostKb() {
-  return GUARD_ARM_COST_KB;
-}
 
 function guardArmTimeoutMs() {
   return GUARD_ARM_TIMEOUT_MS;
@@ -2141,6 +2031,25 @@ function reconcileArms(arms, liveEventKey) {
   return null;
 }
 
+// The claim id the daemon printed belongs to the started record the arm wrote:
+// a later generation that finds that record orphaned retracts by this id and
+// replaces the claim still on the screen, instead of stacking a second toast
+// beside one it cannot name. The newest started record for the key is patched
+// in place; a finished arm's records are history and take no patch.
+function patchArmClaimId(arms, eventKey, claimId) {
+  const list = asList(arms) || [];
+  const key = sanitizeText(eventKey, 256);
+  const id = sanitizeText(claimId, 64);
+  if (key.length === 0 || id.length === 0) return list;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const record = list[i];
+    if (!record || record.outcome !== "started") continue;
+    if (sanitizeText(record.eventKey, 256) !== key) continue;
+    return list.slice(0, i).concat([armRecord(Object.assign({}, record, { claimId: id }))], list.slice(i + 1));
+  }
+  return list;
+}
+
 // ---------------------------------------------------------------------------
 // Onboarding. The ceiling question is one ask per memory type, in the spec's own
 // order, reporting the machine's measured first-run reading before asking. Asked
@@ -2192,15 +2101,6 @@ function logPath(home) {
 
 function stateDir(home) {
   return sanitizePath(home) + "/.local/state/" + STATE_DIR_NAME;
-}
-
-// The once-only memory is the settings file. `firstRunAt` unset - absent, null,
-// or empty - is what first run means; deleting the state directory is the
-// intended reset hook.
-function firstRunNeeded(settings) {
-  const s = settings || {};
-  const at = asString(s.firstRunAt);
-  return at === "" || s.firstRunAt === undefined || s.firstRunAt === null;
 }
 
 function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
@@ -2339,34 +2239,6 @@ function recommendCeilings(type, resting) {
   return { amber, red, critical, restingPct: sitting, provisional: sitting === null };
 }
 
-// Applying a recommendation is the captain's decision, not this function's: it
-// fills only the ceilings he has never set, and it never invents a critical line
-// for him. A critical he has not set stays unset here exactly as it stays unset
-// in the bar.
-function applyRecommendation(settings, type, recommendation) {
-  const all = normalizeThresholds(settings);
-  const kind = all[type] || all.ram;
-  const rec = recommendation || {};
-  const candidate = {
-    amber: kind.amberSetBy === "user" ? kind.amber : asNumber(rec.amber),
-    red: kind.redSetBy === "user" ? kind.red : asNumber(rec.red),
-    critical: kind.criticalSetBy === "user" ? kind.critical : null,
-  };
-  const check = validateThresholds(candidate);
-  if (!check.ok) return { ok: false, errors: check.errors, thresholds: null };
-  const out = Object.assign({}, all);
-  out[type] = {
-    amber: check.thresholds.amber,
-    amberSetBy: kind.amberSetBy === "user" ? "user" : "default",
-    red: check.thresholds.red,
-    redSetBy: kind.redSetBy === "user" ? "user" : "default",
-    critical: check.thresholds.critical,
-    criticalSetBy: kind.criticalSetBy === "user" ? "user" : null,
-    updatedAt: asString(rec.at) || new Date().toISOString(),
-  };
-  return { ok: true, errors: [], thresholds: out };
-}
-
 // The resting level a question or a recommendation may quote: the number
 // `restingFromLog` measured for this type, or nothing. A reading passed in by
 // mistake supplies no resting level either - only the log can.
@@ -2463,36 +2335,6 @@ function logRecord(opts) {
 
 function logLine(record) {
   return JSON.stringify(record);
-}
-
-// The cap is a byte cap and a line cap, applied by dropping the oldest rows: the
-// log is a window, and a window that never ends is not readable.
-function capLog(text, maxBytes, maxLines) {
-  const limitBytes = asNumber(maxBytes) === null ? LOG_MAX_BYTES : maxBytes;
-  const limitLines = asNumber(maxLines) === null ? LOG_MAX_LINES : maxLines;
-  const lines = asString(text).split(/\n/).filter(line => line.trim().length > 0);
-  let out = lines;
-  if (out.length > limitLines) out = out.slice(out.length - limitLines);
-  let joined = out.join("\n");
-  while (out.length > 1 && joined.length > limitBytes) {
-    out = out.slice(1);
-    joined = out.join("\n");
-  }
-  return out;
-}
-
-function appendBaseline(existingText, record, opts) {
-  const before = capLog(existingText, opts && opts.maxBytes, opts && opts.maxLines);
-  const had = asString(existingText).split(/\n/).filter(line => line.trim().length > 0).length;
-  const kept = before.slice();
-  kept.push(logLine(record));
-  const after = capLog(kept.join("\n"), opts && opts.maxBytes, opts && opts.maxLines);
-  return {
-    text: after.length > 0 ? after.join("\n") + "\n" : "",
-    // Honest arithmetic: everything that did not survive, from the window that
-    // was already too long and from the row that pushed it over.
-    dropped: Math.max(0, had + 1 - after.length),
-  };
 }
 
 // Append without a shell: `dd oflag=append conv=notrunc` takes the line on
@@ -2771,10 +2613,6 @@ function zramctlArgs() {
   return ["zramctl", "--output=NAME,DISKSIZE,DATA,COMPR,MEM-USED,ALGORITHM"];
 }
 
-function healthArgs() {
-  return oomdActiveArgs();
-}
-
 // ---------------------------------------------------------------------------
 // Nothing fails silently. Each of these has a surfaced state and a defined
 // degradation, and the widget never shows a confident 0% for an unknown.
@@ -2847,12 +2685,6 @@ function degradationText(key) {
 function degradationSurface(key) {
   const entry = DEGRADATIONS[key];
   return entry === undefined ? "" : entry.surface;
-}
-
-// A stale reading is reported as stale. It is never rendered as 0%.
-function staleVerdict(reading) {
-  const r = reading || {};
-  return asNumber(r.pct) === null;
 }
 
 // ---------------------------------------------------------------------------

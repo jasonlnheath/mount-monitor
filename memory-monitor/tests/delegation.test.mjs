@@ -182,6 +182,9 @@ test("an escalation displaces the live notice by its show-time id, and the lane 
   const noticeProc = (QML.match(/id: noticeProc[^]*?\n  \}/) || [""])[0];
   assert.match(noticeProc, /stdout: SplitParser/, "the printed id arrives while the popup lives, not when it closes");
   assert.match(noticeProc, /noticePrintedId = id/, "the live id is what the escalation replaces and what a later generation retracts");
+  assert.match(noticeProc, /Memory\.patchArmClaimId\(next\.arms, root\.arm\.eventKey, id\)/,
+    "the printed id is persisted onto the started record, so a restart retracts by it");
+  assert.match(noticeProc, /writeState\(next\)/, "the persisted id is what survives into the file");
   assert.match(noticeProc, /root\.noticePreempting = false;/, "the displaced process's own exit is what fires the replacement");
 
   const queue = (QML.match(/function queueAlert\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";

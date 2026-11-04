@@ -17,31 +17,17 @@ test("the guard is on unless the user says otherwise - the ask is an insist, not
   assert.match(Memory.shouldStartArm({ band: 3, guard: false }).reason, /guard is off/);
 });
 
-test("the ask is the captain's copy, critical urgency, and never expires", () => {
-  const args = Memory.guardAskArgs({ guard: null });
-  assert.equal(args[0], "notify-send");
-  assert.equal(args[args.indexOf("-u") + 1], "critical");
-  assert.equal(args.includes("-t"), false, "a question that expires is a question that is never answered");
-  assert.equal(args[args.indexOf("-A") + 1], "default:Turn the guard on");
-  const hint = JSON.parse(args[args.indexOf("-h") + 1].slice("STRING:omarchy-exec-argv:".length));
-  same(hint, ["qs", "ipc", "call", "memory-monitor", "answerGuardAsk"]);
-  const body = args[args.length - 1];
+test("the ask is the captain's copy", () => {
+  assert.equal(Memory.guardAskTitle(), "Memory Monitor - the guard");
+  const body = Memory.guardAskBody({ guard: null });
   assert.match(body, /The guard is the agent that steps in when a critical line is crossed\./);
   assert.match(body, /It does guard: it runs when your critical threshold is reached\./);
   assert.match(body, /Turn it on\?$/);
   assert.match(Memory.guardAskBody({ guard: false }), /It is currently off\./);
 });
 
-test("a re-fired ask replaces the ask it answers instead of stacking one notice per shell restart", () => {
-  const withId = Memory.guardAskReplaceArgs("17", { guard: null });
-  assert.equal(withId[withId.indexOf("-r") + 1], "17");
-  const without = Memory.guardAskReplaceArgs("", { guard: null });
-  assert.equal(without.includes("-r"), false, "no captured id yet: send a fresh notice");
-  assert.deepEqual(without.slice(0, 4), Memory.guardAskArgs({ guard: null }).slice(0, 4));
-});
-
 test("the arm is refused when the machine has no headroom for it", () => {
-  const cost = Memory.guardArmCostKb();
+  const cost = Memory.GUARD_ARM_COST_KB;
   assert.ok(cost > 0, "the guard's cost is a named number, not a guess at launch time");
   const ok = Memory.armBudgetCheck(HEALTHY, OOMD);
   assert.equal(ok.ok, true);
@@ -81,14 +67,6 @@ test("the arm event identity is the event, not the wall clock", () => {
   assert.notEqual(a, Memory.armEventKey({ type: "ram", band: 3, key: "ram", epoch: 5 }));
   assert.notEqual(a, Memory.armEventKey({ type: "ram", band: 2, key: "ram", epoch: 4 }));
   assert.notEqual(a, Memory.armEventKey({ type: "hd", band: 3, key: "partuuid:x", epoch: 4 }));
-});
-
-test("the claim toast is critical, captures its id, and clicks to the detail window", () => {
-  const args = Memory.claimArgs("Memory Monitor", "body");
-  assert.equal(args[args.indexOf("-u") + 1], "critical");
-  assert.equal(args.includes("-p"), true, "the claim's id is captured so a dead guard can retract it");
-  assert.equal(args[args.indexOf("-A") + 1], "default:Open Memory Monitor");
-  same(JSON.parse(args[args.indexOf("-h") + 1].slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
 });
 
 test("the critical copy states the guard state the guard is actually in", () => {
@@ -275,6 +253,40 @@ test("a started record with a terminal successor is a finished arm, not an orpha
   assert.equal(plan.arms[1].outcome, "started", "the finished arm's start record stays as history");
   assert.equal(plan.arms[2].outcome, "survived");
   assert.equal(plan.retract.eventKey, "vram|3|vram|9");
+});
+
+test("the printed claim id reaches the persisted started record, so a restart retracts by it", () => {
+  const started = Memory.armRecord({
+    eventKey: "ram|3|ram|8",
+    type: "ram",
+    band: 3,
+    key: "ram",
+    id: Memory.memId("ram"),
+    pct: 97.2,
+    outcome: "started",
+    startedAt: "2026-11-04T00:00:00.000Z",
+    claimId: "",
+  });
+  const patched = Memory.patchArmClaimId([started], started.eventKey, "311");
+  assert.equal(patched.length, 1, "the id patches the started record in place, it does not append");
+  assert.equal(patched[0].claimId, "311", "the id the daemon printed is the id the record carries");
+  assert.equal(patched[0].outcome, "started", "the id arrives while the arm is running");
+
+  const died = Memory.armRecord(Object.assign({}, patched[0], {
+    outcome: "died",
+    survived: false,
+    endedAt: "2026-11-04T00:02:00.000Z",
+    reasons: ["killed by the watchdog"],
+  }));
+  const plan = Memory.retractClaimFor(died);
+  assert.equal(plan.replaceable, true, "a watchdog-killed arm retracts by the captured id, not a fresh toast");
+  assert.equal(plan.args[plan.args.indexOf("-r") + 1], "311");
+
+  same(Memory.patchArmClaimId([started], "hd|3|x|1", "311"), [started], "another arm's id patches nothing");
+  same(Memory.patchArmClaimId([started], started.eventKey, ""), [started], "an empty id patches nothing");
+  same(Memory.patchArmClaimId(null, started.eventKey, "311"), []);
+  const finished = Memory.armRecord(Object.assign({}, started, { outcome: "survived", claimId: "311" }));
+  same(Memory.patchArmClaimId([finished], started.eventKey, "999"), [finished], "a finished arm's record is history, not a claim holder");
 });
 
 test("the arm timeout is a named number", () => {

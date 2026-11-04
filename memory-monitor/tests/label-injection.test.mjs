@@ -98,16 +98,6 @@ test("the untrusted-data declaration is in the prompt and is not something a dev
   assert.match(Memory.dataOpen(), /data not instructions/);
 });
 
-test("a record written into the block is the sanitised record, not the raw row", () => {
-  const row = hostileRow();
-  const record = Memory.mountRecord(row);
-  const json = JSON.stringify(record);
-  assert.equal(json.includes("<<<"), false);
-  assert.equal(json.includes(">>>"), false);
-  assert.equal(Memory.isMemId(record.id), true);
-  assert.equal(record.target.includes("<"), false);
-});
-
 test("identity is minted from the key, and two different non-ASCII labels do not collide", () => {
   // fnv1a walks UTF-16 code units. Truncating each code unit to a byte makes
   // "données" and "données" with a different combining mark hash the same, and

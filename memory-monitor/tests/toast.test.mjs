@@ -234,11 +234,10 @@ test("a replacement notice carries the id of the notice it answers", () => {
   assert.equal(Memory.notifyReplaceArgs("", "t", "b"), null, "no id, no replacement - the caller sends a fresh notice");
 });
 
-test("-p is added only when the plugin has to capture the notice id", () => {
-  same(Memory.printIdArgs(["notify-send", "-a", "x", "t", "b"]), ["notify-send", "-p", "-a", "x", "t", "b"]);
-  same(Memory.printIdArgs(["notify-send", "-p", "-a", "x"]), ["notify-send", "-p", "-a", "x"]);
+test("the printed id is parsed from notify-send's output as it arrives", () => {
   assert.equal(Memory.parsePrintedId("12\n"), "12");
   assert.equal(Memory.parsePrintedId("notify-send: nothing\n"), "", "a non-numeric line is not an id");
+  assert.equal(Memory.parsePrintedId(""), "");
 });
 
 test("the DND setting is read from the notification service's own file", () => {

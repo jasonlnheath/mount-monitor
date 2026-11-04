@@ -21,7 +21,6 @@ test("a missing MemAvailable is unknown, never 0%", () => {
   assert.equal(Memory.ramUsedPct({ MemTotal: 0, MemAvailable: 0 }), null);
   const reading = Memory.ramReading({ MemTotal: 1000 });
   assert.equal(reading.pct, null);
-  assert.equal(Memory.staleVerdict(reading), true, "an unknown is reported as stale, not as empty");
 });
 
 test("the rig's meminfo parses to a full reading", () => {
