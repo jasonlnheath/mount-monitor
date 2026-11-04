@@ -809,6 +809,18 @@ function hdCandidate(row, targets) {
   };
 }
 
+// The reading a prompt carries is the reading of the event being fired: the row
+// whose key the alert names, never another device's numbers. An unknown key
+// falls back to the first row because a sentence still needs a reading; an
+// empty table is no reading at all.
+function hdRowFor(rows, key) {
+  const list = asList(rows) || [];
+  for (const row of list) {
+    if (row && row.key === key) return row;
+  }
+  return list.length > 0 ? list[0] : null;
+}
+
 function hdCandidates(text, targets) {
   const list = normalizeMounts(targets);
   const out = [];
@@ -1599,6 +1611,29 @@ function notifyLaneFor(alert) {
   return band >= 2 ? "notice" : "alert";
 }
 
+// Severity on the never-expiring lane, for escalation preemption. A question
+// sits below every alert: it is why an emergency never queues behind one.
+function noticeSeverity(notice) {
+  if (isOnboardingNotice(notice)) return 0;
+  return asNumber((notice || {}).band) || 0;
+}
+
+// A severity rise displaces the notice on the screen instead of queueing behind
+// it: critical displaces red, red displaces a question. Nothing displaces the
+// live claim of an already-armed guard, and nothing displaces nothing.
+function displacesLiveNotice(incoming, live) {
+  if (!incoming || !live) return false;
+  return noticeSeverity(incoming) > noticeSeverity(live);
+}
+
+// A queued alert a louder one supersedes is dropped when it reaches the head of
+// the lane. A queued question is not dropped: it is answered after the
+// emergency, so the escalation never erases it.
+function supersedesQueuedNotice(incoming, queued) {
+  if (!incoming || !queued || isOnboardingNotice(queued)) return false;
+  return noticeSeverity(incoming) > noticeSeverity(queued);
+}
+
 // Amber respects DND: silencing an amber is a legitimate choice the user made by
 // turning DND on. Red bypasses it. Critical is unchanged.
 function bypassesDnd(alert) {
@@ -1774,7 +1809,10 @@ function notifyArgs(alert, agentCommand, opts) {
   // stacking a second copy of a question that was never answered.
   const replace = sanitizeText(o.replaceId, 64);
   if (replace.length > 0) args.push("-r", replace);
-  if ((band >= 3 || isOnboardingNotice(alert)) && normalizeBool(o.printId, false)) args.push("-p");
+  // Every never-expiring notice prints its id: the claim needs it to be
+  // retractable when the arm dies, and an escalation needs it to displace this
+  // notice when a worse one arrives while it is still on the screen.
+  if (notifyLaneFor(alert) === "notice" && normalizeBool(o.printId, false)) args.push("-p");
   const body = bodyFor(alert);
   const title = titleFor(alert);
   if (title.length > 0) args.push(title);
@@ -2063,6 +2101,33 @@ function retractClaimFor(arm) {
     replaceable: true,
     args: notifyReplaceArgs(id, criticalTitle(), criticalBody({ pct: record.pct, guardState: "died" })),
   };
+}
+
+// A widget generation that starts up and finds an arm whose guard did not
+// survive the restart marks the persisted record died in place and retracts the
+// standing claim from the record alone - the in-memory arm of that generation is
+// not consulted. The record of the arm this generation is running is never its
+// own orphan, and the newest five records are the window: a generation retracts
+// one claim, so a restart that finds the same record cannot retract it twice.
+function reconcileArms(arms, liveEventKey) {
+  const list = asList(arms) || [];
+  const start = Math.max(0, list.length - 5);
+  for (let i = list.length - 1; i >= start; i--) {
+    const record = list[i];
+    if (!record || record.outcome !== "started") continue;
+    if (liveEventKey && sanitizeText(liveEventKey, 256) === record.eventKey) continue;
+    const died = armRecord(Object.assign({}, record, {
+      outcome: "died",
+      survived: false,
+      endedAt: new Date().toISOString(),
+      reasons: (asList(record.reasons) || []).concat([degradationText("arm-orphaned")]),
+    }));
+    return {
+      arms: list.slice(0, i).concat([died], list.slice(i + 1)),
+      retract: died,
+    };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -2571,6 +2636,19 @@ function alertsYouDidNotSeeText(events) {
     );
   }
   return lines.join("\n");
+}
+
+// The detail window's unseen-alert ring: the last events the window has not been
+// opened on, whatever the log append did in between. A silenced amber survives
+// every sample until the window is opened; the oldest falls off at the cap.
+function unseenAlertsMax() {
+  return 20;
+}
+
+function pushUnseenAlerts(list, alert) {
+  const out = (asList(list) || []).slice();
+  out.push(alert === undefined ? null : alert);
+  return out.length > unseenAlertsMax() ? out.slice(out.length - unseenAlertsMax()) : out;
 }
 
 function latchedText(latched) {

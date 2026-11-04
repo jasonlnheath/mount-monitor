@@ -173,6 +173,61 @@ test("an arm record carries what a retraction needs, so a restart can act on the
   assert.match(body, /has reached 98% usage/, "the fresh toast carries the record's own reading, rounded up");
 });
 
+test("a restart reconciles an orphaned arm from the file alone, once, and never the arm it is running", () => {
+  const survived = Memory.armRecord({ eventKey: "ram|3|ram|1", type: "ram", band: 3, outcome: "survived", survived: true });
+  const orphan = Memory.armRecord({
+    eventKey: "hd|3|partuuid:x|1",
+    type: "hd",
+    band: 3,
+    key: "partuuid:x",
+    id: Memory.memId("partuuid:x"),
+    pct: 96.4,
+    target: "/data",
+    outcome: "started",
+    startedAt: "2026-11-03T00:00:00.000Z",
+    claimId: "",
+  });
+  const live = Memory.armRecord({
+    eventKey: "ram|3|ram|2",
+    type: "ram",
+    band: 3,
+    key: "ram",
+    id: Memory.memId("ram"),
+    pct: 97.2,
+    outcome: "started",
+    startedAt: "2026-11-04T00:00:00.000Z",
+  });
+
+  const plan = Memory.reconcileArms([survived, orphan, live], live.eventKey);
+  assert.notEqual(plan, null);
+  assert.equal(plan.arms[0].outcome, "survived");
+  assert.equal(plan.arms[1].outcome, "died", "the orphaned record is marked died in place, not appended");
+  assert.equal(plan.arms[2].outcome, "started", "the arm this generation is running is never its own orphan");
+  assert.equal(plan.retract.eventKey, "hd|3|partuuid:x|1", "the retraction is built from the persisted record");
+  assert.match(plan.retract.reasons.join(" "), /shell restarted/);
+
+  const args = Memory.retractClaimFor(plan.retract).args;
+  assert.equal(args[0], "notify-send", "a restart acts on the file alone");
+  assert.match(args[args.length - 1], /has reached 97% usage/);
+
+  assert.equal(Memory.reconcileArms(plan.arms, live.eventKey), null, "reconciliation is exactly once");
+  assert.equal(Memory.reconcileArms([live], live.eventKey), null, "a live arm's own record is skipped");
+  assert.equal(Memory.reconcileArms([orphan], orphan.eventKey), null);
+  assert.equal(Memory.reconcileArms([], ""), null);
+  assert.equal(Memory.reconcileArms(null, ""), null);
+  const noLive = Memory.reconcileArms([survived, orphan], "");
+  assert.equal(noLive.arms[0].outcome, "survived");
+  assert.equal(noLive.arms[1].outcome, "died", "no live arm: a persisted started record is the orphan");
+
+  const beyond = [];
+  for (let i = 0; i < 6; i++) {
+    beyond.push(Memory.armRecord({ eventKey: "ram|3|ram|" + i, type: "ram", band: 3, outcome: "started" }));
+  }
+  const old = Memory.reconcileArms(beyond, "");
+  assert.equal(old.arms[0].outcome, "started", "a record outside the newest-five window waits for a later generation");
+  assert.equal(old.arms[5].outcome, "died", "the newest orphan is the one reconciled");
+});
+
 test("the arm timeout is a named number", () => {
   assert.ok(Memory.guardArmTimeoutMs() > 0);
   assert.ok(Memory.guardArmTimeoutMs() < 10 * 60 * 1000);

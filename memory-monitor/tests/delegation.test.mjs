@@ -178,6 +178,36 @@ test("the notice lane answers the notice it showed, and never asks a question tw
   assert.equal(QML.includes("Memory.groupHdByDevice(hdRows, latchedMap)"), true, "the latch map rides the group rebuild");
 });
 
+test("an escalation displaces the live notice by its show-time id, and the lane reads the id as it arrives", () => {
+  const noticeProc = (QML.match(/id: noticeProc[^]*?\n  \}/) || [""])[0];
+  assert.match(noticeProc, /stdout: SplitParser/, "the printed id arrives while the popup lives, not when it closes");
+  assert.match(noticeProc, /noticePrintedId = id/, "the live id is what the escalation replaces and what a later generation retracts");
+  assert.match(noticeProc, /root\.noticePreempting = false;/, "the displaced process's own exit is what fires the replacement");
+
+  const queue = (QML.match(/function queueAlert\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(queue, /Memory\.supersedesQueuedNotice\(alert, noticeQueue\[i\]\)/, "which queued notice a louder one supersedes is decided in memory.js");
+  assert.match(queue, /Memory\.displacesLiveNotice\(alert, activeNotice\)/, "whether the live notice is displaced is decided in memory.js");
+  assert.match(queue, /preemptLiveNotice\(alert\)/, "the escalation displaces instead of queueing behind the live notice");
+
+  const preempt = (QML.match(/function preemptLiveNotice\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(preempt, /replaceId = noticePrintedId/, "the replacement carries the live notice's own id");
+  assert.match(preempt, /noticeProc\.running = false/, "the displaced notice frees the lane at once");
+});
+
+test("the unseen-alert ring survives samples and is emptied when the window opens", () => {
+  const record = (QML.match(/function recordAlertEvent\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(record, /Memory\.pushUnseenAlerts\(unseenAlerts, alert\)/, "the ring's cap and order are decided in memory.js");
+
+  const log = (QML.match(/function appendLog\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(log, /pendingAlertEvents = \[\];/, "the log row takes the sample's events and clears them");
+  assert.equal(log.includes("unseenAlerts"), false, "the ring survives every writer sample");
+
+  const open = (QML.match(/function open\(\): void \{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(open, /unseenAlerts = \[\];/, "opening the window is what empties the ring");
+  assert.equal(PANEL.includes('mon("unseenAlerts", [])'), true, "the detail window reads the ring, not the per-sample log feed");
+  assert.equal(PANEL.includes("pendingAlertEvents"), false);
+});
+
 test("an arm finishes once, and a killed arm is never read as a survivor", () => {
   assert.match(QML, /if \(arm === null \|\| arm\.outcome !== "started"\) return;/,
     "the watchdog's synchronous finish is the record; the process's own exit cannot write a second one");
@@ -185,7 +215,7 @@ test("an arm finishes once, and a killed arm is never read as a survivor", () =>
     "a signal death is a death even when the watchdog already gave up");
 });
 
-test("the arm is on the file when it starts, and a restart reconciles from the record", () => {
+test("the arm is on the file when it starts, and the orphan decision is memory.js's", () => {
   const start = (QML.match(/function startArm\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
   assert.equal((start.match(/recordArm\(arm\);/g) || []).length, 2,
     "the started record is persisted before the process runs, the refused record too");
@@ -193,13 +223,16 @@ test("the arm is on the file when it starts, and a restart reconciles from the r
   assert.match(start, /pct: alert\.pct/, "the persisted record carries the reading");
 
   const reconcile = (QML.match(/function reconcilePersistedArms\(\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
-  assert.match(reconcile, /outcome: "died"/, "the orphaned record is marked died in place, so no later generation re-retracts it");
-  assert.match(reconcile, /retractClaim\(died\);/, "the retraction is built from the persisted record, not the in-memory arm");
+  assert.match(reconcile, /Memory\.reconcileArms\(/, "which persisted record is an orphan is decided in memory.js");
+  assert.match(reconcile, /if \(reconcileDone\) return;/, "the reconcile runs once per widget generation: the widget's own state writes re-enter loadState through the file watch");
+  assert.match(reconcile, /liveArmKey/, "the record of the arm this generation is running is skipped");
+  assert.match(reconcile, /retractClaim\(plan\.retract\);/, "the retraction is built from the persisted record, not the in-memory arm");
   assert.equal(reconcile.includes("finishArm("), false, "reconciliation never depends on this generation holding an arm");
 });
 
 test("the reading a prompt carries is the reading of the alert being fired", () => {
   const reading = (QML.match(/function readingFor\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(reading, /Memory\.hdRowFor\(hdRows/, "which row an event names is decided in memory.js");
   assert.match(reading, /event\.key/, "the event being fired picks the row, not a lane-global");
   assert.match(reading, /activeAlert\.key/, "the live alert still resolves a one-argument call");
   assert.equal(QML.includes("readingFor(alert.type, alert)"), true, "every lane passes the alert it is firing");

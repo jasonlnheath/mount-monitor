@@ -93,6 +93,40 @@ test("a never-expiring alert goes to the notice lane, so it cannot hold the aler
   assert.equal(Memory.timeoutFor(ramAlert(3, 98)), 0);
 });
 
+test("escalation displaces the live notice instead of queueing behind it", () => {
+  const red = ramAlert(2, 91);
+  const critical = ramAlert(3, 98);
+  const ceilings = { kind: "ceilings", band: 3, key: "ceilings" };
+  assert.equal(Memory.noticeSeverity(red), 2);
+  assert.equal(Memory.noticeSeverity(critical), 3);
+  assert.equal(Memory.noticeSeverity(ceilings), 0, "a question sits below every alert");
+
+  assert.equal(Memory.displacesLiveNotice(critical, red), true, "critical displaces a live red");
+  assert.equal(Memory.displacesLiveNotice(red, ceilings), true, "red displaces a live question");
+  assert.equal(Memory.displacesLiveNotice(red, red), false);
+  assert.equal(Memory.displacesLiveNotice(critical, critical), false, "the live claim of an armed guard is never displaced");
+  assert.equal(Memory.displacesLiveNotice(critical, null), false);
+  assert.equal(Memory.displacesLiveNotice(null, red), false, "nothing comes from nothing");
+
+  assert.equal(Memory.supersedesQueuedNotice(critical, red), true, "a queued red superseded by a critical is dropped");
+  assert.equal(Memory.supersedesQueuedNotice(critical, ceilings), false, "a queued question survives the emergency and is answered after it");
+  assert.equal(Memory.supersedesQueuedNotice(red, red), false);
+  assert.equal(Memory.supersedesQueuedNotice(critical, null), false);
+});
+
+test("every notice-lane send prints its id, so an escalation can replace the live notice by it", () => {
+  const red = Memory.notifyArgs(ramAlert(2, 91), null, { printId: true });
+  assert.equal(red.includes("-p"), true, "a red toast is replaceable by the critical that displaces it");
+  const critical = Memory.notifyArgs(ramAlert(3, 98), null, { clickArgv: Memory.ipcOpenDetailArgv(), printId: true });
+  assert.equal(critical.includes("-p"), true, "the claim's id is what a later generation retracts");
+  const ask = Memory.notifyArgs({ kind: "guard-ask", band: 3 }, null, { printId: true });
+  assert.equal(ask.includes("-p"), true, "a displaced question is replaced by the ask that follows it");
+  const amber = Memory.notifyArgs(ramAlert(1, 82), null, { printId: true });
+  assert.equal(amber.includes("-p"), false, "the amber lane has nothing to displace and no claim to retract");
+  const replace = Memory.notifyArgs(ramAlert(3, 98), null, { printId: true, replaceId: "47" });
+  assert.equal(replace[replace.indexOf("-r") + 1], "47", "the displacing notice carries the live id it replaces");
+});
+
 test("amber is silenced by DND, red is not", () => {
   assert.equal(Memory.deliveryVerdict(ramAlert(1, 82), true), "silenced-dnd");
   assert.equal(Memory.deliveryVerdict(ramAlert(2, 91), true), "shown");

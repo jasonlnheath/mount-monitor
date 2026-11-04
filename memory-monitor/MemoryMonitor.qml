@@ -463,7 +463,11 @@ BarWidget {
       // Band escalation preempts an unanswered lower-band toast rather than
       // queueing behind it.
       for (var i = 0; i < noticeQueue.length; i++) {
-        if (noticeQueue[i].band < band) noticeQueue[i].preempt = true;
+        if (Memory.supersedesQueuedNotice(alert, noticeQueue[i])) noticeQueue[i].preempt = true;
+      }
+      if (Memory.displacesLiveNotice(alert, activeNotice)) {
+        preemptLiveNotice(alert);
+        return;
       }
       if (noticeQueue.length >= noticeQueueMax) noticeQueue.shift();
       noticeQueue = noticeQueue.concat([alert]);
@@ -477,6 +481,7 @@ BarWidget {
 
   function recordAlertEvent(alert): void {
     pendingAlertEvents = pendingAlertEvents.concat([alert]);
+    unseenAlerts = Memory.pushUnseenAlerts(unseenAlerts, alert);
   }
 
   // ---------------------------------------------------------------------------
@@ -503,11 +508,9 @@ BarWidget {
   }
 
   function readingFor(type, event): var {
-    var key = event ? event.key : (activeAlert ? activeAlert.key : "");
     if (type === "ram") return ramReading;
     if (type === "vram") return vramReading;
-    for (var i = 0; i < hdRows.length; i++) if (hdRows[i].key === key) return hdRows[i];
-    return hdRows.length > 0 ? hdRows[0] : null;
+    return Memory.hdRowFor(hdRows, event ? event.key : (activeAlert ? activeAlert.key : ""));
   }
 
   function releaseActiveAlert(reason): void {
@@ -524,7 +527,7 @@ BarWidget {
 
   function fireNextNotice(): void {
     if (!isWriter) return;
-    if (noticeProc.running || noticeQueue.length === 0) return;
+    if (noticePreempting || noticeProc.running || noticeQueue.length === 0) return;
     var alert = noticeQueue[0];
     if (alert.preempt) {
       noticeQueue = noticeQueue.slice(1);
@@ -543,7 +546,7 @@ BarWidget {
     });
     var args = Memory.notifyArgs(alert, agentCommandArgv(), {
       clickArgv: clickArgv,
-      printId: alert.band >= 3 || Memory.isOnboardingNotice(alert),
+      printId: true,
       replaceId: alert.replaceId === undefined ? "" : alert.replaceId,
     });
     noticeProcArgs = args;
@@ -553,6 +556,25 @@ BarWidget {
     // A question is not an emergency: the ceiling question and the guard ask ride
     // the critical lane so they stay clickable, and neither one arms an agent.
     if (Memory.isArmNotice(alert) && guardState === "armed") startArm(alert);
+  }
+
+  // A severity rise over the notice on the screen displaces it: the incoming
+  // notice takes the lane at its head and re-sends over the live id, the
+  // displaced one leaves the queue, and its process is stopped so the lane frees
+  // at once. The displaced notice's own exit is what fires the replacement, and
+  // a displaced question stays unrecorded - it is re-asked when the lane is free,
+  // because it was interrupted, not answered.
+  function preemptLiveNotice(incoming): void {
+    incoming.replaceId = noticePrintedId;
+    var live = activeNotice;
+    activeNotice = null;
+    noticePreempting = true;
+    var rest = [];
+    for (var i = 0; i < noticeQueue.length; i++) {
+      if (noticeQueue[i] !== live) rest.push(noticeQueue[i]);
+    }
+    noticeQueue = [incoming].concat(rest);
+    noticeProc.running = false;
   }
 
   // The claim is only ever emitted when the arm is about to start. Guard-off and
@@ -661,26 +683,20 @@ BarWidget {
 
   // A widget generation that starts up and finds an arm whose guard did not
   // survive marks the persisted record died and retracts the standing claim by
-  // the record's own id, before this generation has an arm of its own.
+  // the record's own id, before this generation has an arm of its own. The
+  // widget's own state writes re-enter loadState through the file watch, so the
+  // reconcile runs once per generation: a reload cannot re-arm it, and the
+  // record of an arm this generation is running is skipped.
   function reconcilePersistedArms(): void {
+    if (reconcileDone) return;
+    reconcileDone = true;
     if (!isWriter) return;
-    var arms = state && state.arms ? state.arms : [];
-    for (var i = arms.length - 1; i >= 0 && i >= arms.length - 5; i--) {
-      var record = arms[i];
-      if (record && record.outcome === "started") {
-        var died = Memory.armRecord(Object.assign({}, record, {
-          outcome: "died",
-          survived: false,
-          endedAt: new Date().toISOString(),
-          reasons: (record.reasons || []).concat([Memory.degradationText("arm-orphaned")]),
-        }));
-        var next = JSON.parse(JSON.stringify(state));
-        next.arms = arms.slice(0, i).concat([died], arms.slice(i + 1));
-        writeState(next);
-        retractClaim(died);
-        return;
-      }
-    }
+    var plan = Memory.reconcileArms(state && state.arms ? state.arms : [], liveArmKey);
+    if (plan === null) return;
+    var next = JSON.parse(JSON.stringify(state));
+    next.arms = plan.arms;
+    writeState(next);
+    retractClaim(plan.retract);
   }
 
   // ---------------------------------------------------------------------------
@@ -862,7 +878,7 @@ BarWidget {
   }
 
   function showDetail(): void {
-    if (panelLoader.item) panelLoader.item.open();
+    open();
   }
 
   // ---------------------------------------------------------------------------
@@ -875,12 +891,15 @@ BarWidget {
   property bool swapEscalatedLast: false
   property var activeAlert: null
   property var activeNotice: null
+  property bool noticePreempting: false
   property var notifyProcArgs: []
   property var noticeProcArgs: []
   property string noticePrintedId: ""
   property var pendingAlertEvents: []
+  property var unseenAlerts: []
   property int logBytesWritten: 0
   property bool stateDirDone: false
+  property bool reconcileDone: false
   property bool stateWritten: false
   property string lastStateWrite: ""
   property string vramVerdict: ""
@@ -1067,11 +1086,14 @@ BarWidget {
   Process {
     id: noticeProc
     command: ["true"]
-    // A critical claim carries -p, and the printed id is what lets a later
-    // generation retract the claim when the arm it names dies.
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var id = Memory.parsePrintedId(this.text);
+    // Every notice on this lane carries -p, and the printed id is what lets an
+    // escalation replace this notice while it is still on the screen and what
+    // lets a later generation retract the claim when the arm it names dies. The
+    // id is read as it arrives, not when the popup closes.
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: (line) => {
+        var id = Memory.parsePrintedId(line);
         if (id !== "") {
           root.noticePrintedId = id;
           if (root.arm !== null && root.arm.outcome === "started") {
@@ -1086,6 +1108,7 @@ BarWidget {
     onExited: function(exitCode, exitStatus) {
       var notice = root.activeNotice;
       root.activeNotice = null;
+      root.noticePreempting = false;
       if (notice !== null) {
         root.recordNoticeDelivered(notice, exitCode);
         var at = root.noticeQueue.indexOf(notice);
@@ -1474,6 +1497,7 @@ BarWidget {
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
   function open(): void {
+    unseenAlerts = [];
     if (panelLoader.item) panelLoader.item.open();
   }
 

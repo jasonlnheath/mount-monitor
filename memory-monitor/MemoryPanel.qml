@@ -69,7 +69,7 @@ Panel {
   readonly property var devices: mon("hdDevices", [])
   readonly property var oomd: mon("oomd", null)
   readonly property var mmState: mon("state", {})
-  readonly property var alertEvents: mon("pendingAlertEvents", [])
+  readonly property var alertEvents: mon("unseenAlerts", [])
 
   function bandColor(band) {
     if (band >= 2) return root.redColor

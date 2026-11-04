@@ -134,6 +134,18 @@ test("a watched drive Mount Monitor also watches is suppressed through the group
   assert.equal(Memory.hdAlertSuppressed(undefined, qtList(["/"])), false, "a group with no target is never suppressed");
 });
 
+test("the reading a prompt carries is the row of the event being fired", () => {
+  const rows = Memory.hdCandidates(SUBS, ["/", "/home", "/mnt/models"]);
+  const root = rows.find(row => row.key === "partuuid:a02330f1-304d-459b-8274-e52ab1cf11ba");
+  const stick = rows.find(row => row.target === "/mnt/models");
+
+  assert.equal(Memory.hdRowFor(rows, root.key), root, "the alert's key picks its own row");
+  assert.equal(Memory.hdRowFor(rows, stick.key), stick);
+  assert.equal(Memory.hdRowFor(rows, "partuuid:gone"), rows[0], "an unknown key falls back to the first row, never to a guessed device");
+  assert.equal(Memory.hdRowFor([], "partuuid:x"), null, "no rows is no reading at all");
+  assert.equal(Memory.hdRowFor(null, "partuuid:x"), null);
+});
+
 test("partition identity is PARTUUID, else UUID, else the device path", () => {
   assert.equal(
     Memory.hdDeviceKey({ PARTUUID: "abc", UUID: "def", SOURCE: "/dev/sda1" }),
