@@ -227,11 +227,24 @@ test("the exec hint sends nothing the notification service's own validator would
   same(JSON.parse(Memory.execHintValue(["qs", "ipc", "call", "memory-monitor", "openDetail"])), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
 });
 
-test("a replacement notice carries the id of the notice it answers", () => {
-  const args = Memory.notifyReplaceArgs("42", "Memory Monitor", "body");
+test("a replacement notice carries the id of the notice it answers, and the click its copy promises", () => {
+  const args = Memory.notifyReplaceArgs("42", "Memory Monitor", "body", {
+    clickArgv: Memory.ipcOpenDetailArgv(),
+    action: Memory.actionFor({ kind: "alert", band: 3 }),
+  });
   same(args.slice(0, 7), ["notify-send", "-a", "Memory Monitor", "-e", "-r", "42", "-u"]);
   assert.equal(args[args.indexOf("-u") + 1], "critical");
-  assert.equal(Memory.notifyReplaceArgs("", "t", "b"), null, "no id, no replacement - the caller sends a fresh notice");
+  assert.equal(args[args.indexOf("-A") + 1], "default:Open Memory Monitor");
+  const hint = args[args.indexOf("-h") + 1];
+  assert.match(hint, /^STRING:omarchy-exec-argv:/);
+  same(JSON.parse(hint.slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
+  assert.equal(args[args.length - 2], "Memory Monitor");
+  assert.equal(args[args.length - 1], "body");
+  assert.equal(Memory.notifyReplaceArgs("", "t", "b", {}), null, "no id, no replacement - the caller sends a fresh notice");
+
+  const refused = Memory.notifyReplaceArgs("42", "t", "b", { clickArgv: ["-rm", "-rf", "/"], action: "Open" });
+  assert.equal(refused.includes("-h"), false, "a program the notification service would refuse is not sent as a hint");
+  assert.equal(refused[refused.indexOf("-A") + 1], "default:Open", "the live action stays");
 });
 
 test("the printed id is parsed from notify-send's output as it arrives", () => {

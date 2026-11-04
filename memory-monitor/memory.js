@@ -1756,11 +1756,20 @@ function notifyArgs(alert, agentCommand, opts) {
 }
 
 // A claim that must not outlive the arm it names is re-sent with `-r <id>`, the
-// same replacement mechanism the insist-guard uses.
-function notifyReplaceArgs(id, title, body) {
+// same replacement mechanism the insist-guard uses, and carries the same click
+// plumbing every toast carries: the death sentence says "Click to open Memory
+// Monitor", so the argv has to deliver that click.
+function notifyReplaceArgs(id, title, body, opts) {
+  const o = opts || {};
   const claimId = sanitizeText(id, 64);
   if (claimId.length === 0) return null;
-  return ["notify-send", "-a", NOTIFIER_APP, "-e", "-r", claimId, "-u", "critical", asString(title), asString(body)];
+  const args = ["notify-send", "-a", NOTIFIER_APP, "-e", "-r", claimId, "-u", "critical"];
+  const action = sanitizeText(o.action, 64);
+  if (action.length > 0) args.push("-A", "default:" + action);
+  const hint = execHintValue(o.clickArgv);
+  if (hint.length > 0) args.push("-h", "STRING:" + EXEC_HINT_KEY + ":" + hint);
+  args.push(asString(title), asString(body));
+  return args;
 }
 
 function parsePrintedId(text) {
@@ -1991,7 +2000,10 @@ function retractClaimFor(arm) {
   }
   return {
     replaceable: true,
-    args: notifyReplaceArgs(id, criticalTitle(), criticalBody({ pct: record.pct, guardState: "died" })),
+    args: notifyReplaceArgs(id, criticalTitle(), criticalBody({ pct: record.pct, guardState: "died" }), {
+      clickArgv: ipcOpenDetailArgv(),
+      action: actionFor({ kind: "alert", band: 3 }),
+    }),
   };
 }
 
@@ -2036,6 +2048,17 @@ function reconcileArms(arms, liveEventKey) {
 // replaces the claim still on the screen, instead of stacking a second toast
 // beside one it cannot name. The newest started record for the key is patched
 // in place; a finished arm's records are history and take no patch.
+// A printed id may reach the claim only from the notice that IS the claim: the
+// same event the arm was started for, and a band alert - a question never claims
+// an agent. Any other notice printing on the never-expiring lane while the arm
+// is live is another notice's id, and patching it onto the record would have a
+// death retract by an id the claim never held.
+function isArmClaimNotice(arm, notice) {
+  if (!arm || !notice) return false;
+  if (isOnboardingNotice(notice)) return false;
+  return armEventKey(notice) === sanitizeText(arm.eventKey, 256);
+}
+
 function patchArmClaimId(arms, eventKey, claimId) {
   const list = asList(arms) || [];
   const key = sanitizeText(eventKey, 256);

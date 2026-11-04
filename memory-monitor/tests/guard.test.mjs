@@ -81,6 +81,10 @@ test("a dead guard retracts its claim by the captured id", () => {
   const died = Memory.retractClaimFor({ outcome: "died", claimId: "99", pct: 98 });
   assert.equal(died.replaceable, true);
   assert.equal(died.args[died.args.indexOf("-r") + 1], "99");
+  assert.equal(died.args[died.args.indexOf("-A") + 1], "default:Open Memory Monitor", "the death toast's copy says Click to open Memory Monitor");
+  const hint = died.args[died.args.indexOf("-h") + 1];
+  assert.match(hint, /^STRING:omarchy-exec-argv:/);
+  same(JSON.parse(hint.slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
   assert.match(died.args[died.args.length - 1], /The guard did not survive/);
 
   const noId = Memory.retractClaimFor({ outcome: "died", type: "ram", key: "ram", id: Memory.memId("ram"), claimId: "", pct: 98 });
@@ -287,6 +291,30 @@ test("the printed claim id reaches the persisted started record, so a restart re
   same(Memory.patchArmClaimId(null, started.eventKey, "311"), []);
   const finished = Memory.armRecord(Object.assign({}, started, { outcome: "survived", claimId: "311" }));
   same(Memory.patchArmClaimId([finished], started.eventKey, "999"), [finished], "a finished arm's record is history, not a claim holder");
+});
+
+test("only the arm's own claim toast hands its id to the claim", () => {
+  const claim = { type: "ram", band: 3, key: "ram", id: Memory.memId("ram"), pct: 97.2, target: null };
+  const arm = Memory.armRecord({
+    eventKey: Memory.armEventKey(claim),
+    type: "ram",
+    band: 3,
+    key: "ram",
+    id: Memory.memId("ram"),
+    pct: 97.2,
+    outcome: "started",
+    startedAt: "2026-11-04T00:00:00.000Z",
+    claimId: "",
+  });
+  assert.equal(Memory.isArmClaimNotice(arm, claim), true, "the claim toast names the arm's own event");
+  assert.equal(
+    Memory.isArmClaimNotice(arm, { type: "vram", band: 2, key: "vram", id: Memory.memId("vram"), pct: 91 }),
+    false, "a red toast for another resource never claims",
+  );
+  assert.equal(Memory.isArmClaimNotice(arm, { kind: "ceilings", band: 3 }), false, "a question never claims an agent");
+  assert.equal(Memory.isArmClaimNotice(arm, { type: "ram", band: 2, key: "ram", id: Memory.memId("ram") }), false, "a lower-band notice of the same resource is not the claim");
+  assert.equal(Memory.isArmClaimNotice(arm, null), false);
+  assert.equal(Memory.isArmClaimNotice(null, claim), false);
 });
 
 test("the arm timeout is a named number", () => {

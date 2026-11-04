@@ -107,6 +107,7 @@ BarWidget {
 
   // ---- The single-flight arm, machine-wide, keyed by the event identity.
   property var arm: null
+  property var armClaimNotice: null
   property var liveArmKey: ""
 
   // ---- Which instance owns the shared side effects for this sample.
@@ -609,6 +610,7 @@ BarWidget {
       writer: isWriter,
     });
     if (!decision.start) {
+      armClaimNotice = null;
       arm = Memory.armRecord({
         eventKey: eventKey,
         type: alert.type,
@@ -625,6 +627,7 @@ BarWidget {
       ? Memory.agentArgvWithInline(prompt, agentCommandArgv())
       : Memory.agentArgv(prompt, agentCommandArgv());
     liveArmKey = eventKey;
+    armClaimNotice = alert;
     arm = Memory.armRecord({
       eventKey: eventKey,
       type: alert.type,
@@ -653,6 +656,7 @@ BarWidget {
       reasons: (arm.reasons || []).concat(reasons || []),
     }));
     liveArmKey = "";
+    armClaimNotice = null;
     armWatchdog.stop();
     recordArm(arm);
     if (outcome === "died") retractClaim(arm);
@@ -1096,7 +1100,10 @@ BarWidget {
         var id = Memory.parsePrintedId(line);
         if (id !== "") {
           root.noticePrintedId = id;
-          if (root.arm !== null && root.arm.outcome === "started") {
+          var ownClaim = root.arm !== null && root.arm.outcome === "started"
+            && root.activeNotice === root.armClaimNotice
+            && Memory.isArmClaimNotice(root.arm, root.activeNotice);
+          if (ownClaim) {
             root.arm = Memory.armRecord(Object.assign({}, root.arm, { claimId: id }));
             var next = JSON.parse(JSON.stringify(state));
             var patched = Memory.patchArmClaimId(next.arms, root.arm.eventKey, id);

@@ -184,8 +184,13 @@ test("an escalation displaces the live notice by its show-time id, and the lane 
   assert.match(noticeProc, /noticePrintedId = id/, "the live id is what the escalation replaces and what a later generation retracts");
   assert.match(noticeProc, /Memory\.patchArmClaimId\(next\.arms, root\.arm\.eventKey, id\)/,
     "the printed id is persisted onto the started record, so a restart retracts by it");
+  assert.match(noticeProc, /root\.activeNotice === root\.armClaimNotice/, "the id is accepted only from the lane slot the claim toast occupies");
+  assert.match(noticeProc, /Memory\.isArmClaimNotice\(root\.arm, root\.activeNotice\)/, "whether a printed id names the claim is decided in memory.js");
   assert.match(noticeProc, /writeState\(next\)/, "the persisted id is what survives into the file");
   assert.match(noticeProc, /root\.noticePreempting = false;/, "the displaced process's own exit is what fires the replacement");
+
+  const startArm = (QML.match(/function startArm\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [""])[0];
+  assert.match(startArm, /armClaimNotice = alert/, "the arm remembers the notice that is its claim toast");
 
   const queue = (QML.match(/function queueAlert\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
   assert.match(queue, /Memory\.supersedesQueuedNotice\(alert, noticeQueue\[i\]\)/, "which queued notice a louder one supersedes is decided in memory.js");
