@@ -587,6 +587,7 @@ BarWidget {
       guard: guardOn(),
       budgetOk: budget.ok,
       armDied: false,
+      armLive: Memory.armIsLive(arm),
     });
   }
 
@@ -744,6 +745,7 @@ BarWidget {
   function writeState(next): void {
     next.primed = primed;
     next.bands = bands;
+    state = next;
     var payload = JSON.stringify(next);
     if (payload === lastStateWrite) return;
     lastStateWrite = payload;

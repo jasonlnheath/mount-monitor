@@ -68,6 +68,14 @@ test("the critical copy names the guard state it is actually in", () => {
   const fallback = Memory.criticalBody({ pct: 98, guardState: "who knows" });
   assert.equal(fallback.includes("has been notified"), false);
   assert.match(fallback, /The guard could not start/);
+
+  // An arm already live is not a fresh claim: the sentence is suppressed, and
+  // the reading is still reported.
+  const unbacked = Memory.criticalBody({ pct: 96.4, guardState: "unbacked" });
+  assert.equal(unbacked.includes("has been notified"), false, "a critical while an arm is live carries no claim sentence");
+  assert.equal(unbacked.includes("could not start"), false, "and no false fallback sentence either");
+  assert.match(unbacked, /Device has reached 97% usage\./);
+  assert.equal(unbacked.split("\n").length, 2, "the claim is suppressed, not replaced by new copy");
 });
 
 test("only an armed guard emits the claim", () => {

@@ -158,6 +158,7 @@ test("a held band and the priming survive a shell restart through the state file
   const write = (QML.match(/function writeState\(next\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
   assert.match(write, /next\.primed = primed;/, "every writer stamps the priming, so no writer persists a stale one");
   assert.match(write, /next\.bands = bands;/, "every writer stamps the held bands, so a ceiling write cannot lose them");
+  assert.match(write, /state = next;/, "what the writer wrote is what the widget holds: the show-time patch reads the record startArm just persisted");
 
   const apply = (QML.match(/function applyBand\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
   assert.match(apply, /psiCrossing: psiNow && !psiStalledLast/, "PSI is passed as the crossing, not the standing level");
@@ -191,6 +192,9 @@ test("an escalation displaces the live notice by its show-time id, and the lane 
 
   const startArm = (QML.match(/function startArm\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [""])[0];
   assert.match(startArm, /armClaimNotice = alert/, "the arm remembers the notice that is its claim toast");
+
+  const queueGuardState = (QML.match(/function queueGuardState\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(queueGuardState, /armLive: Memory\.armIsLive\(arm\)/, "the queue-time guard state knows whether an arm is already live");
 
   const queue = (QML.match(/function queueAlert\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
   assert.match(queue, /Memory\.supersedesQueuedNotice\(alert, noticeQueue\[i\]\)/, "which queued notice a louder one supersedes is decided in memory.js");

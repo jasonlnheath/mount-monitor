@@ -75,6 +75,8 @@ test("the critical copy states the guard state the guard is actually in", () => 
   assert.equal(Memory.guardStateFor({ guard: true, budgetOk: true, armDied: true }), "died");
   assert.equal(Memory.guardStateFor({ guard: true, budgetOk: true }), "armed");
   assert.equal(Memory.guardStateFor({}), "armed", "unanswered still means armed");
+  assert.equal(Memory.guardStateFor({ guard: true, budgetOk: true, armLive: true }), "unbacked", "an arm already live is not a fresh claim");
+  assert.equal(Memory.guardStateFor({ guard: true, budgetOk: false, armLive: true }), "unbacked", "the running guard outranks today's headroom");
 });
 
 test("a dead guard retracts its claim by the captured id", () => {

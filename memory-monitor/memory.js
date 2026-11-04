@@ -123,8 +123,6 @@ var GUARD_TERMINAL_KB = 130 * 1024;
 var GUARD_ARM_COST_KB = GUARD_AGENT_RSS_KB + GUARD_TERMINAL_KB;
 var GUARD_ARM_HEADROOM_KB = 256 * 1024;
 var GUARD_ARM_TIMEOUT_MS = 120000;
-var GUARD_CLAIM_ID = "mem-guard-claim";
-var GUARD_ASK_ID = "mem-guard-ask";
 
 // ---------------------------------------------------------------------------
 // Paths. Distinct state directory, distinct log file. The baseline log is the
@@ -1476,12 +1474,17 @@ function criticalGuardStates() {
 function criticalBody(opts) {
   const o = opts || {};
   const pct = readingPct(o.pct);
-  const state = criticalGuardStates().indexOf(o.guardState) >= 0 ? o.guardState : "refused";
-  return [
+  const lines = [
     "CRITICAL ALERT!",
     "Device has reached " + pct + "% usage.",
-    GUARD_VARIANTS[state],
-  ].join("\n");
+  ];
+  // An arm already live is not a fresh claim: the guard this toast would name
+  // belongs to an earlier arm, so the claim sentence is suppressed rather than
+  // shipped as a sentence no retraction will ever cover.
+  if (o.guardState === "unbacked") return lines.join("\n");
+  const state = criticalGuardStates().indexOf(o.guardState) >= 0 ? o.guardState : "refused";
+  lines.push(GUARD_VARIANTS[state]);
+  return lines.join("\n");
 }
 
 function bodyFor(alert) {
@@ -2145,7 +2148,11 @@ function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
   lines.push("The kernel's ceiling: " + kernelCeilingText(oomd));
   const sitting = restingPctFor(resting, type);
   const rec = recommendCeilings(type, resting);
-  lines.push("Recommended from this machine: amber " + rec.amber + "%, red " + rec.red + "%, critical " + rec.critical + "%.");
+  if (rec.provisional) {
+    lines.push("Recommended defaults until measured: amber " + DEFAULT_AMBER + "%, red " + DEFAULT_RED + "%, critical unset.");
+  } else {
+    lines.push("Recommended from this machine: amber " + rec.amber + "%, red " + rec.red + "%, critical " + rec.critical + "%.");
+  }
   if (sitting === null) {
     lines.push(restingUnmeasuredText());
   } else if (sitting >= t.amber) {
@@ -2746,6 +2753,7 @@ function shouldStartArm(opts) {
 function guardStateFor(opts) {
   const o = opts || {};
   if (!normalizeBool(o.guard, true)) return "off";
+  if (normalizeBool(o.armLive, false)) return "unbacked";
   if (!normalizeBool(o.budgetOk, true)) return "refused";
   if (normalizeBool(o.armDied, false)) return "died";
   return "armed";

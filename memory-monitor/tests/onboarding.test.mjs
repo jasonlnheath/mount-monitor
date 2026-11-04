@@ -77,6 +77,18 @@ test("the resting claim is measured from the log, and withheld until the log hol
   assert.equal(answered.includes("No resting claim yet"), false);
 });
 
+test("an unmeasured machine is recommended the documented defaults, never 'from this machine'", () => {
+  const unmeasured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, null);
+  assert.match(unmeasured, /Recommended defaults until measured: amber 80%, red 90%, critical unset\./);
+  assert.equal(unmeasured.includes("from this machine"), false, "an unmeasured machine claims no provenance");
+  const rec = Memory.recommendCeilings("ram", null);
+  assert.ok(rec.amber < rec.red, "the provisional pair is never amber above red");
+
+  const measured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 93 });
+  assert.match(measured, /^Recommended from this machine: amber 95%, red 98%, critical 99%\.$/m);
+  assert.equal(measured.includes("Recommended defaults until measured"), false);
+});
+
 test("a recommendation is a recommendation: derived from the resting reading, capped, and marked provisional without one", () => {
   const rec = Memory.recommendCeilings("ram", { ram: 93 });
   assert.equal(rec.restingPct, 93);
