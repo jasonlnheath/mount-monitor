@@ -1387,9 +1387,10 @@ function severityRank(entry) {
   return band * 1000000 + (1000000 - Math.min(1000000, Math.max(-1000000, Math.round(headroom * 100)))) - idx;
 }
 
-// The bar shows one badge: the most severe resource. A tie is broken by the
-// spec's own order - System RAM, VRAM, Hard Drive - because RAM is the resource
-// the guard exists for.
+// The bar shows one badge: the most severe resource. Within the winning band
+// the same rank decides again - the smallest headroom to the entry's own
+// critical line first, then the spec's order - System RAM, VRAM, Hard Drive -
+// because RAM is the resource the guard exists for.
 var TYPE_ORDER = ["ram", "vram", "hd"];
 
 function mostSevereForBar(entries) {
@@ -1398,10 +1399,11 @@ function mostSevereForBar(entries) {
   const list = (asList(entries) || []).filter(entry => {
     return entry !== null && entry !== undefined && !normalizeBool(entry.absent, false) && entry.band === best.band;
   });
-  for (const type of TYPE_ORDER) {
-    for (const entry of list) if (entry.type === type) return entry;
+  let pick = null;
+  for (const entry of list) {
+    if (pick === null || severityRank(entry) > severityRank(pick)) pick = entry;
   }
-  return best;
+  return pick;
 }
 
 function dropGoneAlerts(alerts, liveKeys) {
@@ -2106,16 +2108,25 @@ function retractClaimFor(arm) {
 // A widget generation that starts up and finds an arm whose guard did not
 // survive the restart marks the persisted record died in place and retracts the
 // standing claim from the record alone - the in-memory arm of that generation is
-// not consulted. The record of the arm this generation is running is never its
-// own orphan, and the newest five records are the window: a generation retracts
-// one claim, so a restart that finds the same record cannot retract it twice.
+// not consulted. A started record whose event already carries a terminal record
+// anywhere in the file - survived, died, refused, skipped - is a finished arm's
+// own history, not an orphan, and no later generation retracts it. The record of
+// the arm this generation is running is never its own orphan, and the newest
+// five records are the window: a generation retracts one claim, so a restart
+// that finds the same record cannot retract it twice.
 function reconcileArms(arms, liveEventKey) {
   const list = asList(arms) || [];
   const start = Math.max(0, list.length - 5);
+  const adjudicated = {};
+  for (const record of list) {
+    if (record && record.outcome !== "started") adjudicated[sanitizeText(record.eventKey, 256)] = true;
+  }
   for (let i = list.length - 1; i >= start; i--) {
     const record = list[i];
     if (!record || record.outcome !== "started") continue;
-    if (liveEventKey && sanitizeText(liveEventKey, 256) === record.eventKey) continue;
+    const key = sanitizeText(record.eventKey, 256);
+    if (liveEventKey && sanitizeText(liveEventKey, 256) === key) continue;
+    if (adjudicated[key]) continue;
     const died = armRecord(Object.assign({}, record, {
       outcome: "died",
       survived: false,
@@ -2192,7 +2203,7 @@ function firstRunNeeded(settings) {
   return at === "" || s.firstRunAt === undefined || s.firstRunAt === null;
 }
 
-function ceilingsQuestion(type, reading, oomd, thresholds) {
+function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
   const t = thresholdsFor({ thresholds }, type);
   const kind = kindLabel(type);
   const lines = [];
@@ -2209,10 +2220,12 @@ function ceilingsQuestion(type, reading, oomd, thresholds) {
       : "Your critical: " + t.critical + "%" + provenance(t.criticalSetBy) + "."
   );
   lines.push("The kernel's ceiling: " + kernelCeilingText(oomd));
-  const rec = recommendCeilings(type, reading, oomd);
+  const sitting = restingPctFor(resting, type);
+  const rec = recommendCeilings(type, resting);
   lines.push("Recommended from this machine: amber " + rec.amber + "%, red " + rec.red + "%, critical " + rec.critical + "%.");
-  const sitting = restingBandPct(type, reading);
-  if (sitting !== null && sitting >= t.amber) {
+  if (sitting === null) {
+    lines.push(restingUnmeasuredText());
+  } else if (sitting >= t.amber) {
     lines.push("This machine rests at " + readingPct(sitting) + "%, which is inside your amber line.");
   }
   return lines.join("\n");
@@ -2314,14 +2327,16 @@ function kernelCeilingText(oomd) {
 
 // A recommendation, never a ceiling. A recommended value may become the default
 // for a type whose critical the user has not set; it is never written over a
-// user-set ceiling and never moved without his word.
-function recommendCeilings(type, reading, oomd) {
-  const resting = restingBandPct(type, reading);
-  const base = resting === null ? DEFAULT_RED : Math.round(resting);
+// user-set ceiling and never moved without his word. It is derived from the
+// machine's own measured resting level, and marked provisional when the log
+// cannot yet say what that is.
+function recommendCeilings(type, resting) {
+  const sitting = restingPctFor(resting, type);
+  const base = sitting === null ? DEFAULT_RED : Math.round(sitting);
   const amber = Math.min(97, Math.max(1, base + 2));
   const red = Math.min(98, amber + 5);
   const critical = Math.min(99, red + 3);
-  return { amber, red, critical, restingPct: resting, provisional: resting === null };
+  return { amber, red, critical, restingPct: sitting, provisional: sitting === null };
 }
 
 // Applying a recommendation is the captain's decision, not this function's: it
@@ -2352,13 +2367,17 @@ function applyRecommendation(settings, type, recommendation) {
   return { ok: true, errors: [], thresholds: out };
 }
 
-function restingBandPct(type, reading) {
-  const r = reading || {};
-  if (type === "ram") {
-    const pct = asNumber(r.ramRestingPct);
-    return pct === null ? asNumber(r.pct) : pct;
-  }
-  return asNumber(r.pct);
+// The resting level a question or a recommendation may quote: the number
+// `restingFromLog` measured for this type, or nothing. A reading passed in by
+// mistake supplies no resting level either - only the log can.
+function restingPctFor(resting, type) {
+  if (resting === null || resting === undefined) return null;
+  return asNumber(resting[type]);
+}
+
+function restingUnmeasuredText() {
+  return "No resting claim yet - the baseline log needs " + RESTING_MIN_SAMPLES +
+    " samples before this machine's resting level is known.";
 }
 
 // ---------------------------------------------------------------------------
@@ -2549,6 +2568,24 @@ function distribution(records, type) {
     max: values[values.length - 1],
     mean: sum / values.length,
   };
+}
+
+// The gate at which "rests at" may be said at all. A single sample is a moment,
+// not a resting level, and no sentence may quote one; below the gate the honest
+// answer is that the machine's resting level is not known yet.
+var RESTING_MIN_SAMPLES = 48;
+
+// What this machine rests at, per type, from the full baseline log: the median
+// of the resource's own distribution. A type whose readings are missing or
+// still under the gate rests at nothing, and that is the answer.
+function restingFromLog(logText) {
+  const records = parseBaseline(logText);
+  const resting = {};
+  for (const type of CEILING_TYPES) {
+    const dist = distribution(records, type);
+    resting[type] = dist !== null && dist.n >= RESTING_MIN_SAMPLES ? dist.p50 : null;
+  }
+  return resting;
 }
 
 // ---------------------------------------------------------------------------

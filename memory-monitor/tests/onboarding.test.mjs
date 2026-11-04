@@ -7,7 +7,6 @@ import { Memory, repoFile, same } from "./load.mjs";
 
 const RAM = {
   pct: 97.95,
-  ramRestingPct: 93.0,
   memTotalKb: 65588588,
   memAvailableKb: 4587520,
   psiSomeAvg10: 0.18,
@@ -36,7 +35,7 @@ test("the state lives in its own directory, and deleting it is the reset hook", 
 });
 
 test("the ceiling question reports the reading before it asks anything", () => {
-  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, {});
+  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 93 });
   const lines = text.split("\n");
   assert.match(lines[0], /^Memory Monitor - System RAM ceilings$/);
   assert.match(lines[1], /^Measured now: System RAM 98% used, .* available of .*$/);
@@ -49,24 +48,49 @@ test("the ceiling question reports the reading before it asks anything", () => {
 
 test("a ceiling the user set is reported as his, with its number", () => {
   const settings = Memory.setCeiling(Memory.setCeiling({}, "ram", "critical", 96), "ram", "amber", 70);
-  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, settings.thresholds);
+  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, settings.thresholds, { ram: 93 });
   assert.match(text, /Your amber: 70% \(you set it\)/);
   assert.match(text, /Your critical: 96% \(you set it\)\./);
   assert.equal(text.includes("not set - you have no ceiling"), false);
 });
 
 test("no oomd is stated as no kernel ceiling, not as a zero", () => {
-  const text = Memory.ceilingsQuestion("ram", RAM, { oomdActive: false }, {});
+  const text = Memory.ceilingsQuestion("ram", RAM, { oomdActive: false }, {}, null);
   assert.match(text, /The kernel's ceiling: systemd-oomd is not active - no kernel ceiling is in force/);
 });
 
+test("the resting claim is measured from the log, and withheld until the log holds 48 samples", () => {
+  assert.equal(Memory.RESTING_MIN_SAMPLES, 48);
+  const sample = pct => Memory.logLine(Memory.logRecord({ at: "2026-11-04T00:00:00.000Z", ram: { pct } }));
+  const short = Array.from({ length: Memory.RESTING_MIN_SAMPLES - 1 }, () => sample(93)).join("\n");
+  const full = Array.from({ length: Memory.RESTING_MIN_SAMPLES }, () => sample(93)).join("\n");
+
+  const withheld = Memory.restingFromLog(short);
+  assert.equal(withheld.ram, null, "47 samples say nothing about where this machine rests");
+  assert.equal(withheld.vram, null);
+  assert.equal(withheld.hd, null);
+  const measured = Memory.restingFromLog(full);
+  assert.equal(measured.ram, 93, "the median of the log's own distribution, never the live reading");
+
+  const question = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, withheld);
+  assert.match(
+    question,
+    /No resting claim yet - the baseline log needs 48 samples before this machine's resting level is known\./,
+  );
+  assert.equal(question.includes("rests at"), false, "the live reading never becomes a resting claim");
+
+  const answered = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, measured);
+  assert.match(answered, /^This machine rests at 93%, which is inside your amber line\.$/m);
+  assert.equal(answered.includes("No resting claim yet"), false);
+});
+
 test("a recommendation is a recommendation: derived from the resting reading, capped, and marked provisional without one", () => {
-  const rec = Memory.recommendCeilings("ram", RAM, OOMD);
+  const rec = Memory.recommendCeilings("ram", { ram: 93 });
   assert.equal(rec.restingPct, 93);
   assert.equal(rec.provisional, false);
   assert.ok(rec.amber > rec.restingPct, "a recommendation that sits under the resting reading would alert forever");
   assert.ok(rec.critical <= 99);
-  const none = Memory.recommendCeilings("ram", null, OOMD);
+  const none = Memory.recommendCeilings("ram", null);
   assert.equal(none.provisional, true);
   assert.equal(none.restingPct, null);
 });
@@ -74,7 +98,7 @@ test("a recommendation is a recommendation: derived from the resting reading, ca
 test("a recommendation fills only the ceilings he never set, and is refused rather than applied broken", () => {
   const settings = Memory.setCeiling({}, "ram", "critical", 96);
   // This machine rests at 93%, so the recommendation is amber 95 / red 98 / critical 99.
-  const resting = Memory.recommendCeilings("ram", { ramRestingPct: 93 }, OOMD);
+  const resting = Memory.recommendCeilings("ram", { ram: 93 });
   const buried = Memory.applyRecommendation(settings.thresholds, "ram", resting);
   assert.equal(buried.ok, false);
   assert.match(buried.errors.join(" "), /critical must sit above red/);

@@ -122,6 +122,22 @@ test("most severe is one ranking: band first, then headroom to its own ceiling, 
   }
 });
 
+test("within one band the ceiling's own headroom decides, in both engines", () => {
+  const entries = [
+    { type: "ram", band: 2, pct: 93, critical: 99 },
+    { type: "hd", band: 2, pct: 91, critical: 92 },
+  ];
+  assert.equal(
+    RingKit.mostSevere(entries, Memory.TYPE_ORDER).type, "hd",
+    "one point from its own ceiling beats six, whatever the type order says",
+  );
+  assert.equal(Memory.mostSevereForBar(entries).type, "hd", "the bar picks the same entry the rank picks");
+  assert.equal(
+    RingKit.severityRank(entries[1], Memory.TYPE_ORDER) > RingKit.severityRank(entries[0], Memory.TYPE_ORDER), true,
+  );
+  assert.equal(Memory.severityRank(entries[1]) > Memory.severityRank(entries[0]), true);
+});
+
 test("an absent resource is never the most severe one, in either engine", () => {
   const entries = [
     { type: "ram", band: 2, pct: 95, critical: 98, present: false, absent: true },

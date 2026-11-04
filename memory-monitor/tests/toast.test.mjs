@@ -150,6 +150,28 @@ test("a silenced amber is recorded, not lost", () => {
   assert.match(text, /System RAM|System Ram/);
 });
 
+test("the unseen ring keeps the newest twenty, in order, without touching its input", () => {
+  assert.equal(Memory.unseenAlertsMax(), 20);
+  const original = [{ pct: 1 }, { pct: 2 }];
+  const copy = JSON.parse(JSON.stringify(original));
+  const grown = Memory.pushUnseenAlerts(original, { pct: 3 });
+  same(original, copy, "the caller's list is not mutated");
+  same(grown, [{ pct: 1 }, { pct: 2 }, { pct: 3 }], "each new alert appends at the end");
+  same(Memory.pushUnseenAlerts(null, { pct: 4 }), [{ pct: 4 }], "no list yet is an empty ring, not a crash");
+
+  let ring = [];
+  const pushed = [];
+  for (let i = 0; i < Memory.unseenAlertsMax() + 3; i++) {
+    const event = { pct: 80 + i };
+    pushed.push(event);
+    ring = Memory.pushUnseenAlerts(ring, event);
+    assert.equal(ring.length, Math.min(i + 1, Memory.unseenAlertsMax()));
+  }
+  assert.equal(ring.length, Memory.unseenAlertsMax(), "the cap holds no matter how many alerts arrive");
+  same(ring[0], pushed[3], "the oldest fell off, never the newest");
+  same(ring[ring.length - 1], pushed[pushed.length - 1], "the newest is last");
+});
+
 test("the notify-send argv is typed, carries the app name, and carries the click hint", () => {
   const argv = Memory.notifyArgs(ramAlert(2, 91), null, {
     clickArgv: Memory.ipcOpenDetailArgv(),

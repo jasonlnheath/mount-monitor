@@ -228,6 +228,55 @@ test("a restart reconciles an orphaned arm from the file alone, once, and never 
   assert.equal(old.arms[5].outcome, "died", "the newest orphan is the one reconciled");
 });
 
+test("a started record with a terminal successor is a finished arm, not an orphan", () => {
+  const started = Memory.armRecord({
+    eventKey: "ram|3|ram|4",
+    type: "ram",
+    band: 3,
+    key: "ram",
+    id: Memory.memId("ram"),
+    pct: 97.2,
+    outcome: "started",
+    startedAt: "2026-11-03T00:00:00.000Z",
+    claimId: "",
+  });
+  const survived = Memory.armRecord(Object.assign({}, started, {
+    outcome: "survived",
+    survived: true,
+    endedAt: "2026-11-03T00:05:00.000Z",
+    claimId: "77",
+  }));
+  const died = Memory.armRecord(Object.assign({}, started, {
+    outcome: "died",
+    survived: false,
+    endedAt: "2026-11-03T00:05:00.000Z",
+  }));
+  const refused = Memory.armRecord(Object.assign({}, started, { outcome: "refused" }));
+
+  assert.equal(Memory.reconcileArms([started, survived], ""), null,
+    "a completed arm's own start is history: no false death, no false never-expiring toast");
+  assert.equal(Memory.reconcileArms([started, died], ""), null,
+    "a death announced when the arm finished is not re-announced by the next generation");
+  assert.equal(Memory.reconcileArms([started, refused], ""), null);
+
+  const orphan = Memory.armRecord({
+    eventKey: "vram|3|vram|9",
+    type: "vram",
+    band: 3,
+    key: "vram",
+    id: Memory.memId("vram"),
+    pct: 96.0,
+    outcome: "started",
+    startedAt: "2026-11-02T00:00:00.000Z",
+  });
+  const plan = Memory.reconcileArms([orphan, started, survived], "");
+  assert.notEqual(plan, null);
+  assert.equal(plan.arms[0].outcome, "died", "a genuine orphan behind a finished pair is still found");
+  assert.equal(plan.arms[1].outcome, "started", "the finished arm's start record stays as history");
+  assert.equal(plan.arms[2].outcome, "survived");
+  assert.equal(plan.retract.eventKey, "vram|3|vram|9");
+});
+
 test("the arm timeout is a named number", () => {
   assert.ok(Memory.guardArmTimeoutMs() > 0);
   assert.ok(Memory.guardArmTimeoutMs() < 10 * 60 * 1000);

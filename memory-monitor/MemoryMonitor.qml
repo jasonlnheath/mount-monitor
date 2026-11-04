@@ -771,9 +771,15 @@ BarWidget {
     if (!state.guardAsked) askGuard();
   }
 
+  function baselineResting(): var {
+    logFile.reload();
+    return Memory.restingFromLog(logFile.text());
+  }
+
   function askCeilings(): void {
     if (!isWriter) return;
     if (Memory.onboardingNoticePending(noticeQueue, activeNotice, "ceilings")) return;
+    var resting = baselineResting();
     var notice = {
       kind: "ceilings",
       key: "ceilings",
@@ -783,9 +789,9 @@ BarWidget {
       pct: ramReading === null ? null : ramReading.pct,
       guardState: "off",
       title: "Memory Monitor - your ceilings",
-      body: Memory.ceilingsQuestion("ram", ramReading, oomd, state.thresholds)
-        + "\n\n" + Memory.ceilingsQuestion("vram", vramReading, oomd, state.thresholds)
-        + "\n\n" + Memory.ceilingsQuestion("hd", hdRows.length > 0 ? hdRows[0] : null, oomd, state.thresholds),
+      body: Memory.ceilingsQuestion("ram", ramReading, oomd, state.thresholds, resting)
+        + "\n\n" + Memory.ceilingsQuestion("vram", vramReading, oomd, state.thresholds, resting)
+        + "\n\n" + Memory.ceilingsQuestion("hd", hdRows.length > 0 ? hdRows[0] : null, oomd, state.thresholds, resting),
       replaceId: state.ceilingsAskId,
       at: new Date().toISOString(),
     };
@@ -1335,9 +1341,21 @@ BarWidget {
 
   function barEntries(): var {
     var out = [];
-    if (ramReading !== null) out.push(ramReading);
-    if (vramReading !== null) out.push(vramReading);
-    for (var i = 0; i < hdDevices.length; i++) out.push(hdDevices[i]);
+    if (ramReading !== null) {
+      var ram = JSON.parse(JSON.stringify(ramReading));
+      ram.critical = thresholds("ram").critical;
+      out.push(ram);
+    }
+    if (vramReading !== null) {
+      var vram = JSON.parse(JSON.stringify(vramReading));
+      vram.critical = thresholds("vram").critical;
+      out.push(vram);
+    }
+    for (var i = 0; i < hdDevices.length; i++) {
+      var device = JSON.parse(JSON.stringify(hdDevices[i]));
+      device.critical = thresholds("hd").critical;
+      out.push(device);
+    }
     return out;
   }
 
