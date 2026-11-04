@@ -207,6 +207,11 @@ Panel {
             Layout.fillWidth: true
             spacing: Style.space(2)
             required property var modelData
+            readonly property string rowNote: {
+              var note = Memory.hdRowNote(modelData.ro, modelData.fstype);
+              var held = Memory.latchedText(modelData.latched);
+              return held.length > 0 ? note + "   " + held : note;
+            }
             Text {
               text: (modelData.targets || []).join(", ") + "   "
                 + Memory.readingPct(modelData.pct) + "%   " + Memory.mib(modelData.usedKb) + " of " + Memory.mib(modelData.sizeKb)
@@ -215,7 +220,7 @@ Panel {
               Layout.fillWidth: true
             }
             Text {
-              text: modelData.device + "   " + Memory.hdRowNote(modelData.ro, modelData.fstype)
+              text: modelData.device + "   " + rowNote
               color: root.dim
               font.pixelSize: Style.font.caption
               Layout.fillWidth: true

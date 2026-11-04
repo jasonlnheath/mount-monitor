@@ -95,6 +95,16 @@ test("the device group carries the fullest mount on it, because that is the row 
   assert.equal(daw.label, "DAW");
 });
 
+test("the device group carries the device's latch flag, so a held drive can present held at all", () => {
+  const targets = ["/", "/home", "/srv/models", "/var/log", "/var/cache/pacman/pkg"];
+  const candidates = Memory.hdCandidates(SUBS, targets);
+  const key = "partuuid:a02330f1-304d-459b-8274-e52ab1cf11ba";
+  assert.equal(Memory.groupHdByDevice(candidates, { [key]: true })[0].latched, true);
+  assert.equal(Memory.groupHdByDevice(candidates, { [key]: false })[0].latched, false);
+  assert.equal(Memory.groupHdByDevice(candidates)[0].latched, false, "no latch map is the default, not an invented held");
+  assert.equal(Memory.groupHdByDevice(candidates, "not a map")[0].latched, false);
+});
+
 test("partition identity is PARTUUID, else UUID, else the device path", () => {
   assert.equal(
     Memory.hdDeviceKey({ PARTUUID: "abc", UUID: "def", SOURCE: "/dev/sda1" }),

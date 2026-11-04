@@ -51,7 +51,7 @@ test("exactly one instance owns the shared side effects for a sample, whatever t
 
 test("two live instances produce one alert event for one crossing", () => {
   const fired = instances(2).filter(entry =>
-    entry.writer && Memory.shouldFireAlert({ band: 2, previousBand: 1, psiStalling: false, swapEscalated: false }));
+    entry.writer && Memory.shouldFireAlert({ band: 2, previousBand: 1, psiCrossing: false, swapCrossing: false }));
   assert.equal(fired.length, 1, "one crossing is one alert event, not one per monitor");
   assert.equal(fired[0].index, 0);
 

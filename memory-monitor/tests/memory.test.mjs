@@ -225,6 +225,26 @@ test("nothing watched and nothing held means no badge at all", () => {
   assert.equal(Memory.mostSevereForBar([{ type: "hd", band: 2, pct: 91, absent: true }]), null);
 });
 
+test("a held band says it is held, in the detail window and on the bar, for every resource", () => {
+  const held = { type: "ram", band: 2, pct: 93, latched: true, memAvailableKb: 1, memTotalKb: 2, swapPct: null };
+  assert.match(Memory.tooltipText(held), /held: this band has not released yet/);
+  const released = { type: "ram", band: 2, pct: 93, latched: false, memAvailableKb: 1, memTotalKb: 2, swapPct: null };
+  assert.equal(Memory.tooltipText(released).includes("held"), false);
+  assert.match(Memory.tooltipText({ type: "vram", band: 1, pct: 82, latched: true, vramUsedMib: 1, vramTotalMib: 2, vramFreeMib: 1 }), /held: this band has not released yet/);
+  assert.match(Memory.tooltipText({ type: "hd", band: 1, pct: 84, latched: true, target: "/data", usedKb: 1, sizeKb: 2, availKb: 1 }), /held: this band has not released yet/);
+  assert.equal(Memory.latchedText(true), "held: this band has not released yet");
+  assert.equal(Memory.latchedText(false), "");
+  assert.equal(Memory.latchedText(undefined), "", "a group that carries no latch flag is not called held");
+  assert.equal(
+    Memory.barTooltip([{ type: "ram", band: 2, pct: 93, latched: true }]).split("\n")[1],
+    "RAM 93% (red, held)",
+  );
+  assert.equal(
+    Memory.barTooltip([{ type: "hd", band: 1, pct: 84, latched: false }]).split("\n")[1],
+    "HD 84% (amber)",
+  );
+});
+
 test("a drive that went away drops its alert", () => {
   const alerts = [
     { key: "partuuid:a", type: "hd", band: 2 },
@@ -235,15 +255,37 @@ test("a drive that went away drops its alert", () => {
   assert.equal(kept[0].key, "partuuid:a");
 });
 
+test("a question is never evicted by the gone-device sweep, because no live device key names a question", () => {
+  const notices = [
+    { kind: "ceilings", key: "ceilings", band: 3 },
+    { kind: "guard-ask", key: "guard-ask", band: 3 },
+  ];
+  same(Memory.dropGoneAlerts(notices, []), notices, "an unanswered question is not a device that went away");
+  same(Memory.dropGoneAlerts(notices.concat([{ key: "partuuid:c", type: "hd", band: 2 }]), ["partuuid:a"]), [
+    notices[0],
+    notices[1],
+  ], "the drive's alert drops, the questions stay");
+});
+
 test("an alert fires on an event, not on a state, and only after the first reading", () => {
   // A shell restart must not re-toast a band the machine was already sitting in.
   assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 0, firstSample: true, wasHeld: false }), true);
   assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 2, firstSample: false, wasHeld: true }), false);
   assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true }), false);
-  assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true, psiStalling: true }), true);
-  assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true, swapEscalated: true }), true);
+  assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true, psiCrossing: true }), true);
+  assert.equal(Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true, swapCrossing: true }), true);
+  assert.equal(
+    Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true, psiCrossing: false, swapCrossing: false }),
+    false,
+    "a standing stall is a state: only the crossing re-fires, or a stalling machine toasts every escalated poll",
+  );
+  assert.equal(
+    Memory.shouldFireAlert({ band: 2, previousBand: 2, latched: true, swapEscalated: true, psiStalling: true }),
+    false,
+    "the caller passes the crossing; a level-shaped option decides nothing",
+  );
   assert.equal(Memory.shouldFireAlert({ band: 1, previousBand: 2 }), false, "a descent is not an alert");
-  assert.equal(Memory.shouldFireAlert({ band: 0, previousBand: 0, psiStalling: true }), false, "band 0 never alerts");
+  assert.equal(Memory.shouldFireAlert({ band: 0, previousBand: 0, psiCrossing: true }), false, "band 0 never alerts");
 });
 
 // ---------------------------------------------------------------------------

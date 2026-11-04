@@ -822,15 +822,16 @@ function hdCandidates(text, targets) {
 // Five btrfs subvolumes of one device are five detail rows and one alert event.
 // The device group carries the fullest mount on it, because that is the row the
 // alert is about.
-function groupHdByDevice(candidates) {
+function groupHdByDevice(candidates, latches) {
   const list = asList(candidates) || [];
+  const held = latches && typeof latches === "object" ? latches : {};
   const byKey = {};
   const order = [];
   for (const entry of list) {
     const key = sanitizePath(entry && entry.key);
     if (key.length === 0) continue;
     if (!byKey[key]) {
-      byKey[key] = { key, id: memId(key), type: "hd", targets: [], band: 0, pct: 0, latched: false };
+      byKey[key] = { key, id: memId(key), type: "hd", targets: [], band: 0, pct: 0, latched: normalizeBool(held[key], false) };
       order.push(key);
     }
     const group = byKey[key];
@@ -1395,6 +1396,10 @@ function dropGoneAlerts(alerts, liveKeys) {
   const out = [];
   for (const alert of asList(alerts) || []) {
     if (alert === null || alert === undefined) continue;
+    if (isOnboardingNotice(alert)) {
+      out.push(alert);
+      continue;
+    }
     if (live.indexOf(sanitizePath(alert.key)) >= 0) out.push(alert);
   }
   return out;
@@ -1404,7 +1409,9 @@ function dropGoneAlerts(alerts, liveKeys) {
 // Toasts are events, not states. An alert fires on a band ascent, never on a
 // resource merely sitting in a band; a held band does not re-toast. A held band
 // produces a fresh event when (a) its severity increases, (b) PSI memory crosses
-// the stall floor, or (c) swap crosses oomd's swap limit. `primed` is carried
+// the stall floor on this sample, or (c) swap crosses oomd's swap limit on this
+// sample. The caller passes the crossing, not the standing level: a machine that
+// keeps stalling must not re-toast on every escalated poll. `primed` is carried
 // across a shell restart so a restart does not re-toast a band already held.
 // ---------------------------------------------------------------------------
 
@@ -1416,8 +1423,8 @@ function shouldFireAlert(opts) {
   if (normalizeBool(o.firstSample, false) && !normalizeBool(o.wasHeld, false)) return true;
   if (band > previousBand) return true;
   if (band !== previousBand) return false;
-  if (normalizeBool(o.psiStalling, false)) return true;
-  if (normalizeBool(o.swapEscalated, false)) return true;
+  if (normalizeBool(o.psiCrossing, false)) return true;
+  if (normalizeBool(o.swapCrossing, false)) return true;
   return false;
 }
 
@@ -1715,6 +1722,19 @@ function noticeKind(alert) {
 function isOnboardingNotice(alert) {
   const kind = noticeKind(alert);
   return kind === "ceilings" || kind === "guard-ask";
+}
+
+// A question already queued or already on the screen is not asked again: the
+// notice lane does not evict onboarding notices, so eviction is not what caps
+// them, and the ask is re-fired only when no copy of it is queued or live.
+function onboardingNoticePending(queue, live, kind) {
+  const want = sanitizeText(kind, 24);
+  if (want.length === 0) return false;
+  if (noticeKind(live) === want) return true;
+  for (const notice of asList(queue) || []) {
+    if (notice !== null && notice !== undefined && noticeKind(notice) === want) return true;
+  }
+  return false;
 }
 
 function answerGuardAskArgv() {
@@ -2048,6 +2068,23 @@ function retractClaimFor(arm) {
 
 var CEILING_TYPES = ["hd", "vram", "ram"];
 
+// The band each device was last seen holding rides the state file: `primed`
+// carried across a restart only prevents a re-toast if the held band itself
+// survives the restart. Band 0 is not a held band and is not stored; a key that
+// is not a device key is not stored either.
+function normalizeBands(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const out = {};
+  for (const name of Object.keys(raw)) {
+    const key = sanitizePath(name);
+    if (key.length === 0) continue;
+    const band = Math.round(asNumber(raw[name]) || 0);
+    if (band <= 0) continue;
+    out[key] = Math.min(band, 3);
+  }
+  return out;
+}
+
 function normalizeSettings(value) {
   const raw = value && typeof value === "object" ? value : {};
   return {
@@ -2057,6 +2094,7 @@ function normalizeSettings(value) {
     ceilingsAsked: normalizeBool(raw.ceilingsAsked, false),
     firstRunAt: asString(raw.firstRunAt) || null,
     primed: normalizeBool(raw.primed, false),
+    bands: normalizeBands(raw.bands),
     guardAskId: sanitizeText(raw.guardAskId, 64),
     ceilingsAskId: sanitizeText(raw.ceilingsAskId, 64),
     arms: (asList(raw.arms) || []).map(armRecord),
@@ -2530,25 +2568,32 @@ function alertsYouDidNotSeeText(events) {
   return lines.join("\n");
 }
 
+function latchedText(latched) {
+  return normalizeBool(latched, false) ? "held: this band has not released yet" : "";
+}
+
 function tooltipText(entry) {
   const e = entry || {};
   const type = sanitizeText(e.type, 16);
   const band = asNumber(e.band) || 0;
   const pct = readingPct(e.pct);
+  const held = latchedText(e.latched);
   const lines = [];
   if (type === "hd") {
     lines.push((sanitizeText(e.target) || "drive") + " - " + pct + "%");
     lines.push(mib(e.usedKb) + " used of " + mib(e.sizeKb) + ", " + mib(e.availKb) + " free");
     if (normalizeBool(e.ro, false)) lines.push("read-only - nothing can be pruned here, only moved off");
-    if (normalizeBool(e.latched, false)) lines.push("held: this band has not released yet");
+    if (held.length > 0) lines.push(held);
   } else if (type === "ram") {
     lines.push("System RAM - " + pct + "%");
     lines.push(gib(e.memAvailableKb) + " available of " + gib(e.memTotalKb));
     lines.push("swap " + (asNumber(e.swapPct) === null ? "none" : readingPct(e.swapPct) + "%"));
+    if (held.length > 0) lines.push(held);
   } else if (type === "vram") {
     lines.push("VRAM - " + pct + "%");
     lines.push(asNumber(e.vramUsedMib) + " MiB used of " + asNumber(e.vramTotalMib) + " MiB");
     lines.push(asNumber(e.vramFreeMib) + " MiB free");
+    if (held.length > 0) lines.push(held);
   }
   if (band >= 1) lines.push("Band: " + (BAND_NAMES[band] || "none"));
   return lines.join("\n");
@@ -2580,7 +2625,8 @@ function barTooltip(entries) {
       lines.push(label + ": not mounted now");
       continue;
     }
-    lines.push(label + " " + readingPct(entry.pct) + "% (" + (BAND_NAMES[asNumber(entry.band) || 0] || "none") + ")");
+    const held = normalizeBool(entry.latched, false) ? ", held" : "";
+    lines.push(label + " " + readingPct(entry.pct) + "% (" + (BAND_NAMES[asNumber(entry.band) || 0] || "none") + held + ")");
   }
   return lines.join("\n");
 }

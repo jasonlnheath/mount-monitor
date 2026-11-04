@@ -332,7 +332,7 @@ BarWidget {
 
     var wanted = watchedMounts();
     hdRows = Memory.hdCandidates(findmntText, wanted);
-    hdDevices = Memory.groupHdByDevice(hdRows);
+    hdDevices = Memory.groupHdByDevice(hdRows, latchedMap);
     scanDone = true;
   }
 
@@ -389,16 +389,24 @@ BarWidget {
     next[key] = held;
     bands = next;
 
+    var firstSample = !primed;
     var wasHeld = primed && previous > 0;
+    var psiNow = type === "ram" && Memory.psiStalling(psi, Memory.PSI_STALL_FLOOR);
+    var swapNow = type === "ram" && Memory.swapEscalates(ramReading, oomd);
     var fire = Memory.shouldFireAlert({
       band: held,
       previousBand: previous,
-      firstSample: !primed,
+      firstSample: firstSample,
       wasHeld: wasHeld,
-      psiStalling: Memory.psiStalling(psi, Memory.PSI_STALL_FLOOR),
-      swapEscalated: type === "ram" && Memory.swapEscalates(ramReading, oomd),
+      psiCrossing: psiNow && !psiStalledLast,
+      swapCrossing: swapNow && !swapEscalatedLast,
     });
+    if (type === "ram") {
+      psiStalledLast = psiNow;
+      swapEscalatedLast = swapNow;
+    }
     primed = true;
+    if (isWriter && (held !== previous || firstSample)) saveState();
     if (!fire) return;
     if (entry) entry.band = held;
     queueAlert(entry, held, type, key, result.latched);
@@ -611,7 +619,7 @@ BarWidget {
   }
 
   function finishArm(outcome, survived, reasons): void {
-    if (arm === null) return;
+    if (arm === null || arm.outcome !== "started") return;
     arm = Memory.armRecord(Object.assign({}, arm, {
       outcome: outcome,
       survived: survived,
@@ -682,6 +690,7 @@ BarWidget {
     state = parsed;
     stateLoaded = true;
     primed = parsed.primed;
+    bands = parsed.bands;
     if (!stateDirDone) return;
     reconcilePersistedArms();
   }
@@ -698,6 +707,8 @@ BarWidget {
   }
 
   function writeState(next): void {
+    next.primed = primed;
+    next.bands = bands;
     var payload = JSON.stringify(next);
     if (payload === lastStateWrite) return;
     lastStateWrite = payload;
@@ -707,9 +718,7 @@ BarWidget {
 
   function saveState(): void {
     var next = JSON.parse(JSON.stringify(state));
-    next.thresholds = next.thresholds || Memory.normalizeThresholds({});
-    next.primed = primed;
-    next.firstRunAt = next.firstRunAt || new Date().toISOString();
+    if (!next.firstRunAt) next.firstRunAt = new Date().toISOString();
     writeState(next);
   }
 
@@ -727,6 +736,7 @@ BarWidget {
   }
 
   function askCeilings(): void {
+    if (Memory.onboardingNoticePending(noticeQueue, activeNotice, "ceilings")) return;
     var notice = {
       kind: "ceilings",
       key: "ceilings",
@@ -749,6 +759,7 @@ BarWidget {
   }
 
   function askGuard(): void {
+    if (Memory.onboardingNoticePending(noticeQueue, activeNotice, "guard-ask")) return;
     var notice = {
       kind: "guard-ask",
       key: "guard-ask",
@@ -838,6 +849,8 @@ BarWidget {
 
   property var latchedMap: ({})
   property var deviceTargets: ({})
+  property bool psiStalledLast: false
+  property bool swapEscalatedLast: false
   property var activeAlert: null
   property var activeNotice: null
   property var notifyProcArgs: []
@@ -1049,10 +1062,13 @@ BarWidget {
       onStreamFinished: if (this.text.trim() !== "") console.warn("memory-monitor: notify-send:", this.text.trim())
     }
     onExited: function(exitCode, exitStatus) {
-      var notice = root.noticeQueue.length > 0 ? root.noticeQueue[0] : null;
+      var notice = root.activeNotice;
       root.activeNotice = null;
-      if (notice !== null) root.recordNoticeDelivered(notice, exitCode);
-      root.noticeQueue = root.noticeQueue.slice(1);
+      if (notice !== null) {
+        root.recordNoticeDelivered(notice, exitCode);
+        var at = root.noticeQueue.indexOf(notice);
+        if (at >= 0) root.noticeQueue = root.noticeQueue.slice(at + 1);
+      }
       root.fireNextNotice();
     }
   }
@@ -1096,7 +1112,8 @@ BarWidget {
       onStreamFinished: if (this.text.trim() !== "") console.warn("memory-monitor: guard:", this.text.trim())
     }
     onExited: function(exitCode, exitStatus) {
-      if (exitCode === 0) finishArm("survived", true, []);
+      if (exitStatus !== undefined && exitStatus !== 0) finishArm("died", false, ["terminated by signal"]);
+      else if (exitCode === 0) finishArm("survived", true, []);
       else finishArm("died", false, ["exit " + exitCode]);
     }
   }

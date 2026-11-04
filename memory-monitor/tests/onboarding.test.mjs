@@ -134,6 +134,34 @@ test("settings survive the round trip, and garbage does not become a ceiling", (
   assert.equal(garbage.thresholds.ram.critical, null, "a garbage critical stays unset rather than becoming a ceiling");
 });
 
+test("the held band rides the state file, so a restart knows what the machine was sitting in", () => {
+  const key = "partuuid:a02330f1-304d-459b-8274-e52ab1cf11ba";
+  const settings = Memory.normalizeSettings({ bands: { ram: 2, vram: 1, [key]: 3 } });
+  assert.equal(settings.bands.ram, 2);
+  assert.equal(settings.bands.vram, 1);
+  assert.equal(settings.bands[key], 3);
+
+  const garbage = Memory.normalizeSettings({ bands: { ram: 9, [key]: 0, "": 2, "not a number": "hot" } });
+  assert.equal(garbage.bands.ram, 3, "a band is 0..3, never more");
+  assert.equal(garbage.bands[key], undefined, "band 0 is not a held band and stores nothing");
+  assert.equal(garbage.bands[""], undefined, "an unnamed key stores nothing");
+  assert.equal(garbage.bands["not a number"], undefined, "a value that is not a number stores nothing");
+
+  same(Memory.normalizeSettings({}).bands, {});
+  same(Memory.normalizeSettings({ bands: "not a map" }).bands, {});
+});
+
+test("a question already queued or already on the screen is not asked again", () => {
+  const ceilings = { kind: "ceilings", key: "ceilings", band: 3 };
+  const guardAsk = { kind: "guard-ask", key: "guard-ask", band: 3 };
+  assert.equal(Memory.onboardingNoticePending([ceilings], null, "ceilings"), true);
+  assert.equal(Memory.onboardingNoticePending([], ceilings, "ceilings"), true, "the live notice counts too");
+  assert.equal(Memory.onboardingNoticePending([guardAsk], ceilings, "ceilings"), true);
+  assert.equal(Memory.onboardingNoticePending([guardAsk], null, "ceilings"), false, "the other question does not stand in");
+  assert.equal(Memory.onboardingNoticePending([], null, "ceilings"), false, "nothing pending is an ask that may be sent");
+  assert.equal(Memory.onboardingNoticePending([ceilings], null, ""), false, "no kind names no ask");
+});
+
 test("the health-check prompt is fixed copy that reports before it asks", () => {
   const prompt = Memory.healthCheckPrompt("/log", { ram: { amber: 80, red: 90 } }, OOMD);
   assert.match(prompt, /Memory Monitor health check\./);

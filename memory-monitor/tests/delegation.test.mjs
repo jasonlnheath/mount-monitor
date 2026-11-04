@@ -140,12 +140,49 @@ test("the widget reads every setting through a normalize* helper, because a Qt l
     "Memory.normalizeBool(",
     "Memory.normalizeNumber(",
     "Memory.normalizeAgentCommand(",
-    "Memory.normalizeThresholds(",
   ]) {
     assert.equal(QML.includes(call), true, `MemoryMonitor.qml must read settings through ${call}`);
   }
   assert.equal(/Array\.isArray\([^)]*setting\(/.test(QML), false, "a bare array check rejects a correctly configured Qt list");
   assert.equal(QML.includes("Array.isArray"), false);
+});
+
+test("a held band and the priming survive a shell restart through the state file", () => {
+  // primed carried across a restart only prevents a re-toast if the held band
+  // itself survives the restart. Neither the load nor the write can live in a
+  // node test, so the wiring is pinned at the exact hand-off points.
+  const load = (QML.match(/function loadState\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(load, /primed = parsed\.primed;/);
+  assert.match(load, /bands = parsed\.bands;/, "the load must seed the held bands before the first sample");
+
+  const write = (QML.match(/function writeState\(next\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(write, /next\.primed = primed;/, "every writer stamps the priming, so no writer persists a stale one");
+  assert.match(write, /next\.bands = bands;/, "every writer stamps the held bands, so a ceiling write cannot lose them");
+
+  const apply = (QML.match(/function applyBand\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(apply, /psiCrossing: psiNow && !psiStalledLast/, "PSI is passed as the crossing, not the standing level");
+  assert.match(apply, /swapCrossing: swapNow && !swapEscalatedLast/, "swap is passed as the crossing, not the standing level");
+  assert.match(apply, /psiStalledLast = psiNow;/, "the last sample's level is what the next crossing is measured against");
+  assert.match(apply, /if \(isWriter && \(held !== previous \|\| firstSample\)\) saveState\(\);/,
+    "the writer instance persists the band change; a non-writer writes nothing");
+});
+
+test("the notice lane answers the notice it showed, and never asks a question twice at once", () => {
+  // The close is attributed to activeNotice, and a question is only queued when
+  // no copy of it is queued or live: the ask is re-fired by delivery failure,
+  // never by a sample that found the queue holding it.
+  assert.match(QML, /var notice = root\.activeNotice;/, "the close is attributed to the notice that was shown, not to the queue head");
+  assert.match(QML, /root\.noticeQueue\.indexOf\(notice\)/, "the shown notice is the one removed from the queue");
+  assert.equal(QML.includes("Memory.onboardingNoticePending(noticeQueue, activeNotice, \"ceilings\")"), true);
+  assert.equal(QML.includes("Memory.onboardingNoticePending(noticeQueue, activeNotice, \"guard-ask\")"), true);
+  assert.equal(QML.includes("Memory.groupHdByDevice(hdRows, latchedMap)"), true, "the latch map rides the group rebuild");
+});
+
+test("an arm finishes once, and a killed arm is never read as a survivor", () => {
+  assert.match(QML, /if \(arm === null \|\| arm\.outcome !== "started"\) return;/,
+    "the watchdog's synchronous finish is the record; the process's own exit cannot write a second one");
+  assert.equal(QML.includes("exitStatus !== undefined && exitStatus !== 0"), true,
+    "a signal death is a death even when the watchdog already gave up");
 });
 
 test("the widget delegates every band, poll, severity and alert decision to memory.js", () => {
