@@ -105,6 +105,35 @@ test("the device group carries the device's latch flag, so a held drive can pres
   assert.equal(Memory.groupHdByDevice(candidates, "not a map")[0].latched, false);
 });
 
+test("the device group carries the singular target the alert is about", () => {
+  const rows = Memory.parseRows(RIG);
+  const candidates = [];
+  for (const target of ["/", "/home", "/srv/models", "/var/log", "/var/cache/pacman/pkg", "/mnt/models", "/run/media/jason/OMARCHY"]) {
+    const c = Memory.hdCandidate(rows.find(r => r.TARGET === target), [target]);
+    if (c !== null) candidates.push(c);
+  }
+  const groups = Memory.groupHdByDevice(candidates);
+  const daw = groups.find(g => g.key === "partuuid:724dba15-7bef-4968-8bc7-285f54e1f3ac");
+  assert.equal(daw.target, "/mnt/models", "the alert names the mount, not just the device");
+  const usb = groups.find(g => g.key === "partuuid:72e5618c-cab5-4e49-95db-bf73eebeb698");
+  assert.equal(usb.target, "/run/media/jason/OMARCHY");
+  assert.equal(usb.pct, 93);
+
+  const subs = Memory.hdCandidates(SUBS, ["/", "/home", "/srv/models", "/var/log", "/var/cache/pacman/pkg"]);
+  const one = Memory.groupHdByDevice(subs)[0];
+  assert.equal(one.targets.indexOf(one.target) >= 0, true, "the singular target is one of the group's mounts");
+});
+
+test("a watched drive Mount Monitor also watches is suppressed through the group's own target", () => {
+  const candidates = Memory.hdCandidates(SUBS, ["/mnt/models"]);
+  const group = Memory.groupHdByDevice(candidates)[0];
+  assert.equal(group.target, "/mnt/models");
+  assert.equal(group.pct, 90);
+  assert.equal(Memory.hdAlertSuppressed(group.target, qtList(["/", "/mnt/models"])), true);
+  assert.equal(Memory.hdAlertSuppressed(group.target, qtList(["/"])), false);
+  assert.equal(Memory.hdAlertSuppressed(undefined, qtList(["/"])), false, "a group with no target is never suppressed");
+});
+
 test("partition identity is PARTUUID, else UUID, else the device path", () => {
   assert.equal(
     Memory.hdDeviceKey({ PARTUUID: "abc", UUID: "def", SOURCE: "/dev/sda1" }),

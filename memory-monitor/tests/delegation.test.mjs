@@ -185,6 +185,27 @@ test("an arm finishes once, and a killed arm is never read as a survivor", () =>
     "a signal death is a death even when the watchdog already gave up");
 });
 
+test("the arm is on the file when it starts, and a restart reconciles from the record", () => {
+  const start = (QML.match(/function startArm\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.equal((start.match(/recordArm\(arm\);/g) || []).length, 2,
+    "the started record is persisted before the process runs, the refused record too");
+  assert.match(start, /key: alert\.key/, "the persisted record carries what a retraction needs");
+  assert.match(start, /pct: alert\.pct/, "the persisted record carries the reading");
+
+  const reconcile = (QML.match(/function reconcilePersistedArms\(\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(reconcile, /outcome: "died"/, "the orphaned record is marked died in place, so no later generation re-retracts it");
+  assert.match(reconcile, /retractClaim\(died\);/, "the retraction is built from the persisted record, not the in-memory arm");
+  assert.equal(reconcile.includes("finishArm("), false, "reconciliation never depends on this generation holding an arm");
+});
+
+test("the reading a prompt carries is the reading of the alert being fired", () => {
+  const reading = (QML.match(/function readingFor\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(reading, /event\.key/, "the event being fired picks the row, not a lane-global");
+  assert.match(reading, /activeAlert\.key/, "the live alert still resolves a one-argument call");
+  assert.equal(QML.includes("readingFor(alert.type, alert)"), true, "every lane passes the alert it is firing");
+  assert.equal(QML.includes("readingFor(alert.type)"), false, "no call site is left resolving the type alone");
+});
+
 test("the widget delegates every band, poll, severity and alert decision to memory.js", () => {
   for (const call of [
     "Memory.resolveBand(",

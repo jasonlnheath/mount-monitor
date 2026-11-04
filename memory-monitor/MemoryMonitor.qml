@@ -442,6 +442,7 @@ BarWidget {
   }
 
   function queueAlert(entry, band, type, key, latched): void {
+    if (!isWriter) return;
     if (band === 0) return;
     var alert = alertEvent(entry, band, type, key, latched);
 
@@ -484,13 +485,14 @@ BarWidget {
   // ---------------------------------------------------------------------------
 
   function fireNextAlert(): void {
+    if (!isWriter) return;
     if (notifyProc.running || alertQueue.length === 0) return;
     var alert = alertQueue[0];
     activeAlert = alert;
     notifyProcArgs = Memory.notifyArgs(alert, agentCommandArgv(), {
       clickArgv: Memory.clickArgvFor(alert, agentCommandArgv(), {
         inline: Memory.normalizeBool(setting("agentInline", false), false),
-        reading: readingFor(alert.type),
+        reading: readingFor(alert.type, alert),
         oomd: oomd,
         logPath: baselinePath,
       }),
@@ -500,10 +502,11 @@ BarWidget {
     alertWatchdog.restart();
   }
 
-  function readingFor(type): var {
+  function readingFor(type, event): var {
+    var key = event ? event.key : (activeAlert ? activeAlert.key : "");
     if (type === "ram") return ramReading;
     if (type === "vram") return vramReading;
-    for (var i = 0; i < hdRows.length; i++) if (hdRows[i].key === (activeAlert ? activeAlert.key : "")) return hdRows[i];
+    for (var i = 0; i < hdRows.length; i++) if (hdRows[i].key === key) return hdRows[i];
     return hdRows.length > 0 ? hdRows[0] : null;
   }
 
@@ -520,6 +523,7 @@ BarWidget {
   // ---------------------------------------------------------------------------
 
   function fireNextNotice(): void {
+    if (!isWriter) return;
     if (noticeProc.running || noticeQueue.length === 0) return;
     var alert = noticeQueue[0];
     if (alert.preempt) {
@@ -532,7 +536,7 @@ BarWidget {
     alert.guardState = guardState;
     var clickArgv = Memory.clickArgvFor(alert, agentCommandArgv(), {
       inline: Memory.normalizeBool(setting("agentInline", false), false),
-      reading: readingFor(alert.type),
+      reading: readingFor(alert.type, alert),
       oomd: oomd,
       thresholds: state.thresholds,
       logPath: baselinePath,
@@ -599,7 +603,7 @@ BarWidget {
       recordArm(arm);
       return;
     }
-    var prompt = Memory.agentPrompt(alert, readingFor(alert.type), oomd, baselinePath);
+    var prompt = Memory.agentPrompt(alert, readingFor(alert.type, alert), oomd, baselinePath);
     var argv = Memory.normalizeBool(setting("agentInline", false), false)
       ? Memory.agentArgvWithInline(prompt, agentCommandArgv())
       : Memory.agentArgv(prompt, agentCommandArgv());
@@ -608,11 +612,16 @@ BarWidget {
       eventKey: eventKey,
       type: alert.type,
       band: alert.band,
+      key: alert.key,
+      id: alert.id,
+      pct: alert.pct,
+      target: alert.target,
       outcome: "started",
       startedAt: new Date().toISOString(),
       claimId: noticePrintedId,
       inline: Memory.normalizeBool(setting("agentInline", false), false),
     });
+    recordArm(arm);
     armProc.command = argv;
     armProc.running = true;
     armWatchdog.restart();
@@ -651,13 +660,24 @@ BarWidget {
   }
 
   // A widget generation that starts up and finds an arm whose guard did not
-  // survive retracts the standing claim by the persisted id.
+  // survive marks the persisted record died and retracts the standing claim by
+  // the record's own id, before this generation has an arm of its own.
   function reconcilePersistedArms(): void {
+    if (!isWriter) return;
     var arms = state && state.arms ? state.arms : [];
     for (var i = arms.length - 1; i >= 0 && i >= arms.length - 5; i--) {
       var record = arms[i];
       if (record && record.outcome === "started") {
-        finishArm("died", false, [Memory.degradationText("arm-orphaned")]);
+        var died = Memory.armRecord(Object.assign({}, record, {
+          outcome: "died",
+          survived: false,
+          endedAt: new Date().toISOString(),
+          reasons: (record.reasons || []).concat([Memory.degradationText("arm-orphaned")]),
+        }));
+        var next = JSON.parse(JSON.stringify(state));
+        next.arms = arms.slice(0, i).concat([died], arms.slice(i + 1));
+        writeState(next);
+        retractClaim(died);
         return;
       }
     }
@@ -736,6 +756,7 @@ BarWidget {
   }
 
   function askCeilings(): void {
+    if (!isWriter) return;
     if (Memory.onboardingNoticePending(noticeQueue, activeNotice, "ceilings")) return;
     var notice = {
       kind: "ceilings",
@@ -759,6 +780,7 @@ BarWidget {
   }
 
   function askGuard(): void {
+    if (!isWriter) return;
     if (Memory.onboardingNoticePending(noticeQueue, activeNotice, "guard-ask")) return;
     var notice = {
       kind: "guard-ask",
@@ -1078,6 +1100,7 @@ BarWidget {
   // asked again when it comes back. The captured notify-send id is what lets the
   // next shell start replace this notice instead of stacking a second copy.
   function recordNoticeDelivered(notice, exitCode): void {
+    if (!isWriter) return;
     if (exitCode !== 0) return;
     var next = JSON.parse(JSON.stringify(state));
     if (notice.kind === "guard-ask") {

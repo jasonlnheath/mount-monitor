@@ -141,6 +141,38 @@ test("the guard state is stated in the detail window in words", () => {
   assert.match(Memory.guardStateText({ guard: false }), /off/);
 });
 
+test("an arm record carries what a retraction needs, so a restart can act on the file alone", () => {
+  const started = Memory.armRecord({
+    eventKey: "ram|3|ram|1",
+    type: "ram",
+    band: 3,
+    key: "ram",
+    id: Memory.memId("ram"),
+    pct: 97.2,
+    target: null,
+    outcome: "started",
+    startedAt: "2026-11-04T00:00:00.000Z",
+    claimId: "",
+  });
+  assert.equal(started.outcome, "started");
+  assert.equal(started.key, "ram");
+  assert.equal(started.id, Memory.memId("ram"));
+  assert.equal(started.pct, 97.2);
+
+  const died = Memory.armRecord(Object.assign({}, started, {
+    outcome: "died",
+    survived: false,
+    endedAt: "2026-11-04T00:02:00.000Z",
+    reasons: ["orphaned by a shell restart"],
+  }));
+  const plan = Memory.retractClaimFor(died);
+  assert.equal(plan.replaceable, false, "the captured id died with the shell: a fresh honest toast, not a replace");
+  assert.equal(plan.args[0], "notify-send");
+  const body = plan.args[plan.args.length - 1];
+  assert.match(body, /The guard did not survive/);
+  assert.match(body, /has reached 98% usage/, "the fresh toast carries the record's own reading, rounded up");
+});
+
 test("the arm timeout is a named number", () => {
   assert.ok(Memory.guardArmTimeoutMs() > 0);
   assert.ok(Memory.guardArmTimeoutMs() < 10 * 60 * 1000);

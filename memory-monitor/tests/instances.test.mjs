@@ -105,12 +105,16 @@ test("the arm event identity is the event, so one crossing cannot arm twice", ()
 });
 
 test("the widget gates every shared side effect on the election rather than on itself", () => {
-  // The delegation half of the gate: the log append, the notices and the arm all
-  // sit behind `isWriter`, and `isWriter` comes from memory.js's election rather
-  // than from a widget-local guess about which instance it is.
+  // The delegation half of the gate: the log append, the alert queue, the notice
+  // lane, the onboarding asks, the delivery record and the arm all sit behind
+  // `isWriter`, and `isWriter` comes from memory.js's election rather than from a
+  // widget-local guess about which instance it is.
   assert.equal(QML.includes("Memory.logWriterElection(instanceIndex, instanceCount)"), true);
   assert.equal(QML.includes("if (isWriter) appendLog();"), true);
-  assert.equal(QML.includes("if (!isWriter) return;"), true);
   assert.equal(QML.includes("writer: isWriter,"), true, "the arm is gated on the same election");
   assert.equal(QML.includes("siblingInstances"), true, "the widget counts its own instances instead of assuming one");
+  for (const fn of ["queueAlert", "fireNextAlert", "fireNextNotice", "recordNoticeDelivered", "askCeilings", "askGuard", "startArm", "reconcilePersistedArms"]) {
+    const body = (QML.match(new RegExp("function " + fn + "\\([^)]*\\)[^{]*\\{([^]*?)\\n  \\}")) || [])[1] || "";
+    assert.match(body, /if \(!isWriter\) return;/, `${fn} runs on the writer instance only: one toast, one write, one arm`);
+  }
 });

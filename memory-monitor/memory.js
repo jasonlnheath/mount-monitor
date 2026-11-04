@@ -840,6 +840,7 @@ function groupHdByDevice(candidates, latches) {
     const pct = asNumber(entry.pct) || 0;
     if (pct >= group.pct) {
       group.pct = pct;
+      group.target = target;
       group.device = sanitizePath(entry.device);
       group.fstype = sanitizeText(entry.fstype, 32);
       group.label = sanitizeText(entry.label);
@@ -2017,6 +2018,10 @@ function armRecord(opts) {
     eventKey: sanitizeText(o.eventKey, 256),
     type: sanitizeText(o.type, 16),
     band: asNumber(o.band),
+    key: sanitizePath(o.key),
+    id: sanitizeText(o.id, 64),
+    pct: asNumber(o.pct),
+    target: sanitizePath(o.target),
     outcome,
     pid: asNumber(o.pid),
     startedAt: asString(o.startedAt) || null,
