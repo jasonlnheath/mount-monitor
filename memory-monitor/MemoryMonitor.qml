@@ -333,7 +333,14 @@ BarWidget {
 
     var wanted = watchedMounts();
     hdRows = Memory.hdCandidates(findmntText, wanted);
-    hdDevices = Memory.groupHdByDevice(hdRows, latchedMap);
+    // The rebuilt rows carry the held band the way ram.band carries bandOf
+    // above — before the assignment, because the badge and tooltip bindings
+    // evaluate on the assignment itself and never see a later in-place fix. A
+    // row rebuilt at band 0 drops a held band off the bar until the next
+    // escalation re-fires it.
+    var devices = Memory.groupHdByDevice(hdRows, latchedMap);
+    for (var h = 0; h < devices.length; h++) devices[h].band = bandOf(devices[h].key);
+    hdDevices = devices;
     scanDone = true;
   }
 
@@ -872,13 +879,28 @@ BarWidget {
     pendingAlertEvents = [];
     var line = Memory.logLine(record);
     logBytesWritten += line.length + 1;
-    logAppendProc.write(line + "\n");
+    appendLogLine(line);
     var plan = Memory.logRotatePlan(logBytesWritten, Memory.logMaxBytes(), Memory.logMaxLines());
     if (plan.rotate) {
       logBytesWritten = 0;
       logRotateProc.command = Memory.logRotateArgs(baselinePath, plan.keepLines);
       logRotateProc.running = true;
     }
+  }
+
+  // One dd per line: start it, feed the row, close its stdin so dd flushes at
+  // EOF and exits. A line that arrives while the previous dd is still running
+  // waits for that exit, so nothing is written into a closing pipe.
+  function appendLogLine(line): void {
+    if (logAppendProc.running) {
+      logAppendPending = logAppendPending.length > 0 ? logAppendPending + "\n" + line : line;
+      return;
+    }
+    logAppendProc.command = Memory.logAppendArgs(root.baselinePath);
+    logAppendProc.stdinEnabled = true;
+    logAppendProc.running = true;
+    logAppendProc.write(line + "\n");
+    logAppendProc.stdinEnabled = false;
   }
 
   function openDetail(): void {
@@ -906,6 +928,7 @@ BarWidget {
   property var pendingAlertEvents: []
   property var unseenAlerts: []
   property int logBytesWritten: 0
+  property string logAppendPending: ""
   property bool stateDirDone: false
   property bool reconcileDone: false
   property bool stateWritten: false
@@ -1238,6 +1261,11 @@ BarWidget {
     command: Memory.logAppendArgs(root.baselinePath)
     onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0) console.warn("memory-monitor:", Memory.degradationText("log-append-failed"))
+      if (logAppendPending.length > 0) {
+        var line = logAppendPending;
+        logAppendPending = "";
+        appendLogLine(line);
+      }
     }
     stderr: StdioCollector { onStreamFinished: void this.text }
   }
