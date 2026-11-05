@@ -59,11 +59,11 @@ fi
 # Loader hands the panel are expected outside a running shell - first-party
 # Omarchy panels produce the same ones. A non-zero exit is a syntax error or a
 # broken import.
-for qml in MemoryMonitor.qml MemoryPanel.qml; do
+for qml in MemoryMonitor.qml MemoryPanel.qml QuattroDash.qml QuattroSymbol.qml; do
   if ! qml_out="$("$qmllint" "$plugin/$qml" 2>&1)"; then
     echo "qmllint failed on $qml:" >&2
     echo "$qml_out" >&2
     exit 1
   fi
 done
-echo "qmllint: MemoryMonitor.qml and MemoryPanel.qml parse and their memory.js / ringkit.js imports resolve"
+echo "qmllint: MemoryMonitor.qml, MemoryPanel.qml, QuattroDash.qml and QuattroSymbol.qml parse and their memory.js / quattro.js / ringkit.js imports resolve"

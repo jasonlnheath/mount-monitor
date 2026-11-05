@@ -37,11 +37,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `memory-monitor/tests/ringkit-conformance.test.mjs` proves `mounts.js bandFor`
   and `memory.js bandForPct` cannot disagree with it.
 - `memory-monitor/` is the sibling plugin (System RAM / VRAM / drive severity,
-  user-set ceilings, the detail window, the baseline log, the guard ask). It has
+  user-set ceilings, the Quattro Dash instrument cluster, the detail window, the
+  baseline log, the guard ask). It has
   its own `manifest.json`, `install.sh`, `README.md`, `skills/` and `tests/`; its
   `install.sh` copies `ringkit.js` beside the widget because the shell's plugin
   registry scans exactly one level. Its decisions live in
-  `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`.
+  `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`,
+  with the Quattro Dash popup's own decisions (LED bands, dial geometry, code
+  taxonomy, cluster copy, the ISO symbol artwork) in `memory-monitor/quattro.js`,
+  rendered by `QuattroDash.qml` / `QuattroSymbol.qml` under the same
+  plain-module law.
 - `skills/` holds the agent skills `install.sh` copies to `~/.agents/skills/`:
   `disk-prune` (cleanup analysis), `partition-onboarding` (add a monitor),
   `partition-remove` (unwire one). Notification copy and skill wording have to

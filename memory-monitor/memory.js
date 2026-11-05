@@ -775,6 +775,37 @@ function hdCandidates(text, targets) {
   return out;
 }
 
+// Quattro Dash's one dashboard reading: the ROOT row of the findmnt table, on
+// a real device, in percent FREE (the fuel gauge reads F = 100 percent free).
+// It is a reading, not a watch decision: root drive usage feeds the dashboard
+// whether or not the watch list covers it, and it never produces an alert.
+// A pseudo filesystem behind / (tmpfs and friends) is no root at all - the
+// same rule that keeps tmpfs off the bar.
+function rootDriveReading(text) {
+  for (const row of parseRows(text)) {
+    if (sanitizePath(row.TARGET) !== "/") continue;
+    if (!isRealDevice(row.SOURCE)) continue;
+    const usedBytes = asNumber(row.USED);
+    const availBytes = asNumber(row.AVAIL);
+    const pctUsed = asNumber(row["USE%"].replace("%", ""));
+    if (usedBytes === null || availBytes === null || pctUsed === null) continue;
+    const usedKb = Math.round(usedBytes / 1024);
+    const availKb = Math.round(availBytes / 1024);
+    return {
+      type: "root",
+      target: "/",
+      device: deviceOf(row.SOURCE),
+      fstype: sanitizeText(row.FSTYPE, 32),
+      pctUsed,
+      pctFree: Math.max(0, Math.min(100, 100 - pctUsed)),
+      usedKb,
+      availKb,
+      sizeKb: usedKb + availKb,
+    };
+  }
+  return null;
+}
+
 // Five btrfs subvolumes of one device are five detail rows and one alert event.
 // The device group carries the fullest mount on it, because that is the row the
 // alert is about.

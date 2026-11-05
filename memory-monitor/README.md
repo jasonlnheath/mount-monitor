@@ -15,17 +15,16 @@ already alerting on — so one drive produces one toast, not two.
 
 ## What the bar shows
 
-- **No alerts:** the Memory Monitor logo — a full ring filled in white with
-  `MM` in white in the middle. Plain white, plain Jane.
-- **Amber / red / critical:** the resource in trouble, with a graphic badge —
-  a drive glyph, a memory-chip glyph, a GPU-card glyph. Only the **most severe**
-  alert across the three types is shown, chosen by a deterministic rule
-  (severity, then the smallest headroom to its own critical line, then a fixed
-  type order). A resource that is not on the machine is never named.
-- **Severity carries shape as well as colour:** amber is a hollow partial fill,
-  red is a full badge with a warning glyph, critical adds the pulse and halo. A
-  latched band renders as latched. The tooltip always carries the numbers in
-  text.
+- **No alerts:** the Quattro Dash emblem — the standard check-engine telltale
+  (ISO 2575 artwork) in plain white. Monochrome means all systems go, just like
+  an instrument cluster.
+- **Amber / red / critical:** the same check-engine telltale, tinted by the
+  most severe alert across the three types (amber, then red, then critical's
+  red with a breathing pulse), chosen by a deterministic rule (severity, then
+  the smallest headroom to its own critical line, then a fixed type order). A
+  resource that is not on the machine is never named.
+- **Click opens the Quattro Dash** instrument cluster. The tooltip always
+  carries the numbers in text.
 
 ## Thresholds: you set the ceilings
 
@@ -131,16 +130,35 @@ largest consumers of RAM, VRAM and drives, with ranked throttle/prune
 recommendations — nothing is killed or throttled without your word). On decline,
 monitoring continues and a critical still notifies you, with the guard-off copy.
 
+## Quattro Dash, the instrument cluster
+
+Clicking the bar emblem opens the dashboard: two round meters (RAM PRESSURE
+reading the kernel's Pressure Stall Information from `/proc/pressure/memory`,
+some avg10, amber from 60, red at 80; ROOT DRIVE as a fuel gauge where F is
+100 percent free and the red zone sits below 10 percent free) and a SWAP
+RESERVE battery telltale with a ten-segment LED bar (green at 25 percent or
+more, yellow from 10, red below 10, pulsing when red, no swap configured reads
+as the empty state). Under them, the codes area: two columns under check-engine
+heads, amber for moderate codes and red for severe ones. A code is the
+monitor's own live fault - a watched resource sitting over your amber or red
+ceiling - wearing an OBD-style name (P for System RAM, C for VRAM and drives,
+plus four stable digits), a one-line description, and a hover decode (Issue /
+Status / Fix). Clicking a code sends the same fixed prompt the toasts send to
+your default agent and lights the green toast; severe codes carry the
+"agent has the crash pattern and is processing now" wording. Hovering any
+instrument gives the plain-words teaching decode, PSI included: it is a real
+kernel metric, not one we invented.
+
 ## The detail window
 
-Click the widget (or a critical toast) for the whole picture: per-drive rows
-grouped by device, the RAM picture with absolute GiB, PSI, swap and zram, the
-VRAM picture with its consumers and its unattributed remainder, your ceilings
-next to the kernel's, the guard's real state, the alerts DND silenced, and the
-baseline log path. Thresholds are set there: a value box per threshold, changed
-by clicking the step buttons, by typing, or by arrow keys (up/right increments,
-down/left decrements, one percentage point). An unavailable measurement reads as
-unavailable — never as 0%.
+A critical toast's click (or the `openDetail` IPC) opens the whole picture:
+per-drive rows grouped by device, the RAM picture with absolute GiB, PSI, swap
+and zram, the VRAM picture with its consumers and its unattributed remainder,
+your ceilings next to the kernel's, the guard's real state, the alerts DND
+silenced, and the baseline log path. Thresholds are set there: a value box per
+threshold, changed by clicking the step buttons, by typing, or by arrow keys
+(up/right increments, down/left decrements, one percentage point). An
+unavailable measurement reads as unavailable — never as 0%.
 
 ## The baseline log
 

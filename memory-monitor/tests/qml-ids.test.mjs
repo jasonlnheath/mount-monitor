@@ -13,7 +13,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Memory, repoFile } from "./load.mjs";
 
-const FILES = ["memory-monitor/MemoryMonitor.qml", "memory-monitor/MemoryPanel.qml"];
+const FILES = [
+  "memory-monitor/MemoryMonitor.qml",
+  "memory-monitor/MemoryPanel.qml",
+  "memory-monitor/QuattroDash.qml",
+];
 
 // Members that only a QML object declared in this file owns. A JavaScript value
 // in this codebase never has any of them.
