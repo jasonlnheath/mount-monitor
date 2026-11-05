@@ -476,6 +476,17 @@ test("the reserved spares footer is the approved mockup footer, exactly", () => 
   }
 });
 
+test("the thermometer body keeps the mockup's full tick-bump run into the bulb neck", () => {
+  // The stem's ticks are a run of bump pairs the mockup draws explicitly before
+  // the bulb neck; collapsing the run into one smooth curve shortens the stem
+  // and lifts the bulb entry off the approved artwork. The artwork is an owned
+  // transcription contract, pinned like the fuel nozzle's relative lineto.
+  const body = Quattro.SYMBOLS.thermo.items[1];
+  assert.match(body.d,
+    /1\.216,1\.216h1\.96v6\.148h-1\.96c-0\.672,0-1\.216,0\.543-1\.216,1\.215s/,
+    "the bump run into the bulb neck is the mockup's, not a collapsed smooth curve");
+});
+
 test("the palette carries the approved mockup hexes", () => {
   assert.equal(Quattro.PAL.amber, "#e3b341");
   assert.equal(Quattro.PAL.redHot, "#ff3b30");
