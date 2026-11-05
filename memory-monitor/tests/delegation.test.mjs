@@ -386,3 +386,14 @@ test("the widget's own copy is only the bar's logo and the tooltip, both of whic
   assert.equal(both.includes("Memory.swapText("), true);
   assert.equal(both.includes("Memory.psiText("), true);
 });
+
+test("a dash-launched severe dispatch rides the same arm gate the toast path rides", () => {
+  const dispatch = (QML.match(/function dispatchCriticalCode\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.notEqual(dispatch, "", "the widget owns the severe code's dispatch");
+  assert.match(dispatch, /Memory\.shouldStartArm\(/,
+    "the gate is the arm's own single-flight check, not a dash-local guess");
+  assert.match(dispatch, /Memory\.armBudgetCheck\(/, "the budget gate rides along");
+  assert.match(dispatch, /startArm\(alert, true\)/,
+    "the dispatched agent IS the arm: one flight, one agent, the v1 doctrine");
+  assert.match(dispatch, /why: decision\.why/, "the refusal names why so the dash can say so");
+});

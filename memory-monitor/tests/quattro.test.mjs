@@ -63,7 +63,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
   for (const fn of [
     "ledBand", "litSegments", "reserveReading", "psiZone", "psiNeedleFrac",
     "fuelNeedleFrac", "needleAngleDeg", "psiTip", "battTip", "fuelTip",
-    "codeTip", "codesFromReadings", "dispatchToast", "gbFromKb",
+    "codeTip", "codesFromReadings", "dispatchToast", "dispatchRefused", "gbFromKb",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -385,6 +385,49 @@ test("dispatchToast: the approved toast copy, with the processing words on sever
   assert.equal(severe.text, "to firstmate (default agent), processing now");
 });
 
+test("dispatchRefused: a refused severe click names why, on shouldStartArm's own tokens", () => {
+  assert.equal(Quattro.dispatchRefused("C1500", "guard-off").text, "not sent. the guard is off.");
+  assert.equal(Quattro.dispatchRefused("C1500", "arm-live").text, "not sent. an agent is already on it.");
+  assert.equal(Quattro.dispatchRefused("C1500", "no-headroom").text, "not sent. no memory headroom.");
+  assert.equal(Quattro.dispatchRefused("C1500", "not-writer").text, "not sent. another screen owns the guard.");
+  const unknown = Quattro.dispatchRefused("C1500", "");
+  assert.equal(unknown.mark, "\u2717");
+  assert.equal(unknown.code, "C1500");
+  assert.equal(unknown.text, "not sent.");
+});
+
+test("codesFromReadings: an hd alert carries the device data the dispatch prompt's data block needs", () => {
+  const entry = {
+    type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05", band: 2, pct: 97,
+    target: "/", device: "/dev/sda2", fstype: "btrfs", label: "OMARCHY",
+    partlabel: "OMARCHY_ROOT", sizeKb: 1000, usedKb: 700, availKb: 300,
+    ro: false, latched: true,
+  };
+  const alert = Quattro.codesFromReadings(null, null, [entry])[0].alert;
+  same(alert, {
+    kind: "alert", band: 2, type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05",
+    pct: 97, target: "/", device: "/dev/sda2", fstype: "btrfs", label: "OMARCHY",
+    partlabel: "OMARCHY_ROOT", sizeKb: 1000, usedKb: 700, availKb: 300,
+    ro: false, latched: true,
+  });
+});
+
+test("the dashboard dispatch builds the same prompt the toast dispatch builds", () => {
+  const entry = {
+    type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05", band: 2, pct: 97,
+    target: "/", device: "/dev/sda2", fstype: "btrfs", label: "OMARCHY",
+    partlabel: "OMARCHY_ROOT", sizeKb: 1000, usedKb: 700, availKb: 300,
+    ro: false, latched: false,
+  };
+  const dashAlert = Quattro.codesFromReadings(null, null, [entry])[0].alert;
+  const dashPrompt = Memory.agentPrompt(dashAlert, null, null, "/log");
+  const toastAlert = Object.assign({ kind: "band" }, entry);
+  const toastPrompt = Memory.agentPrompt(toastAlert, null, null, "/log");
+  assert.equal(dashPrompt, toastPrompt, "one alert, one prompt, whichever surface dispatched it");
+  assert.match(dashPrompt, /\/dev\/sda2/, "the device rides the data block, not an empty string");
+  assert.match(dashPrompt, /OMARCHY_ROOT/);
+});
+
 // ---------------------------------------------------------------------------
 // Symbols and palette (the ISO artwork from the approved mockup)
 // ---------------------------------------------------------------------------
@@ -408,6 +451,29 @@ test("the four ISO symbols ship with their viewBox and fill/stroke items", () =>
   assert.equal(Quattro.SYMBOLS.temp.items.some(i => i.stroke && i.width === 11), true,
     "the temp symbol's ribs are the 11-wide strokes from the mockup");
   assert.equal(Quattro.SYMBOLS.fuel.items.some(i => i.stroke && i.width === 10), true);
+});
+
+test("the fuel nozzle subpath is the mockup's relative lineto, not an absolute one", () => {
+  // The mockup reads `M157.64 55.626 9.4547 80.332c...`: a lowercase moveto's
+  // implicit second pair is a RELATIVE lineto. Transcribed under an uppercase M
+  // that pair becomes absolute and the nozzle lands off-canvas. The zero
+  // reference is the moveto pair itself; what follows must start with `l`.
+  const item = Quattro.SYMBOLS.fuel.items.find(i => i.stroke && i.width === 10);
+  const at = item.d.indexOf("M157.64 55.626");
+  assert.notEqual(at, -1, "the nozzle subpath is part of the fuel outline");
+  assert.match(item.d.slice(at + "M157.64 55.626".length), /^l9\.4547 80\.332c/,
+    "the nozzle's second pair must be the mockup's relative lineto");
+});
+
+test("the reserved spares footer is the approved mockup footer, exactly", () => {
+  assert.equal(Quattro.SPARES.caption, "FUTURE LANES (RESERVED)");
+  same(Quattro.SPARES.symbols, ["oil", "thermo", "tri"]);
+  for (const id of Quattro.SPARES.symbols) {
+    const sym = Quattro.SYMBOLS[id];
+    assert.notEqual(sym, undefined, `reserved-lane symbol ${id} ships as artwork`);
+    assert.equal(sym.viewBox.length, 4, `${id} needs its four-number SVG viewBox`);
+    assert.equal(sym.items.length >= 1, true, `${id} needs items`);
+  }
 });
 
 test("the palette carries the approved mockup hexes", () => {
@@ -460,6 +526,10 @@ test("the language rule holds over every string the popup copy can produce", () 
 
   texts.push(Quattro.dispatchToast("P0420", false).text);
   texts.push(Quattro.dispatchToast("C1500", true).text);
+  for (const why of ["guard-off", "arm-live", "no-headroom", "not-writer", ""]) {
+    texts.push(Quattro.dispatchRefused("C1500", why).text);
+  }
+  texts.push(Quattro.SPARES.caption);
   texts.push(Quattro.INSTRUMENTS.psi, Quattro.INSTRUMENTS.batt, Quattro.INSTRUMENTS.fuel);
 
   const bad = texts.filter(t => /[\u2014\u2013;]/.test(t));
@@ -521,7 +591,7 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     "Quattro.ledBand(", "Quattro.INSTRUMENTS", "Quattro.PAL",
     "Quattro.psiZoneArcs", "Quattro.fuelZoneArcs", "Quattro.dialTicks(",
     "Quattro.needleAngleDeg(", "Quattro.psiNeedleFrac(", "Quattro.fuelNeedleFrac(",
-    "Quattro.reserveReading(",
+    "Quattro.reserveReading(", "Quattro.SPARES",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
   }
@@ -536,6 +606,11 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
   // memory.js. The panel builds no prompt words of its own.
   assert.equal(PANEL.includes("Memory.agentArgv("), true);
   assert.equal(PANEL.includes("Memory.agentPrompt("), true);
+  // A severe code's click dispatches through the widget's arm gate, not around
+  // it: the arm's single-flight check is what keeps a second agent off the
+  // machine while one is armed.
+  assert.equal(PANEL.includes("Memory.isArmNotice("), true);
+  assert.equal(PANEL.includes("callMonitor(\"dispatchCriticalCode\""), true);
   assert.equal(PANEL.includes("Quickshell.execDetached("), true);
   // No fixed sentence lives in the panel except its own log lines.
   const longLiterals = PANEL.split("\n").filter(line =>
@@ -563,7 +638,7 @@ test("the bar widget mounts the dashboard and the badge opens it", () => {
 
 test("install.sh ships the dashboard beside the widget", () => {
   const INSTALL = repoFile("memory-monitor/install.sh");
-  for (const file of ["QuattroDash.qml", "quattro.js", "MemoryPanel.qml", "memory.js", "ringkit.js"]) {
+  for (const file of ["QuattroDash.qml", "QuattroSymbol.qml", "quattro.js", "MemoryPanel.qml", "memory.js", "ringkit.js"]) {
     assert.equal(INSTALL.includes(file), true, `install.sh must copy ${file}`);
   }
 });

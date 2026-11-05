@@ -10,17 +10,19 @@ import "quattro.js" as Quattro
 // design (rounds 1-7, verdict "ship it"). A PopupCard at the shell-standard
 // width, mounted from MemoryMonitor.qml through its own Loader the way
 // MemoryPanel.qml is. Two round meters (RAM PRESSURE and ROOT DRIVE), a
-// SWAP RESERVE battery telltale with its LED bar, and the codes area: two
+// SWAP RESERVE battery telltale with its LED bar, the codes area: two
 // columns under the check-engine heads, one amber for moderate codes and one
-// red for severe ones. Hover any instrument or code for the two-column
-// teaching decode; click a code to send the issue to the default agent.
+// red for severe ones, and the reserved spares row the approved footer shows.
+// Hover any instrument or code for the two-column teaching decode; click a
+// moderate code to send the issue to the default agent, and a severe one to
+// put it through the arm's gate.
 //
 // This file draws. Every decision lives in quattro.js (bands, needle geometry,
 // zones, LED counts, code taxonomy, all copy) and memory.js (the swap totals,
-// the agent prompt, the agent argv), so the fixed sentences the design approved
-// exist in exactly one testable place. The popup never renders an unavailable
-// reading as a number: a missing PSI or root reading hides its needle and the
-// Now line says so.
+// the agent prompt, the agent argv, the arm gate), so the fixed sentences the
+// design approved exist in exactly one testable place. The popup never renders
+// an unavailable reading as a number: a missing PSI or root reading hides its
+// needle and the Now line says so.
 Panel {
   id: root
 
@@ -73,13 +75,29 @@ Panel {
 
   // The click path is the plugin's own typed argv: the SAME fixed prompt the
   // toasts send, built by memory.js, one paragraph in one argv element, run
-  // detached. No shell, no sentence built here.
+  // detached, with the same agentInline setting every other click path honors.
+  // No shell, no sentence built here. A severe code is a critical-band
+  // dispatch, so it never launches an agent of its own: it asks the monitor to
+  // put it through the arm's gate and launch, and a refused click says so.
   function dispatchCode(code) {
+    if (Memory.isArmNotice(code.alert)) {
+      var decision = callMonitor("dispatchCriticalCode", [code.alert], null)
+      if (decision === null || decision.started !== true) {
+        showToast(Quattro.dispatchRefused(code.code, decision === null ? "" : decision.why), true)
+        return
+      }
+      markSent(code.code)
+      showToast(Quattro.dispatchToast(code.code, true))
+      return
+    }
     var reading = callMonitor("readingFor", [code.alert.type, code.alert], null)
-    var argv = Memory.agentArgv(
-      Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", "")),
-      callMonitor("agentCommandArgv", [], null))
+    var prompt = Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", ""))
+    var argv = Memory.normalizeBool(callMonitor("setting", ["agentInline", false], false), false)
+      ? Memory.agentArgvWithInline(prompt, callMonitor("agentCommandArgv", [], null))
+      : Memory.agentArgv(prompt, callMonitor("agentCommandArgv", [], null))
     Quickshell.execDetached(argv)
+    markSent(code.code)
+    showToast(Quattro.dispatchToast(code.code, code.sev === "r"))
   }
 
   // ---------------------------------------------------------------------------
@@ -376,6 +394,49 @@ Panel {
             }
           }
         }
+
+        // ---- The reserved spares row: the approved footer. The three unlit
+        //      telltales for the lanes the design held back (oil, thermometer,
+        //      hazard triangle), and the caption that says so. The symbols and
+        //      the words are quattro.js data; this file only lays them out.
+        Item {
+          Layout.fillWidth: true
+          implicitHeight: 1
+          Rectangle {
+            anchors.fill: parent
+            color: Quattro.PAL.line
+          }
+        }
+
+        RowLayout {
+          Layout.alignment: Qt.AlignHCenter
+          spacing: 10
+
+          Repeater {
+            model: Quattro.SPARES.symbols
+
+            Item {
+              required property var modelData
+              width: 17
+              height: 17
+
+              QuattroSymbol {
+                anchors.fill: parent
+                symbol: parent.modelData
+                color: Quattro.PAL.faceSym
+              }
+            }
+          }
+
+          Text {
+            text: Quattro.SPARES.caption
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.5
+          }
+        }
       }
     }
 
@@ -457,7 +518,7 @@ Panel {
       color: Quattro.PAL.tooltipBg
       radius: 10
       border.width: 1
-      border.color: Quattro.PAL.green
+      border.color: root.toastBad ? Quattro.PAL.redHot : Quattro.PAL.green
       z: 20
       visible: toastTimer.running
       opacity: toastTimer.running ? 1 : 0
@@ -473,7 +534,7 @@ Panel {
 
         Text {
           text: root.toastMark
-          color: Quattro.PAL.green
+          color: root.toastBad ? Quattro.PAL.redHot : Quattro.PAL.green
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
           font.bold: true
@@ -685,8 +746,6 @@ Panel {
       onClicked: {
         if (codeRow.entry === null) return
         root.dispatchCode(codeRow.entry)
-        root.markSent(codeRow.entry.code)
-        root.showToast(Quattro.dispatchToast(codeRow.entry.code, codeRow.severe))
       }
       onContainsMouseChanged: if (containsMouse) root.showTip(codeRow.tip(), codeRow, mouse.x, mouse.y)
       else root.hideTip()
@@ -731,11 +790,13 @@ Panel {
   property string toastMark: ""
   property string toastCode: ""
   property string toastText: ""
+  property bool toastBad: false
 
-  function showToast(t) {
+  function showToast(t, bad) {
     toastMark = t.mark
     toastCode = t.code
     toastText = t.text
+    toastBad = bad === true
     toastTimer.restart()
   }
 }

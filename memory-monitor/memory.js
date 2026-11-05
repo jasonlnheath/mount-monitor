@@ -2622,12 +2622,6 @@ function tooltipText(entry) {
   return lines.join("\n");
 }
 
-// The bar's no-alert state is the MM logo: a full ring, white, "MM" in the
-// middle. A badge appears only when a band is held.
-function barLogoText() {
-  return "MM";
-}
-
 function badgeLabel(type) {
   const key = sanitizeText(type, 16);
   if (key === "hd") return "HD";
@@ -2773,12 +2767,12 @@ function armIsLive(arm) {
 
 function shouldStartArm(opts) {
   const o = opts || {};
-  if (asNumber(o.band) !== 3) return { start: false, reason: "not the critical band" };
-  if (!normalizeBool(o.guard, true)) return { start: false, reason: "the standing guard is off" };
-  if (normalizeBool(o.armLive, false)) return { start: false, reason: "an arm is already live for this machine" };
-  if (!normalizeBool(o.budgetOk, true)) return { start: false, reason: "no headroom for the guard" };
-  if (!normalizeBool(o.writer, true)) return { start: false, reason: "another instance owns the arm" };
-  return { start: true, reason: "" };
+  if (asNumber(o.band) !== 3) return { start: false, reason: "not the critical band", why: "not-critical" };
+  if (!normalizeBool(o.guard, true)) return { start: false, reason: "the standing guard is off", why: "guard-off" };
+  if (normalizeBool(o.armLive, false)) return { start: false, reason: "an arm is already live for this machine", why: "arm-live" };
+  if (!normalizeBool(o.budgetOk, true)) return { start: false, reason: "no headroom for the guard", why: "no-headroom" };
+  if (!normalizeBool(o.writer, true)) return { start: false, reason: "another instance owns the arm", why: "not-writer" };
+  return { start: true, reason: "", why: "" };
 }
 
 function guardStateFor(opts) {

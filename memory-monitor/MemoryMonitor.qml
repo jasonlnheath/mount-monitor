@@ -643,7 +643,10 @@ BarWidget {
   // toast's notification id.
   // ---------------------------------------------------------------------------
 
-  function startArm(alert): void {
+  // fromDash marks the Quattro Dash's severe-code click: an arm with no claim
+  // notice behind it, so it captures no printed id and a later death retracts
+  // by a fresh toast instead of by a notice it never showed.
+  function startArm(alert, fromDash): void {
     if (!isWriter) return;
     var eventKey = Memory.armEventKey(alert);
     if (Memory.armIsLive(arm) && liveArmKey === eventKey) return;
@@ -674,7 +677,7 @@ BarWidget {
       ? Memory.agentArgvWithInline(prompt, agentCommandArgv())
       : Memory.agentArgv(prompt, agentCommandArgv());
     liveArmKey = eventKey;
-    armClaimNotice = alert;
+    if (fromDash !== true) armClaimNotice = alert;
     arm = Memory.armRecord({
       eventKey: eventKey,
       type: alert.type,
@@ -685,13 +688,31 @@ BarWidget {
       target: alert.target,
       outcome: "started",
       startedAt: new Date().toISOString(),
-      claimId: noticePrintedId,
+      claimId: fromDash === true ? "" : noticePrintedId,
       inline: Memory.normalizeBool(setting("agentInline", false), false),
     });
     recordArm(arm);
     armProc.command = argv;
     armProc.running = true;
     armWatchdog.restart();
+  }
+
+  // The Quattro Dash's severe-code click is a critical-band dispatch, so it
+  // rides the arm: the same gate chain the queue-time arm passes, and the same
+  // launch through startArm, which is what keeps the machine's single-flight
+  // lane the one guarantee there is never a second agent on top of the armed
+  // one. The refusal rides back to the dash so it can say so in words.
+  function dispatchCriticalCode(alert): var {
+    var budget = Memory.armBudgetCheck(ramReading, oomd, { psiFloor: Memory.PSI_STALL_FLOOR });
+    var decision = Memory.shouldStartArm({
+      band: alert.band,
+      guard: guardOn(),
+      armLive: Memory.armIsLive(arm),
+      budgetOk: budget.ok,
+      writer: isWriter,
+    });
+    if (decision.start) startArm(alert, true);
+    return { started: decision.start, why: decision.why };
   }
 
   function finishArm(outcome, survived, reasons): void {
