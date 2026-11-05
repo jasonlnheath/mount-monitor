@@ -31,9 +31,11 @@ already alerting on — so one drive produces one toast, not two.
 
 - **Amber 80%** and **red 90%** are the documented defaults.
 - **Critical ships unset.** No critical band exists, no critical toast can fire,
-  and the bar cannot glow for a ceiling you never chose. First run reports what
-  your machine actually rests at and asks you for your ceilings; the
-  recommendation is a recommendation, and your value wins.
+  and the bar cannot glow for a ceiling you never chose. First run asks you for
+  your ceilings; until the baseline log has enough samples the question says
+  plainly it has no resting claim yet and recommends the documented defaults as
+  defaults, and once measured it recommends from what your machine actually rests
+  at. The recommendation is a recommendation, and your value wins.
 - One critical control per memory type — hard drive, VRAM, system RAM — set in
   the detail window or answered at onboarding. Each value records whether you
   set it or it is still the default.
@@ -191,7 +193,7 @@ On the widget's entry in `shell.json`:
 | `mounts` | Mount Monitor's `mounts` list | The HD watch list, used only when no Mount Monitor widget is present. An empty list means no drive rows, not garbage. |
 | `agentCommand` | `["omarchy", "agent", "prompt"]` | The agent an amber or red click opens. |
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
-| `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | Override the nominal poll interval. Escalation still applies on top of it. |
+| `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
@@ -229,7 +231,10 @@ magick compare -metric AE /tmp/mm-bar.png memory-monitor/bar-screenshot.png null
 
 `compare -metric AE` reports the count of pixels that differ: an unrelated change
 must report `0`. `memory-monitor/bar-screenshot.png` is the saved render the next
-change is diffed against, so a verified change updates it. Force a band without waiting for a real emergency with
+change is diffed against. No baseline ships with the repo: the first verified
+change saves its render — `cp /tmp/mm-bar.png memory-monitor/bar-screenshot.png`
+— and every later change is diffed against that baseline, updating it when
+verified. Force a band without waiting for a real emergency with
 `"testPct": 91` on the widget's `shell.json` entry, and force the resource the
 badge names by leaving the real readings in place. Remove `testPct` and restart
 the shell again before the render counts as verified.

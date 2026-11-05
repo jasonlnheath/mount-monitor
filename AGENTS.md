@@ -26,14 +26,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the node tests through `node:vm`. It must stay plain top-level `function`
   declarations: no `export`, no `import`, no `.pragma library`, or one of the
   two consumers breaks.
-- `ringkit.js` is the repo-root shared module the two widgets import: the palette,
+- `ringkit.js` is the repo-root shared decision kernel: the palette,
   the band step function, the hysteresis and descent-reachability rules, the
   most-severe tie-break, the adaptive-poll step, the badge shape/glyph decision,
   the trust primitives, and the cursor-marker rule (kept, labelled unconsumed, for
-  the next plugin). It carries no cursor state and no mount-specific rule, and it
-  is a plain module like `mounts.js` for the same reason. `tests/ringkit.test.mjs`
-  is its contract; `memory-monitor/tests/ringkit-conformance.test.mjs` proves it
-  and `mounts.js bandFor` cannot disagree.
+  the next plugin). Memory Monitor's widget imports it; Mount Monitor does not yet —
+  `mounts.js bandFor` mirrors the band rule by hand instead. It carries no cursor
+  state and no mount-specific rule, and it is a plain module like `mounts.js` for
+  the same reason. `tests/ringkit.test.mjs` is its contract;
+  `memory-monitor/tests/ringkit-conformance.test.mjs` proves `mounts.js bandFor`
+  and `memory.js bandForPct` cannot disagree with it.
 - `memory-monitor/` is the sibling plugin (System RAM / VRAM / drive severity,
   user-set ceilings, the detail window, the baseline log, the guard ask). It has
   its own `manifest.json`, `install.sh`, `README.md`, `skills/` and `tests/`; its
@@ -66,10 +68,9 @@ either is absent), the
 hostile-label regression in `tests/label-injection.test.mjs`, the
 spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, the RingKit
 contract in `tests/ringkit.test.mjs` (shared-module shape, band numbers, thresholds,
-hysteresis, most-severe tie-break, poll step, badge shape, trust primitives), a
-check that the root `install.sh` copies `ringkit.js` into the installed plugin, an
-install.sh
-syntax check, a check that every `skills/*/` has a `SKILL.md`, then `qmllint`
+hysteresis, most-severe tie-break, poll step, badge shape, trust primitives), an
+install.sh syntax check, a check that every `skills/*/` has a `SKILL.md`, then
+`qmllint`
 on the QML (syntax and import resolution; QuickShell-type warnings are expected
 outside a running shell). `testPct` in `shell.json` is the manual hook: it
 forces every ring to a percentage, alerts included. There is no way to test a
@@ -256,9 +257,11 @@ layout, the delegation guards) plus the RingKit conformance check that runs
 - **The two plugins share `ringkit.js`, so band numbers are one contract.**
   `mounts.js bandFor`, `memory.js bandForPct` and `ringkit.js bandFor` must agree
   on what a percentage means; `memory-monitor/tests/ringkit-conformance.test.mjs`
-  is the guard. Memory Monitor reads Mount Monitor's `mounts` list and its widget
-  settings through `qs.Config.layout()` (never through `qs.Config.shell()`),
-  suppresses its own HD toast for any target Mount Monitor already alerts on, and
+  is the guard. Memory Monitor reads the live Mount Monitor widget's `mounts`
+  setting through `bar.moduleWidgets()` — the sibling instance's own `setting()`,
+  and `mounts` is the only setting it may read — with its own `mounts` setting as
+  the named fallback when the sibling is not live. It suppresses its own HD toast
+  for any target Mount Monitor already alerts on, and
   runs no `udevadm monitor` of its own — Mount Monitor's is the machine's one
   block-event watcher. Changing Mount Monitor's `mounts` handling, its alert
   targets, or its notification lane changes Memory Monitor's behaviour.
