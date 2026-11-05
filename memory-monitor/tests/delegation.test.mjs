@@ -168,6 +168,41 @@ test("a held band and the priming survive a shell restart through the state file
     "the writer instance persists the band change; a non-writer writes nothing");
 });
 
+test("a band that releases leaves the rows, the badge and the tooltip in the same sample", () => {
+  // The hold direction lives in buildReadings: the rebuilt rows carry bandOf,
+  // so a held band never drops off the bar. The release direction is the other
+  // half of the same binding-timing rule: applyBand returns before it touches
+  // the entry when nothing fires, so on the sample that releases a band the
+  // rows still carry the stale band while the bands memory has already let it
+  // go — the bar would print "HD 30% (red)" for one sample after the red band
+  // has gone. The fix is ordering, and the node suite cannot run QML: the seam
+  // is pinned here, and the release behavior itself is proven live against the
+  // headless rig.
+  const commit = (QML.match(/function commitSample\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  const builtAt = commit.indexOf("buildReadings();");
+  const evaluatedAt = commit.indexOf("evaluateBands();");
+  const reboundAt = commit.indexOf("rebindDisplayBands();");
+  const loggedAt = commit.indexOf("appendLog();");
+  assert.notEqual(builtAt, -1, "commitSample builds the readings");
+  assert.notEqual(evaluatedAt, -1, "commitSample evaluates the bands");
+  assert.notEqual(reboundAt, -1, "commitSample rebinds the display bands");
+  assert.ok(reboundAt > evaluatedAt, "the rebind runs after evaluation, so it carries the band evaluateBands wrote");
+  assert.ok(reboundAt < loggedAt, "the log row is built from the rebound rows, so it records the released band too");
+
+  const rebind = (QML.match(/function rebindDisplayBands\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(rebind, /bandOf\("ram"\)/, "System RAM rebinds from the band memory");
+  assert.match(rebind, /bandOf\("vram"\)/, "VRAM rebinds from the band memory");
+  assert.match(rebind, /bandOf\(row\.key\)/, "each drive row rebinds from the band memory by its own key");
+  assert.match(rebind, /latchedOf\(/, "the latch rebinds with the band: a released band must not present as latched");
+  assert.match(rebind, /ramReading = ram;/, "the readings are rebound by reassignment");
+  assert.match(rebind, /vramReading = vram;/);
+  assert.match(rebind, /hdDevices = rows;/);
+  // The bindings evaluate on the property assignment and never see a later
+  // in-place fix, so the rebind must clone before it writes.
+  assert.equal(rebind.includes("ramReading.band ="), false, "no in-place fix the bindings would miss");
+  assert.equal(rebind.includes("hdDevices[i].band ="), false);
+});
+
 test("the notice lane answers the notice it showed, and never asks a question twice at once", () => {
   // The close is attributed to activeNotice, and a question is only queued when
   // no copy of it is queued or live: the ask is re-fired by delivery failure,

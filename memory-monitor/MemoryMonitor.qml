@@ -284,6 +284,7 @@ BarWidget {
     if (!stateLoaded) return;
     buildReadings();
     evaluateBands();
+    rebindDisplayBands();
     if (isWriter) appendLog();
     schedulePolls();
     evaluateOnboarding();
@@ -386,6 +387,39 @@ BarWidget {
     latchedMap = nextLatched;
     alertQueue = Memory.dropGoneAlerts(alertQueue, seen);
     noticeQueue = Memory.dropGoneAlerts(noticeQueue, seen);
+  }
+
+  // The display rows carry the band the bands memory held BEFORE this sample
+  // (buildReadings binds it, so a held band never drops off the bar); this is
+  // the release direction. On the sample that releases a band, evaluateBands()
+  // has already written the released band into the bands memory while the rows
+  // still carry the stale one — an early-returning applyBand never touches the
+  // entry when nothing fires — so the badge and tooltip would print "HD 30%
+  // (red)" for one sample after the red band has gone. Rebind from the band
+  // memory evaluateBands just wrote. The copy-and-reassign is not a style
+  // choice: the badge and tooltip bindings evaluate on the property assignment
+  // itself and never see a later in-place fix (see buildReadings).
+  function rebindDisplayBands(): void {
+    if (ramReading !== null) {
+      var ram = JSON.parse(JSON.stringify(ramReading));
+      ram.band = bandOf("ram");
+      ram.latched = latchedOf("ram");
+      ramReading = ram;
+    }
+    if (vramReading !== null) {
+      var vram = JSON.parse(JSON.stringify(vramReading));
+      vram.band = bandOf("vram");
+      vram.latched = latchedOf("vram");
+      vramReading = vram;
+    }
+    var rows = [];
+    for (var i = 0; i < hdDevices.length; i++) {
+      var row = JSON.parse(JSON.stringify(hdDevices[i]));
+      row.band = bandOf(row.key);
+      row.latched = latchedOf(row.key);
+      rows.push(row);
+    }
+    hdDevices = rows;
   }
 
   function applyBand(key, type, pct, ceiling, latchedTarget, entry): void {
