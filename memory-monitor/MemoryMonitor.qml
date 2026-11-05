@@ -969,6 +969,7 @@ BarWidget {
 
   function showDetail(): void {
     unseenAlerts = [];
+    hideDash();
     if (panelLoader.item) panelLoader.item.open();
   }
 
@@ -1543,8 +1544,24 @@ BarWidget {
   // Opening either counts as having seen the alert state.
   readonly property bool opened: dashLoader.item ? dashLoader.item.opened === true : false
 
+  // The bar keys the open-panel dot and popout switching on the bar-widget root
+  // (Bar.qml compares its active popout to the slot's item), while each popup
+  // card is owned by its own panel so every window keeps a dismissal path of
+  // its own. The widget carries the popout identity instead: a change in the
+  // panels' opened state registers and releases it with the bar's coordinator.
+  readonly property bool detailOpen: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property bool anySurfaceOpen: opened || detailOpen
+  onAnySurfaceOpenChanged: syncPopout()
+
+  function syncPopout(): void {
+    if (!bar || typeof bar.requestPopout !== "function") return;
+    if (anySurfaceOpen) bar.requestPopout(root);
+    else bar.releasePopout(root);
+  }
+
   function open(): void {
     unseenAlerts = [];
+    hideDetail();
     if (dashLoader.item) dashLoader.item.open();
   }
 
@@ -1553,13 +1570,23 @@ BarWidget {
   }
 
   function togglePanel(): void {
+    hideDetail();
     if (dashLoader.item) dashLoader.item.toggle();
   }
 
   readonly property bool popoutSwitchClosing: dashLoader.item ? dashLoader.item.popoutSwitchClosing === true : false
 
   function closeForPopoutSwitch(): void {
-    if (dashLoader.item) dashLoader.item.closeForPopoutSwitch();
+    if (detailOpen === true && panelLoader.item) panelLoader.item.closeForPopoutSwitch();
+    else if (dashLoader.item) dashLoader.item.closeForPopoutSwitch();
+  }
+
+  function hideDetail(): void {
+    if (detailOpen === true && panelLoader.item) panelLoader.item.close();
+  }
+
+  function hideDash(): void {
+    if (opened === true && dashLoader.item) dashLoader.item.close();
   }
 
   function injectPanel(): void {

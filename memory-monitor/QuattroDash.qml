@@ -109,10 +109,12 @@ Panel {
   readonly property real dialW: 132 * unit
   readonly property real dialH: 118 * unit
 
+  CardBar { id: cardBar; api: root.bar }
+
   PopupCard {
     id: card
     anchorItem: root.anchorItem
-    bar: root.bar
+    bar: cardBar
     owner: root
     open: root.opened
     contentWidth: Style.space(380)

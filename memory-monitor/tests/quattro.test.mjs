@@ -649,7 +649,7 @@ test("the bar widget mounts the dashboard and the badge opens it", () => {
 
 test("install.sh ships the dashboard beside the widget", () => {
   const INSTALL = repoFile("memory-monitor/install.sh");
-  for (const file of ["QuattroDash.qml", "QuattroSymbol.qml", "quattro.js", "MemoryPanel.qml", "memory.js", "ringkit.js"]) {
+  for (const file of ["QuattroDash.qml", "QuattroSymbol.qml", "CardBar.qml", "quattro.js", "MemoryPanel.qml", "memory.js", "ringkit.js"]) {
     assert.equal(INSTALL.includes(file), true, `install.sh must copy ${file}`);
   }
 });

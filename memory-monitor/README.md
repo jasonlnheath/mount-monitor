@@ -143,14 +143,14 @@ heads, amber for moderate codes and red for severe ones. A code is the
 monitor's own live fault - a watched resource sitting over your amber or red
 ceiling - wearing an OBD-style name (P for System RAM, C for VRAM and drives,
 plus four stable digits), a one-line description, and a hover decode (Issue /
-Status / Fix). Clicking a moderate code sends the same fixed prompt the toasts
-send to your default agent (inline when `agentInline` is set) and lights the
-green toast. Clicking a severe code goes through the guard's arm gate first -
-the same single-flight, budget-gated check that owns every critical-band agent
-launch. Armed, the agent starts and the green toast carries the "agent has the
-crash pattern and is processing now" wording; refused, nothing starts and the
-red "not sent." toast says why: the guard is off, an agent is already on it, no
-memory headroom, or another screen owns the guard. Hovering any instrument
+Status / Fix). Clicking a code sends the same fixed prompt the toasts send to
+your default agent (inline when `agentInline` is set) and lights the green
+toast, red codes with the "processing now" wording added. Only a code at the
+critical band goes through the guard's arm gate first - the same
+single-flight, budget-gated check that owns every critical-band agent launch.
+Armed, the agent starts; refused, nothing starts and the red "not sent." toast
+says why: the guard is off, an agent is already on it, no memory headroom, or
+another screen owns the guard. Hovering any instrument
 gives the plain-words teaching decode, PSI included: it is a real kernel
 metric, not one we invented.
 

@@ -80,10 +80,12 @@ Panel {
     return text
   }
 
+  CardBar { id: cardBar; api: root.bar }
+
   PopupCard {
     id: card
     anchorItem: root.anchorItem
-    bar: root.bar
+    bar: cardBar
     // The card's close is this panel's own close (Panel.close), the way
     // QuattroDash's card does it: the bar widget's close() closes the dash, so
     // delegating to the widget would leave this window with no dismissal path.

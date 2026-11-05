@@ -27,6 +27,12 @@ copy; terse casual copy register (5 words ideal).
    the active popout's owner). So each panel keeps its own owner identity: the
    dashboard's `PopupCard.owner` is the QuattroDash item, MemoryPanel keeps
    `owner: barIdentity`.
+   [Superseded by review round 1, 2026-11-05: keying `owner` to the widget left
+   the detail window with no dismissal path once the widget's close() routed to
+   the dash. Each panel's card is now owned by that panel root, the cards read
+   the bar through the inert CardBar facade, and the widget registers itself as
+   the bar's popout owner from the panels' opened state (`MemoryMonitor.qml`
+   `syncPopout`), which is also what lights the bar's open-panel dot.]
 2. **Bar-facing panel shape repointed to the dashboard.** `Bar.qml` calls
    `open/close/opened` on the widget for hotkeys and panel switching, and the
    badge is the click surface the captain named ("user clicks to open the
@@ -141,6 +147,11 @@ copy; terse casual copy register (5 words ideal).
   click-dispatches-to-agent for both severities. MemoryPanel's
   health-check click already runs this exact argv shape, so the pattern has a
   precedent.
+  [Superseded by review round 1, 2026-11-05: the captain ruled a critical-band
+  (band 3) code click is a critical dispatch, never a second agent on top of
+  an armed guard. Such clicks now ask the monitor to put them through the arm
+  gate (`dispatchCriticalCode`) and say so in a red toast when refused; band 2
+  and band 1 codes still dispatch directly exactly as written here.]
 
 ## Code source (the honest live subset)
 
@@ -180,6 +191,10 @@ red layout, the severity dots, the hover decode format (`Issue:` / `Status:` /
 
 - Any journal/coredump reader, auto-engage of the agent at detection (round 7
   says auto-engage is finalized during build only in the sense that the locked
-  wording is the click behavior), group dispatch, spares row, demo sliders,
+  wording is the click behavior), group dispatch, demo sliders,
   digital readouts, prose on the panel, a `testPct` hook for the dashboard,
   any change to ringkit.js, mounts.js, or Mount Monitor.
+  [The spares row left this list in review round 1, 2026-11-05: the captain
+  ruled the approved mockup footer's reserved spares row is contract, and the
+  dashboard ships it (`QuattroDash.qml`, `quattro.js` SPARES and the oil /
+  thermometer / triangle symbols).]
