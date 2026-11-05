@@ -164,8 +164,7 @@ Panel {
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
-                onContainsMouseChanged: if (containsMouse) root.showTip(psiWrap.tip(), psiArea, mouse.x, mouse.y)
-                else root.hideTip()
+                onContainsMouseChanged: if (!containsMouse) root.hideTip()
                 onPositionChanged: if (containsMouse) root.showTip(psiWrap.tip(), psiArea, mouse.x, mouse.y)
               }
             }
@@ -257,8 +256,7 @@ Panel {
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
-                onContainsMouseChanged: if (containsMouse) root.showTip(battWrap.tip(), battArea, mouse.x, mouse.y)
-                else root.hideTip()
+                onContainsMouseChanged: if (!containsMouse) root.hideTip()
                 onPositionChanged: if (containsMouse) root.showTip(battWrap.tip(), battArea, mouse.x, mouse.y)
               }
             }
@@ -303,8 +301,7 @@ Panel {
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
-                onContainsMouseChanged: if (containsMouse) root.showTip(fuelWrap.tip(), fuelArea, mouse.x, mouse.y)
-                else root.hideTip()
+                onContainsMouseChanged: if (!containsMouse) root.hideTip()
                 onPositionChanged: if (containsMouse) root.showTip(fuelWrap.tip(), fuelArea, mouse.x, mouse.y)
               }
             }
@@ -749,8 +746,7 @@ Panel {
         if (codeRow.entry === null) return
         root.dispatchCode(codeRow.entry)
       }
-      onContainsMouseChanged: if (containsMouse) root.showTip(codeRow.tip(), codeRow, mouse.x, mouse.y)
-      else root.hideTip()
+      onContainsMouseChanged: if (!containsMouse) root.hideTip()
       onPositionChanged: if (containsMouse) root.showTip(codeRow.tip(), codeRow, mouse.x, mouse.y)
     }
 

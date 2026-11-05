@@ -7,8 +7,11 @@ import "quattro.js" as Quattro
 // on Wikimedia Commons, licenses recorded in the design report. This item only
 // scales and tints: every path, its fill-or-stroke role and its stroke width
 // are quattro.js data (SYMBOLS), so the artwork has exactly one source and no
-// geometry lives in a QML file. The dashboard's instruments and the bar
-// emblem's check-engine logo all render through this one component.
+// geometry lives in a QML file. Scaling is SVG's letterbox rule: the art is
+// drawn uniformly at the smaller axis ratio and centered, the way an <svg>
+// viewBox letterboxes under the default preserveAspectRatio, so a wide symbol
+// in a square item is not stretched tall. The dashboard's instruments and the
+// bar emblem's check-engine logo all render through this one component.
 Item {
   id: root
 
@@ -18,15 +21,19 @@ Item {
   readonly property var def: Quattro.SYMBOLS[symbol] === undefined ? null : Quattro.SYMBOLS[symbol]
   readonly property real vx: def ? Math.max(1, def.viewBox[2]) : 1
   readonly property real vy: def ? Math.max(1, def.viewBox[3]) : 1
+  readonly property real fit: Math.min(root.width / root.vx, root.height / root.vy)
 
   implicitWidth: vx
   implicitHeight: vy
 
   Shape {
-    anchors.fill: parent
+    width: root.vx * root.fit
+    height: root.vy * root.fit
+    x: (root.width - width) / 2
+    y: (root.height - height) / 2
     transform: Scale {
-      xScale: root.width / root.vx
-      yScale: root.height / root.vy
+      xScale: root.fit
+      yScale: root.fit
     }
 
     Repeater {
