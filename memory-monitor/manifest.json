@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.jasonlnheath.memory-monitor",
+  "name": "Memory Monitor",
+  "version": "0.1.0",
+  "author": "jasonlnheath",
+  "license": "MIT",
+  "description": "Usage rings for System RAM, VRAM and your drives, with amber / red / critical alerts at the ceilings you set. RAM is measured by what is actually available (MemAvailable), not by percent-used. A red or critical toast survives Do Not Disturb, and clicking it opens your agent with the reading, or opens the detail window. First run reports what the machine rests at and asks you for your ceilings; the critical guard is an agent the plugin asks permission to arm.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "MemoryMonitor.qml"
+  },
+  "barWidget": {
+    "displayName": "Memory Monitor",
+    "description": "One badge for the most severe of System RAM, VRAM and your watched drives. Amber, red and critical are ceilings you set - critical ships unset, so no critical alert can fire until you set it. Click a red toast to open your agent with the reading; click a critical toast to open the detail window. Keeps a baseline log of every reading so a later report can say what this machine rests at.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

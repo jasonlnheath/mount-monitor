@@ -1,0 +1,38 @@
+proc /proc proc 0 0 - rw,nosuid,nodev,noexec,relatime    
+sys /sys sysfs 0 0 - rw,nosuid,nodev,noexec,relatime    
+dev /dev devtmpfs 0 33441341440 0% rw,nosuid,relatime,size=32657560k,nr_inodes=8164390,mode=755,inode64,huge=advise    
+run /run tmpfs 2338816 33579016192 0% rw,nosuid,nodev,relatime,mode=755,inode64,huge=advise    
+efivarfs /sys/firmware/efi/efivars efivarfs 133678 123346 51% rw,nosuid,nodev,noexec,relatime    
+devpts /dev/pts devpts 0 0 - rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000    
+/dev/nvme1n1p2[/@] / btrfs 437556584448 1559886684160 22% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@ a02330f1-304d-459b-8274-e52ab1cf11ba 2d60739b-cf79-4b41-b4d7-678fe8712181 OMARCHY-NEW OMARCHY_ROOT_NEW
+securityfs /sys/kernel/security securityfs 0 0 - rw,nosuid,nodev,noexec,relatime    
+tmpfs /dev/shm tmpfs 93089792 33488265216 0% rw,nosuid,nodev,inode64,huge=advise,usrquota    
+cgroup2 /sys/fs/cgroup cgroup2 0 0 - rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,memory_hugetlb_accounting    
+none /sys/fs/pstore pstore 0 0 - rw,nosuid,nodev,noexec,relatime    
+bpf /sys/fs/bpf bpf 0 0 - rw,nosuid,nodev,noexec,relatime,mode=700    
+systemd-1 /proc/sys/fs/binfmt_misc autofs 0 0 - rw,relatime,fd=43,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=21559    
+none /run/credentials/systemd-journald.service tmpfs 0 1048576 0% ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,huge=advise,noswap    
+debugfs /sys/kernel/debug debugfs 0 0 - rw,nosuid,nodev,noexec,relatime    
+configfs /sys/kernel/config configfs 0 0 - rw,nosuid,nodev,noexec,relatime    
+tracefs /sys/kernel/tracing tracefs 0 0 - rw,nosuid,nodev,noexec,relatime    
+mqueue /dev/mqueue mqueue 0 0 - rw,nosuid,nodev,noexec,relatime    
+fusectl /sys/fs/fuse/connections fusectl 0 0 - rw,nosuid,nodev,noexec,relatime    
+hugetlbfs /dev/hugepages hugetlbfs 0 0 - rw,nosuid,nodev,relatime,pagesize=2M    
+none /run/credentials/systemd-resolved.service tmpfs 0 1048576 0% ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,huge=advise,noswap    
+/dev/nvme1n1p2[/@home] /home btrfs 437556584448 1559886684160 22% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=257,subvol=/@home a02330f1-304d-459b-8274-e52ab1cf11ba 2d60739b-cf79-4b41-b4d7-678fe8712181 OMARCHY-NEW OMARCHY_ROOT_NEW
+/dev/nvme1n1p2[/swap] /swap btrfs 437556584448 1559886684160 22% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=261,subvol=/swap a02330f1-304d-459b-8274-e52ab1cf11ba 2d60739b-cf79-4b41-b4d7-678fe8712181 OMARCHY-NEW OMARCHY_ROOT_NEW
+/dev/nvme1n1p2[/@pkg] /var/cache/pacman/pkg btrfs 437556584448 1559886684160 22% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=259,subvol=/@pkg a02330f1-304d-459b-8274-e52ab1cf11ba 2d60739b-cf79-4b41-b4d7-678fe8712181 OMARCHY-NEW OMARCHY_ROOT_NEW
+/dev/nvme1n1p2[/@srv] /srv/models btrfs 437556584448 1559886684160 22% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=260,subvol=/@srv a02330f1-304d-459b-8274-e52ab1cf11ba 2d60739b-cf79-4b41-b4d7-678fe8712181 OMARCHY-NEW OMARCHY_ROOT_NEW
+/dev/nvme1n1p2[/@log] /var/log btrfs 437556584448 1559886684160 22% rw,noatime,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=258,subvol=/@log a02330f1-304d-459b-8274-e52ab1cf11ba 2d60739b-cf79-4b41-b4d7-678fe8712181 OMARCHY-NEW OMARCHY_ROOT_NEW
+/dev/nvme1n1p1 /efi vfat 282664960 1860616192 13% rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro 2c305125-68f4-45be-a4b8-6c72bf31cbee AFAD-4088 OMARCHY_EFI OMARCHY_EFI_NEW
+/dev/nvme2n1p2 /mnt/models ntfs3 1263718166528 199791935488 86% ro,relatime,uid=1000,gid=1000,acl,iocharset=utf8,prealloc,ads 724dba15-7bef-4968-8bc7-285f54e1f3ac 187C1C1B7C1BF1EC DAW Basic\x20data\x20partition
+tmpfs /tmp tmpfs 7187476480 26393882624 21% rw,nosuid,nodev,size=32794296k,nr_inodes=1048576,inode64,huge=advise,usrquota    
+binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc 0 0 - rw,nosuid,nodev,noexec,relatime    
+tmpfs /run/user/1000 tmpfs 34156544 6682112000 1% rw,nosuid,nodev,relatime,size=6558856k,nr_inodes=1639714,mode=700,uid=1000,gid=1000,inode64,huge=advise    
+run[/netns] /run/netns tmpfs 2338816 33579016192 0% rw,nosuid,nodev,relatime,mode=755,inode64,huge=advise    
+nsfs[net:[4026533115]] /run/netns/qbt nsfs 0 0 - rw    
+gvfsd-fuse /run/user/1000/gvfs fuse.gvfsd-fuse 0 0 - rw,nosuid,nodev,relatime,user_id=1000,group_id=1000    
+portal /run/user/1000/doc fuse.portal 0 0 - rw,nosuid,nodev,relatime,user_id=1000,group_id=1000    
+/dev/nvme0n1p3 /mnt/win ntfs3 606729068544 392546029568 61% ro,relatime,uid=0,gid=0,force,acl,iocharset=utf8,prealloc,ads 18a2593c-a9f2-419c-b99f-9f166d51c627 326CF5A86CF5674F  Basic\x20data\x20partition
+/dev/nvme2n1p6 /run/media/jason/models-native btrfs 191166545920 75687215104 71% rw,nosuid,nodev,relatime,ssd,discard=async,space_cache=v2,subvolid=5,subvol=/ e8390136-b49e-4659-a640-6e0015aa4f3a e75caee3-5037-4f6f-8d3e-22db37e4aa6e models-native models-native
+/dev/nvme2n1p5 /run/media/jason/OMARCHY btrfs 246245023744 16681902080 93% rw,nosuid,nodev,relatime,ssd,discard=async,space_cache=v2,subvolid=5,subvol=/ 72e5618c-cab5-4e49-95db-bf73eebeb698 5999cbd8-c212-4f4c-835b-e7ae23760525 OMARCHY OMARCHY_ROOT

@@ -1,0 +1,2 @@
+NAME       DISKSIZE  DATA COMPR MEM-USED ALGORITHM
+/dev/zram0    62.5G 18.8G  8.7G    11.8G zstd
