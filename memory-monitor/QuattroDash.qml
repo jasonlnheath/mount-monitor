@@ -14,8 +14,8 @@ import "quattro.js" as Quattro
 // columns under the check-engine heads, one amber for moderate codes and one
 // red for severe ones, and the reserved spares row the approved footer shows.
 // Hover any instrument or code for the two-column teaching decode; click a
-// moderate code to send the issue to the default agent, and a severe one to
-// put it through the arm's gate.
+// moderate code to send the issue to the default agent, and a critical-band
+// one to put it through the arm's gate.
 //
 // This file draws. Every decision lives in quattro.js (bands, needle geometry,
 // zones, LED counts, code taxonomy, all copy) and memory.js (the swap totals,
@@ -76,7 +76,7 @@ Panel {
   // The click path is the plugin's own typed argv: the SAME fixed prompt the
   // toasts send, built by memory.js, one paragraph in one argv element, run
   // detached, with the same agentInline setting every other click path honors.
-  // No shell, no sentence built here. A severe code is a critical-band
+  // No shell, no sentence built here. A critical-band code is a critical
   // dispatch, so it never launches an agent of its own: it asks the monitor to
   // put it through the arm's gate and launch, and a refused click says so.
   function dispatchCode(code) {

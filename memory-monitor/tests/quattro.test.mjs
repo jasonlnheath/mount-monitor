@@ -451,6 +451,8 @@ test("the four ISO symbols ship with their viewBox and fill/stroke items", () =>
   assert.equal(Quattro.SYMBOLS.temp.items.some(i => i.stroke && i.width === 11), true,
     "the temp symbol's ribs are the 11-wide strokes from the mockup");
   assert.equal(Quattro.SYMBOLS.fuel.items.some(i => i.stroke && i.width === 10), true);
+  assert.equal(Quattro.SYMBOLS.fuel.items.find(i => i.stroke && i.width === 10).fill, true,
+    "the fuel outline sits in the mockup's fill parent, so it fills and strokes");
 });
 
 test("the fuel nozzle subpath is the mockup's relative lineto, not an absolute one", () => {

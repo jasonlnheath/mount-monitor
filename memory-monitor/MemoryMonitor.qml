@@ -643,9 +643,9 @@ BarWidget {
   // toast's notification id.
   // ---------------------------------------------------------------------------
 
-  // fromDash marks the Quattro Dash's severe-code click: an arm with no claim
-  // notice behind it, so it captures no printed id and a later death retracts
-  // by a fresh toast instead of by a notice it never showed.
+  // fromDash marks the Quattro Dash's critical-band code click: an arm with no
+  // claim notice behind it, so it captures no printed id and a later death
+  // retracts by a fresh toast instead of by a notice it never showed.
   function startArm(alert, fromDash): void {
     if (!isWriter) return;
     var eventKey = Memory.armEventKey(alert);
@@ -697,7 +697,7 @@ BarWidget {
     armWatchdog.restart();
   }
 
-  // The Quattro Dash's severe-code click is a critical-band dispatch, so it
+  // The Quattro Dash's critical-band code click is a critical dispatch, so it
   // rides the arm: the same gate chain the queue-time arm passes, and the same
   // launch through startArm, which is what keeps the machine's single-flight
   // lane the one guarantee there is never a second agent on top of the armed
@@ -1566,10 +1566,12 @@ BarWidget {
   }
 
   function close(): void {
-    if (dashLoader.item) dashLoader.item.close();
+    hideDetail();
+    hideDash();
   }
 
   function togglePanel(): void {
+    unseenAlerts = [];
     hideDetail();
     if (dashLoader.item) dashLoader.item.toggle();
   }

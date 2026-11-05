@@ -36,7 +36,7 @@ Item {
         required property var modelData
         strokeColor: modelData.stroke === true ? root.color : "transparent"
         strokeWidth: modelData.stroke === true ? modelData.width : 0
-        fillColor: modelData.stroke === true ? "transparent" : root.color
+        fillColor: modelData.fill === true ? root.color : "transparent"
 
         PathSvg {
           path: modelData.d
