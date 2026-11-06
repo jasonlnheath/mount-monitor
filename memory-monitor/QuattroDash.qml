@@ -9,7 +9,7 @@ import "quattro.js" as Quattro
 // QuattroDash — Memory Monitor's instrument-cluster panel, the board-approved
 // design (rounds 1-7, verdict "ship it"). A PopupCard at the shell-standard
 // width, mounted from MemoryMonitor.qml through its own Loader the way
-// MemoryPanel.qml is. Three round meters (RAM PRESSURE, ROOT DRIVE) and the
+// MemoryPanel.qml is. Two round meters (RAM PRESSURE and ROOT DRIVE), the
 // SWAP RESERVE battery telltale with its LED bar, plus the VRAM COOLANT
 // reservoir the captain expected here: free VRAM above the floor, sampled by
 // this plugin's own nvidia-smi read and floored by its own vramFloorMib

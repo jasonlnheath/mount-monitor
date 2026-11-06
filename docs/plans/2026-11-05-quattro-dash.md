@@ -15,6 +15,16 @@ shell-standard `Style.space(380)`; live PSI from `/proc/pressure/memory`
 One-line code descriptions; two-column popups; NO em dashes or semicolons in UI
 copy; terse casual copy register (5 words ideal).
 
+[Superseded in part by the live-look feedback, 2026-11-06: the dashboard is
+"QuattroDash", one word. A fourth lane joined the cluster row, the VRAM
+COOLANT reservoir (free VRAM above the widget's `vramFloorMib` floor, the
+PR-18 semantics). The codes area is ONE column under one check-engine head,
+red and amber together with the most critical on top, and the per-code desc
+field is gone (rows carry the issue and status lines instead). The reserved
+spares row is no longer drawn either: quattro.js keeps the SPARES record as a
+held-back note, nothing user-visible. Current behavior lives in
+`memory-monitor/README.md`, `quattro.js` and `QuattroDash.qml`.]
+
 ## Ripples measured before writing anything
 
 1. **Panel mounting** — `MemoryPanel.qml` is a `qs.Ui.Panel` mounted by
