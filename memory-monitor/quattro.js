@@ -382,16 +382,13 @@ function codesFromReadings(ram, vram, devices) {
     const severe = band >= 2;
     const kind = entry.type === "ram" ? "ram" : (entry.type === "vram" ? "vram" : "hd");
     const subject = kind === "ram" ? "System RAM" : (kind === "vram" ? "VRAM" : "Drive");
-    const descWord = kind === "hd" ? "drive" : kind;
     const pct = asNumber(entry.pct);
     const where = kind === "hd" && entry.target ? " " + sanitizePath(entry.target) : "";
     const reading = pct === null ? "unknown" : String(Math.round(pct));
-    const word = severe ? "red" : "amber";
     out.push({
       code: codeFor(kind, entry.key),
       sev: severe ? "r" : "a",
       band: band,
-      desc: descWord + " over the " + word + " line",
       issue: subject + where + " reading " + reading + " percent.",
       status: severe ? "severe, over your red ceiling." : "moderate, over your amber ceiling.",
       fix: severe

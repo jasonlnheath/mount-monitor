@@ -49,6 +49,33 @@ function loadQuattro() {
 
 const Quattro = loadQuattro();
 
+// Whether `function tip()` is declared directly on the object whose `id` is
+// <id>: the declaration must sit at the owning object's own brace depth inside
+// its body. A tip declared on a nested child is the swap hover bug this guards
+// against, and an unbounded search between `id:` and `function tip(` cannot
+// see the difference.
+function tipDeclaredOn(text, id) {
+  const at = new RegExp(`id:\\s*${id}\\b`).exec(text);
+  if (at === null) return false;
+  const openAt = [];
+  let depth = 0;
+  for (let i = 0; i < at.index; i += 1) {
+    if (text[i] === "{") { depth += 1; openAt[depth] = i; }
+    else if (text[i] === "}") depth -= 1;
+  }
+  const bodyStart = openAt[depth];
+  if (bodyStart === undefined) return false;
+  const memberDepth = depth + 1;
+  const tokens = /\{|\}|function\s+tip\s*\(/g;
+  let t;
+  while ((t = tokens.exec(text.slice(bodyStart))) !== null) {
+    if (t[0] === "{") depth += 1;
+    else if (t[0] === "}") { depth -= 1; if (depth < memberDepth) return false; }
+    else if (depth === memberDepth) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Module shape
 // ---------------------------------------------------------------------------
@@ -285,7 +312,6 @@ test("codesFromReadings: a band-1 RAM reading is one moderate P-code with the lo
   const code = codes[0];
   assert.match(code.code, /^P\d{4}$/);
   assert.equal(code.sev, "a");
-  assert.equal(code.desc, "ram over the amber line");
   assert.equal(code.issue, "System RAM reading 82 percent.");
   assert.equal(code.status, "moderate, over your amber ceiling.");
   assert.equal(code.fix, "click to send crash pattern to agent.");
@@ -301,7 +327,6 @@ test("codesFromReadings: band 2 and band 3 are severe, with the locked processin
       { type: "ram", key: "ram", id: "mem-0aad21c9", band, pct: 96 }, null, []);
     assert.equal(codes.length, 1);
     assert.equal(codes[0].sev, "r");
-    assert.equal(codes[0].desc, "ram over the red line");
     assert.equal(codes[0].status, "severe, over your red ceiling.");
     assert.equal(codes[0].fix, "agent has the crash pattern and is processing now.");
     assert.equal(codes[0].alert.band, band);
@@ -328,12 +353,6 @@ test("codesFromReadings: each over-line drive is its own C-code, the target only
   assert.equal(severe.issue, "Drive / reading 97 percent.");
   assert.equal(moderate.issue, "Drive /mnt/models reading 91 percent.");
   assert.equal(severe.alert.target, "/");
-  // The one-line desc stays type-worded: no target in it at all.
-  for (const code of codes) {
-    assert.equal(code.desc.includes("/mnt/models"), false);
-    assert.equal(code.desc.includes("/"), false);
-    assert.equal(code.desc, code.sev === "r" ? "drive over the red line" : "drive over the amber line");
-  }
 });
 
 test("codesFromReadings: healthy readings are no codes at all", () => {
@@ -653,7 +672,7 @@ test("the language rule holds over every string the popup copy can produce", () 
         entry.type === "vram" ? entry : null,
         entry.type === "hd" ? [entry] : []);
       for (const code of codes) {
-        texts.push(code.desc, code.issue, code.status, code.fix);
+        texts.push(code.issue, code.status, code.fix);
         pushTip(Quattro.codeTip(code));
       }
     }
@@ -738,15 +757,16 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
   assert.equal(PANEL.includes("amberCodes"), false, "no separate amber column model survives");
   assert.equal(PANEL.includes("severeCodes"), false, "no separate red column model survives");
   // Every instrument's hover must call the tip declared on the id it names: a
-  // call into an id with no tip function throws on hover and the popup never
-  // comes up (the swap popup bug). Each <id>.tip( call needs an `id: <id>` that
-  // declares `function tip()`.
+  // call into an id with no tip function throws on hover and that
+  // instrument's tooltip never shows (the swap hover bug). Each <id>.tip()
+  // call needs a `function tip()` declared on the <id> object itself, so the
+  // search stays inside that object's own braces.
   const declared = new Set([...PANEL.matchAll(/^\s*id:\s*(\w+)/gm)].map(m => m[1]));
   const called = [...PANEL.matchAll(/\b(\w+)\.tip\(\)/g)].map(m => m[1]);
   assert.equal(called.length >= 4, true, "psi, batt, fuel and the coolant all hover for their decode");
   for (const id of called) {
-    const pattern = new RegExp(`id:\\s*${id}\\b[^]*?function tip\\(`);
-    assert.match(PANEL, pattern, `the ${id} hover calls a tip declared on the ${id} object`);
+    assert.equal(tipDeclaredOn(PANEL, id), true,
+      `the ${id} hover calls a tip declared on the ${id} object itself`);
     assert.equal(declared.has(id), true, `${id} is an id in this panel`);
   }
   // The ISO artwork comes from quattro.js through QuattroSymbol.qml - the panel
