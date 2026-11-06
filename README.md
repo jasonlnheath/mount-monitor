@@ -16,7 +16,9 @@ mount you configure, on any filesystem sitting on a real device — btrfs, NTFS,
 ext4, vfat, including a partition mounted read-only: the percent sits inside
 the circle, the solid arc is what's used, the faint ring behind it is what's
 available. Hover any ring for the mount name, filesystem, exact numbers, and
-whether it is read-only.
+whether it is read-only. On a machine with an NVIDIA GPU, a small coolant-level
+telltale beside the rings shows VRAM headroom against a floor you set, with
+guarded crossings so it never flickers at a boundary.
 
 ## Behavior
 
@@ -58,6 +60,32 @@ act on, or dismiss them, and a dismissed one remains reachable in Omarchy's
 notification history. They ride their own lane too, so a notice and a disk
 alert can be on screen at once — a full drive is never made to wait behind a
 question.
+
+## The VRAM headroom telltale
+
+Beside the rings sits a small coolant-level symbol (when the machine has an
+NVIDIA GPU): a reservoir whose filled level is the GPU's headroom — free VRAM
+above your floor, as a fraction of everything above it. At the floor the tank
+is empty; at full capacity it is full. The tint is the guarded state: plain
+while the headroom sits above the floor's approach zone, amber inside it, red
+below the floor.
+
+The crossings are guarded, so a reading that hovers at a line never flickers
+the telltale between states: a band is entered at its line, and it is only
+released once the reading clears the line by 5% of the card's capacity. The
+approach zone is 10% of capacity above the floor. While the telltale is red it
+polls every 20 seconds instead of 60, the same adaptive posture the rest of
+the repo uses. The telltale is silent — it never sends a notification; VRAM
+alerts stay Memory Monitor's job.
+
+Hovering the telltale names the GPU, the reading, and the floor; clicking it
+opens a small popup with the numbers: free of total, the floor, the guarded
+state, and which floor is set.
+
+A floor is a number of MiB you want kept free — room for model loads, a
+reserve for the desktop. No `nvidia-smi` (or a driver it cannot reach) means
+no telltale: an absent reading never renders as a level. `"vramTelltale":
+false` on the widget's entry skips the sampling entirely.
 
 A plugged drive is noticed in seconds, not on the next sweep: the widget keeps
 `udevadm monitor --kernel --subsystem-match=block` open for the life of the shell
@@ -188,6 +216,16 @@ All settings live on the widget's entry in `shell.json`:
   listens on — an inbox script, a CLI, a webhook. Every notification kind
   rides this same path: a disk alert and a partition notice differ in the
   prompt, not the plumbing.
+- `vramFloorMib` — the VRAM headroom floor in MiB: how much free VRAM you
+  want kept, judged against what `nvidia-smi` reports free. Default when
+  unset: `3400` MiB. A floor the telltale can never satisfy (at or above the
+  card's capacity) is honored — the tank reads empty and the tint stays red,
+  which is the honest reading of the floor you set. `0` is a real answer: a
+  floor at zero never alarms.
+- `vramTelltale` — `true` unless you set it to `false`. With it on (and an
+  NVIDIA GPU present) the widget polls `nvidia-smi` once a sweep, or every
+  20 seconds while the telltale is red. With it off the telltale is hidden
+  and no GPU is sampled.
 
 ## Skills
 
@@ -211,7 +249,8 @@ Everything a clicked notification asks for lives in `skills/`, agent-agnostic
 ## Development
 
 The mount filter, the 80/90/98 bands, the alert text, the partition onboarding
-decisions, and the block-event detection timings live in `mounts.js`, which
+decisions, the block-event detection timings, and the VRAM telltale's floor,
+guarded crossings, parser, and copy live in `mounts.js`, which
 `MountMonitor.qml` imports and the tests load directly:
 
 ```bash
@@ -220,9 +259,10 @@ bash tests/run.sh
 
 That runs `node --test tests/` against the fixtures in `tests/fixtures/` (plus
 live `findmnt` and `lsblk` checks that skip when a mount or the tool is not
-present) and, when Qt's `qmllint` is installed, checks that `MountMonitor.qml`
-parses and its `mounts.js` import resolves. `testPct` is a setting for trying a
-band out: `{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }`
+present) and, when Qt's `qmllint` is installed, checks that `MountMonitor.qml`,
+`VramSymbol.qml` and `VramPanel.qml` parse and their `mounts.js` imports
+resolve. `testPct` is a setting for trying a band out:
+`{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }`
 reports every ring at 98% — display and alerts alike. Remove it when you are
 done.
 

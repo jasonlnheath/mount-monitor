@@ -51,6 +51,16 @@ import "mounts.js" as Mounts
 // last event lands. The 60-second sweep stays, and it is what detection falls
 // back to when udevadm cannot start or will not stay up. Set "detectEvents":
 // false on the shell.json entry to skip the monitor.
+// VRAM telltale: a coolant-level symbol beside the rings whose filled level is
+// the GPU's headroom - free VRAM above the floor setting ("vramFloorMib", MiB,
+// default 3400) - tinted by a guarded band. The crossings are hysteresis
+// guarded (Mounts.resolveVramBand): entering a band fires at its line, leaving
+// it needs the margin, so a reading hovering at a boundary never flickers the
+// telltale between states. The telltale is severity-only: the numbers live in
+// its popup (VramPanel.qml), and it is silent - VRAM notifications are Memory
+// Monitor's job. No nvidia-smi means no telltale; "vramTelltale": false skips
+// the sampling. The floor, the crossing rules, the argv, the parser, and the
+// copy all live in mounts.js like every other decision.
 // Configure mounts via the shell.json layout entry:
 //   { "id": "io.github.jasonlnheath.mount-monitor", "mounts": ["/", "/mnt/models"] }
 // Default when unconfigured: root only. Every setting is read through the
@@ -76,6 +86,15 @@ BarWidget {
   // swallowed by the baseline.
   property bool primed: false
   readonly property color alertRed: "#ff2d2d"
+
+  // --- VRAM headroom telltale -----------------------------------------------
+  // The last nvidia-smi reading (Mounts.parseNvidiaGpu) and the guarded band
+  // it sits in (Mounts.resolveVramBand). A missing reading is no reading at
+  // all: the telltale hides instead of claiming a level it does not have.
+  property var vramReading: null
+  property int vramBand: 0
+  readonly property bool vramTelltaleEnabled:
+    Mounts.normalizeBool(root.setting("vramTelltale", true), true)
 
   // --- onboarding -----------------------------------------------------------
   // The last candidate scan: [{ key, target, path, fstype, size, label, removable }].
@@ -130,6 +149,82 @@ BarWidget {
     // it each cycle would race this widget's own write and re-offer what it has
     // already offered.
     if (root.onboardingEnabled && !scanProc.running) scanProc.running = true
+  }
+
+  // --- VRAM headroom telltale -----------------------------------------------
+
+  // The floor the telltale judges headroom against. Read at sample time like
+  // every other setting: the bar injects settings after Component.onCompleted
+  // has read the fallback, so the value a config edit brings lands on the next
+  // poll without the telltale ever holding a stale copy.
+  function vramFloorMib(): int {
+    return Mounts.normalizeFloorMib(root.setting("vramFloorMib", null))
+  }
+
+  // One nvidia-smi answer. Exit 0 with a parsable row is a reading, and the
+  // guarded band is resolved from the band already held - the resolver, not
+  // this widget, decides whether a boundary value holds or crosses. Anything
+  // else is an honest absence: the reading clears and the telltale hides, the
+  // way an unknown never renders as a level.
+  function noteVram(text, exitCode): void {
+    var reading = exitCode === 0 ? Mounts.parseNvidiaGpu(text) : null
+    root.vramReading = reading
+    if (reading !== null) {
+      var resolved = Mounts.resolveVramBand(root.vramBand, reading.freeMib, reading.totalMib, root.vramFloorMib())
+      root.vramBand = resolved.band
+    }
+  }
+
+  // Keep the telltale in agreement with vramTelltale, mirroring syncMonitor:
+  // the start gate reads the fallback, the switch engages when the injected
+  // value arrives, and turning it off stops the sampling and drops the
+  // reading so nothing half-alive stays on the bar.
+  function syncVram(): void {
+    if (!root.vramTelltaleEnabled) {
+      vramProc.running = false
+      vramTimer.running = false
+      root.vramReading = null
+      root.vramBand = 0
+      return
+    }
+    vramTimer.running = true
+    if (!vramProc.running) vramProc.running = true
+  }
+
+  // The telltale's popup. Mount/close forwarding is the shape the bar's panel
+  // routing looks for; the popout registration mirrors the memory monitor's,
+  // so a bar carrying both plugins treats the two panels the same way.
+  readonly property bool opened: vramPanelLoader.item ? vramPanelLoader.item.opened === true : false
+  onOpenedChanged: syncPopout()
+
+  function syncPopout(): void {
+    if (!bar || typeof bar.requestPopout !== "function") return
+    if (opened) bar.requestPopout(root)
+    else bar.releasePopout(root)
+  }
+
+  function open(): void {
+    if (vramPanelLoader.item) vramPanelLoader.item.open()
+  }
+
+  function close(): void {
+    if (vramPanelLoader.item) vramPanelLoader.item.close()
+  }
+
+  function toggleVramPanel(): void {
+    if (vramPanelLoader.item) vramPanelLoader.item.toggle()
+  }
+
+  function injectPanel(): void {
+    var target = vramPanelLoader.item
+    if (target) {
+      if ("bar" in target) target.bar = root.bar
+      if ("settings" in target) target.settings = root.settings
+      if ("moduleName" in target) target.moduleName = root.moduleName
+      if ("anchorItem" in target) target.anchorItem = vramButton
+      if ("hostWidget" in target) target.hostWidget = root
+      if ("monitor" in target) target.monitor = root
+    }
   }
 
   // One line from udevadm monitor. Only a block-device line is answered, and the
@@ -495,6 +590,32 @@ BarWidget {
     }
   }
 
+  // The VRAM sample. One nvidia-smi --query-gpu call per poll (Mounts.nvidiaGpuArgs),
+  // first card only. nvidia-smi missing: a command that never started reports no
+  // exit, so the didStart marker is the only signal there is - the telltale just
+  // stays hidden, the way detection falls back without complaint.
+  Process {
+    id: vramProc
+    command: Mounts.nvidiaGpuArgs()
+    property string vramText: ""
+    property bool didStart: false
+    stdout: StdioCollector {
+      onStreamFinished: vramProc.vramText = this.text
+    }
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: nvidia-smi:", this.text.trim())
+    }
+    onStarted: vramProc.didStart = true
+    onRunningChanged: {
+      if (!vramProc.running && !vramProc.didStart)
+        console.warn("mount-monitor: nvidia-smi could not start, the VRAM telltale stays hidden")
+    }
+    onExited: function(exitCode, exitStatus) {
+      vramProc.didStart = false
+      root.noteVram(vramProc.vramText, exitCode)
+    }
+  }
+
   // The candidate scan. lsblk is per partition, which is what keeps several
   // btrfs subvolume mounts of one drive down to one candidate, and it is the
   // only place the removable flag lives. util-linux, same package as findmnt.
@@ -699,6 +820,19 @@ BarWidget {
     onTriggered: root.settleRescan()
   }
 
+  // The telltale's own clock, on the repo's adaptive-poll posture: nominal
+  // once a sweep, escalated while the band is red. A band change restarts it,
+  // so the escalated cadence applies from the reading that raised the band.
+  Timer {
+    id: vramTimer
+    interval: Mounts.vramPollMs(root.vramBand)
+    repeat: true
+    running: false
+    onTriggered: if (root.vramTelltaleEnabled && !vramProc.running) vramProc.running = true
+  }
+  onVramBandChanged: if (vramTimer.running) vramTimer.restart()
+  onVramTelltaleEnabledChanged: root.syncVram()
+
   Timer {
     id: monitorTimer
     interval: Mounts.udevRestartDelayMs(1)
@@ -729,7 +863,22 @@ BarWidget {
   Component.onCompleted: {
     if (root.onboardingEnabled) stateDirProc.running = true
     if (root.eventsEnabled && !udevProc.running) udevProc.running = true
+    root.syncVram()
   }
+
+  Loader {
+    id: vramPanelLoader
+    active: true
+    source: Qt.resolvedUrl("VramPanel.qml")
+    visible: false
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
+    }
+  }
+
+  onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
 
   Row {
     id: row
@@ -836,6 +985,43 @@ BarWidget {
               font.bold: false
             }
           }
+        }
+      }
+    }
+
+    // The VRAM headroom telltale: fill = free VRAM above the floor, tint =
+    // the guarded band, severity only. It hides while there is no reading -
+    // no nvidia-smi, or a poll that failed - because an absent reading is not
+    // a level. A left click opens the detail popup; the numbers never crowd
+    // the bar.
+    BarIconButton {
+      id: vramButton
+      readonly property bool show: root.vramTelltaleEnabled && root.vramReading !== null
+      visible: show
+      bar: root.bar
+      opticalSize: 22
+      tooltipText: root.vramReading !== null
+        ? Mounts.vramTooltip(root.vramReading, root.vramFloorMib())
+        : ""
+      iconComponent: vramComponent
+
+      onPressed: function(button) {
+        if (button === Qt.LeftButton) root.toggleVramPanel()
+      }
+
+      Component {
+        id: vramComponent
+
+        VramSymbol {
+          anchors.centerIn: parent
+          width: 22
+          height: 22
+          fill: root.vramReading !== null
+            ? Mounts.vramHeadroomFrac(root.vramReading.freeMib, root.vramReading.totalMib, root.vramFloorMib())
+            : 0
+          tint: Mounts.vramTokenFor(root.vramBand) === "plain"
+            ? (root.bar ? root.bar.foreground : Color.foreground)
+            : Mounts.vramTokenHex(Mounts.vramTokenFor(root.vramBand))
         }
       }
     }

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Mount Monitor checks: the node tests over mounts.js (mount filter, alert
-# bands, alert text, partition onboarding, block-event detection) plus the node
+# bands, alert text, partition onboarding, block-event detection, the VRAM
+# headroom telltale's floor, guarded crossings, parser and copy) plus the node
 # tests over ringkit.js - the repo's shared decision kernel, whose own contracts
 # are pinned at the repo root because Mount Monitor is its future second
 # consumer - an install.sh syntax check, a skills/ SKILL.md check, then a QML
-# syntax/import check over MountMonitor.qml when Qt's qmllint is on the box. Run
-# from anywhere: bash tests/run.sh
+# syntax/import check over the widget and the telltale files when Qt's qmllint
+# is on the box. Run from anywhere: bash tests/run.sh
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,9 +39,10 @@ fi
 # Warnings about QuickShell's own types are expected outside a running shell and
 # are only shown when the check fails; a non-zero exit is a syntax error or a
 # broken import.
-if ! qml_out="$("$qmllint" "$repo/MountMonitor.qml" 2>&1)"; then
+qml_files=("$repo/MountMonitor.qml" "$repo/VramSymbol.qml" "$repo/VramPanel.qml")
+qml_out="$("$qmllint" "${qml_files[@]}" 2>&1)" || {
   echo "qmllint failed:" >&2
   echo "$qml_out" >&2
   exit 1
-fi
-echo "qmllint: MountMonitor.qml parses and its mounts.js import resolves"
+}
+echo "qmllint: MountMonitor.qml, VramSymbol.qml and VramPanel.qml parse and their mounts.js imports resolve"
