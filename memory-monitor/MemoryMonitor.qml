@@ -20,11 +20,13 @@ import "ringkit.js" as RingKit
 // critical band, no critical toast, and no glowing badge. Nothing here ever
 // writes a ceiling he did not set.
 //
-// The bar shows one badge: the most severe resource. With nothing over a line it
-// is the plain white MM logo. Severity carries shape as well as hue — amber is a
-// partial fill with a steady badge, red is a full badge plus a warning glyph,
-// critical adds the pulse and halo — so amber-versus-red survives deuteranopia,
-// and the glyph carries the type.
+// The bar shows one emblem: the Quattro Dash check-engine telltale (the ISO
+// artwork QuattroSymbol renders), plain white when nothing is over a line and
+// tinted by the most severe resource — amber, red, and critical's pulse — with
+// severity, the palette token and the pulse still RingKit's decision
+// (badgeParams), so a bar carrying both plugins draws one severity language.
+// Clicking it opens the Quattro Dash; the detail window keeps the critical
+// click and the openDetail IPC.
 //
 // Toasts are events, not states: an alert fires on a band ascent or on one of
 // memory.js's re-fire conditions (severity increase, PSI crossing the stall
@@ -1434,8 +1436,8 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // The bar. One badge, the most severe resource, or the plain white MM logo
-  // when nothing is over a line. Severity carries shape as well as hue.
+  // The bar. One emblem — the Quattro Dash telltale — plain white when nothing
+  // is over a line, tinted by the most severe resource.
   // ---------------------------------------------------------------------------
 
   function barEntries(): var {

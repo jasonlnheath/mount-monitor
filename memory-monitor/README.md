@@ -230,11 +230,12 @@ detail window.
 bash memory-monitor/tests/run.sh
 ```
 
-Node tests over `memory.js` and `ringkit.js` with fixtures for every parser,
-character-pinned toast copy per kind, the RingKit ↔ `mounts.js bandFor`
-conformance check, the hostile-label regression, the multi-instance
-one-alert/one-log-row/one-arm check, the install-layout check, an `install.sh`
-syntax check, a `SKILL.md` check, and `qmllint` on the QML. There is no CI in
+Node tests over `memory.js`, `quattro.js` and `ringkit.js` with fixtures for
+every parser, character-pinned toast copy per kind, the Quattro Dash bands and
+code copy, the RingKit ↔ `mounts.js bandFor` conformance check, the
+hostile-label regression, the multi-instance one-alert/one-log-row/one-arm
+check, the install-layout check, an `install.sh` syntax check, a `SKILL.md`
+check, and `qmllint` on the QML. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 
@@ -258,6 +259,5 @@ change is diffed against. No baseline ships with the repo: the first verified
 change saves its render — `cp /tmp/mm-bar.png memory-monitor/bar-screenshot.png`
 — and every later change is diffed against that baseline, updating it when
 verified. Force a band without waiting for a real emergency with
-`"testPct": 91` on the widget's `shell.json` entry, and force the resource the
-badge names by leaving the real readings in place. Remove `testPct` and restart
+`"testPct": 91` on the widget's `shell.json` entry. Remove `testPct` and restart
 the shell again before the render counts as verified.
