@@ -599,16 +599,22 @@ BarWidget {
     command: Mounts.nvidiaGpuArgs()
     property string vramText: ""
     property bool didStart: false
+    property bool warnedNoStart: false
     stdout: StdioCollector {
       onStreamFinished: vramProc.vramText = this.text
     }
     stderr: StdioCollector {
       onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: nvidia-smi:", this.text.trim())
     }
-    onStarted: vramProc.didStart = true
+    onStarted: {
+      vramProc.didStart = true
+      vramProc.warnedNoStart = false
+    }
     onRunningChanged: {
-      if (!vramProc.running && !vramProc.didStart)
+      if (root.startFailed(vramProc) && !vramProc.warnedNoStart) {
+        vramProc.warnedNoStart = true
         console.warn("mount-monitor: nvidia-smi could not start, the VRAM telltale stays hidden")
+      }
     }
     onExited: function(exitCode, exitStatus) {
       vramProc.didStart = false

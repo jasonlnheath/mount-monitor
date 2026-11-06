@@ -41,11 +41,6 @@ Panel {
     return value === null || value === undefined ? fallback : value
   }
 
-  function callMonitor(name, args, fallback) {
-    if (monitor && typeof monitor[name] === "function") return monitor[name].apply(monitor, args)
-    return fallback
-  }
-
   readonly property var reading: mon("vramReading", null)
   readonly property int band: mon("vramBand", 0)
   readonly property string token: Mounts.vramTokenFor(band)

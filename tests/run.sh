@@ -39,10 +39,10 @@ fi
 # Warnings about QuickShell's own types are expected outside a running shell and
 # are only shown when the check fails; a non-zero exit is a syntax error or a
 # broken import.
-qml_files=("$repo/MountMonitor.qml" "$repo/VramSymbol.qml" "$repo/VramPanel.qml")
+qml_files=("$repo/MountMonitor.qml" "$repo/VramSymbol.qml" "$repo/VramPanel.qml" "$repo/CardBar.qml")
 qml_out="$("$qmllint" "${qml_files[@]}" 2>&1)" || {
   echo "qmllint failed:" >&2
   echo "$qml_out" >&2
   exit 1
 }
-echo "qmllint: MountMonitor.qml, VramSymbol.qml and VramPanel.qml parse and their mounts.js imports resolve"
+echo "qmllint: MountMonitor.qml, VramSymbol.qml, VramPanel.qml and CardBar.qml parse and their mounts.js imports resolve"
