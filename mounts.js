@@ -2,14 +2,16 @@
 //
 // Imported by MountMonitor.qml (import "mounts.js" as Mounts) and loaded by
 // tests/mounts.test.mjs, tests/onboarding.test.mjs, tests/settings.test.mjs,
-// tests/click.test.mjs, tests/label-injection.test.mjs, and
-// tests/spaced-mountpoint.test.mjs, so the plugin
+// tests/click.test.mjs, tests/label-injection.test.mjs,
+// tests/spaced-mountpoint.test.mjs, and tests/vram.test.mjs, so the plugin
 // settings recovery, the mount filter, the alert bands, the alert text, the argv
 // a clicked notification runs, the partition scan, the once-only onboarding
-// memory, and the trust boundary between the plugin's own instructions and what
-// a device calls itself are testable without a running shell. Pure functions
-// only: no QML objects, no state. The widget keeps the state (bands, alert queue,
-// processes) and decides when to ask.
+// memory, the VRAM headroom telltale (the floor, the guarded crossings, the
+// nvidia-smi argv and parser, the telltale copy), and the trust boundary
+// between the plugin's own instructions and what a device calls itself are
+// testable without a running shell. Pure functions only: no QML objects, no
+// state. The widget keeps the state (bands, alert queue, processes) and
+// decides when to ask.
 
 // --- plugin settings -------------------------------------------------------
 //
@@ -260,6 +262,274 @@ function bandFor(pct) {
   if (pct >= 90) return 2
   if (pct >= 80) return 1
   return 0
+}
+
+// --- VRAM headroom telltale -------------------------------------------------
+//
+// A coolant-level style telltale beside the rings: the filled level is the
+// headroom the GPU has left - free VRAM above the user's floor, as a fraction
+// of everything above the floor - and the tint is the guarded band. The floor
+// is a setting (vramFloorMib, MiB); the crossings are hysteresis-guarded, so a
+// reading that hovers on a boundary cannot flicker the telltale between
+// states: entering a band fires at the line, leaving it needs the margin.
+// Severity is all the bar shows; the numbers live in the telltale's popup.
+// The telltale is silent: VRAM notifications are Memory Monitor's job, and
+// this plugin's notification lanes stay disk-only.
+
+// The default floor, in MiB: the reserve practice on this rig keeps a few GiB
+// of VRAM free for model loads, and 3400 is the number that practice settles
+// on. A floor the user set always wins; unset or unusable falls back here.
+var VRAM_FLOOR_DEFAULT_MIB = 3400
+
+// The approach zone: 10% of capacity above the floor reads as amber. The
+// release margin: 5% of capacity, the guard that keeps a reading hovering at
+// a line from flickering the telltale (the brief's 5-10% of capacity apart).
+var VRAM_AMBER_FRACT = 0.10
+var VRAM_HYST_FRACT = 0.05
+
+// Polling cadence: nominal once a sweep, escalated while the telltale is red,
+// the repo's adaptive-poll posture ("monitoring occurs more often on the
+// resource that triggers a red alert").
+var VRAM_POLL_NOMINAL_MS = 60000
+var VRAM_POLL_ESCALATED_MS = 20000
+
+// The severity hues, ringkit.js's tokens by hand: a QML module cannot import
+// another one (the mounts.js law), and tests/vram.test.mjs pins this copy to
+// RingKit's palette so the two plugins cannot drift into two different ambers.
+var VRAM_TOKEN_HEX = { amber: "#e0a030", red: "#ff2d2d" }
+
+// The nvidia-smi arguments the widget runs: one --query-gpu call per poll,
+// first card only, the same shape the memory monitor samples with. There is
+// no --query-compute-apps call here: the telltale needs headroom, not a
+// process table.
+var VRAM_GPU_FIELDS = ["index", "name", "memory.total", "memory.used", "memory.free"]
+
+function nvidiaGpuArgs() {
+  return [
+    "nvidia-smi",
+    "--query-gpu=" + VRAM_GPU_FIELDS.join(","),
+    "--format=csv,nounits,noheader",
+  ]
+}
+
+// One CSV line into its columns, honoring the double quotes nvidia-smi wraps
+// around a name that contains a comma.
+function splitCsvLine(line) {
+  var out = []
+  var current = ""
+  var quoted = false
+  for (var i = 0; i < line.length; i++) {
+    var ch = line.charAt(i)
+    if (ch === '"') { quoted = !quoted; continue }
+    if (ch === "," && !quoted) { out.push(current.trim()); current = ""; continue }
+    current += ch
+  }
+  out.push(current.trim())
+  return out
+}
+
+// The first parsable --query-gpu row: the GPU the telltale speaks for. The
+// name is device-supplied text, so it goes through sanitizeText before it can
+// reach a tooltip or the popup; a row without a usable total is skipped, and
+// no parsable row is no reading at all (null), never a zero.
+function parseNvidiaGpu(text) {
+  var lines = String(text === undefined || text === null ? "" : text).split(/\r?\n/)
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (line.trim().length === 0) continue
+    var parts = splitCsvLine(line)
+    if (parts.length < VRAM_GPU_FIELDS.length) continue
+    var total = numberish(parts[2])
+    var used = numberish(parts[3])
+    var free = numberish(parts[4])
+    if (total === null || used === null || total <= 0) continue
+    return {
+      index: numberish(parts[0]),
+      name: sanitizeText(parts[1]),
+      totalMib: total,
+      usedMib: used,
+      freeMib: free === null ? total - used : free,
+    }
+  }
+  return null
+}
+
+// The floor as a whole MiB number. Absent, unusable, or negative falls back
+// to the documented default, the way every normalize* helper here treats
+// garbage: the documented default, never a silently disabled feature. Zero is
+// a real answer (a floor at zero never alarms) and is honored.
+function normalizeFloorMib(raw) {
+  var value = numberish(raw)
+  if (value === null) {
+    try { value = numberish(JSON.parse(JSON.stringify(raw))) } catch (e) { value = null }
+  }
+  if (value === null || value < 0) return VRAM_FLOOR_DEFAULT_MIB
+  return Math.round(value)
+}
+
+// The four guarded lines, in MiB, derived from capacity: red enters below the
+// floor and releases at floor + hysteresis; amber enters below floor + amber
+// margin and releases at floor + amber margin + hysteresis. Derived from the
+// capacity, not fixed, so the same fractions give a small card a small guard
+// band and a big card a big one.
+function vramBandLines(totalMib, floorMib) {
+  var total = numberish(totalMib)
+  if (total === null || total <= 0) total = 0
+  var floor = numberish(floorMib)
+  if (floor === null || floor < 0) floor = 0
+  var hyst = total * VRAM_HYST_FRACT
+  var amber = total * VRAM_AMBER_FRACT
+  return {
+    redEnter: floor,
+    redExit: floor + hyst,
+    amberEnter: floor + amber,
+    amberExit: floor + amber + hyst,
+    hystMib: hyst,
+    amberMib: amber,
+  }
+}
+
+// The band a reading belongs to on its own, forgetting history: 2 below the
+// floor, 1 in the approach zone, 0 above it. No reading is no alarm (0), the
+// repo's rule that an unknown never renders as a lie.
+function rawVramBand(freeMib, totalMib, floorMib) {
+  var free = numberish(freeMib)
+  if (free === null) return 0
+  var lines = vramBandLines(totalMib, floorMib)
+  if (free < lines.redEnter) return 2
+  if (free < lines.amberEnter) return 1
+  return 0
+}
+
+// The guarded crossing. Bands ascend as headroom falls: ascending fires at
+// the line (an alarm is never late); descending releases only past the
+// reading's own exit line, so a value hovering at a boundary holds the band
+// it has (latched) instead of flickering. One call moves the state at most
+// once; the first sighting is a baseline, not a crossing.
+function resolveVramBand(prev, freeMib, totalMib, floorMib) {
+  var free = numberish(freeMib)
+  var previous = numberish(prev)
+  if (free === null) {
+    var kept = previous === null ? 0 : previous
+    return { band: kept, latched: false, changed: false, ascent: false, descent: false, held: false }
+  }
+  var raw = rawVramBand(free, totalMib, floorMib)
+  if (previous === null)
+    return { band: raw, latched: false, changed: false, ascent: false, descent: false, held: false }
+  if (raw > previous)
+    return { band: raw, latched: false, changed: true, ascent: true, descent: false, held: false }
+  if (raw < previous) {
+    var lines = vramBandLines(totalMib, floorMib)
+    var exit = previous >= 2 ? lines.redExit : (previous >= 1 ? lines.amberExit : null)
+    if (exit === null || free >= exit)
+      return { band: raw, latched: false, changed: true, ascent: false, descent: true, held: false }
+    return { band: previous, latched: true, changed: false, ascent: false, descent: false, held: true }
+  }
+  return { band: previous, latched: false, changed: false, ascent: false, descent: false, held: false }
+}
+
+// The fill fraction of the coolant-level symbol: free VRAM above the floor,
+// as a fraction of everything above the floor. At the floor the tank is
+// empty; at full capacity it is full. A floor at or above capacity leaves no
+// usable headroom anywhere, so the tank reads empty and the band says so.
+function vramHeadroomFrac(freeMib, totalMib, floorMib) {
+  var free = numberish(freeMib)
+  var total = numberish(totalMib)
+  if (free === null || total === null || total <= 0) return 0
+  var floor = numberish(floorMib)
+  if (floor === null || floor < 0) floor = 0
+  var denom = total - floor
+  if (denom <= 0) return 0
+  var frac = (free - floor) / denom
+  if (frac < 0) frac = 0
+  if (frac > 1) frac = 1
+  return frac
+}
+
+function vramPollMs(band) {
+  var b = Math.floor(Number(band))
+  if (!isFinite(b) || b < 2) return VRAM_POLL_NOMINAL_MS
+  return VRAM_POLL_ESCALATED_MS
+}
+
+// The nvidia-smi start warning's latch for polls that ran: warn on the first
+// poll that came back without a usable reading, then hold that line until a
+// reading re-arms it. A binary that never exec'd reports no exit at all, so
+// it never reaches this call - that case is the widget's own never-started
+// guard, sharing the same latch. The lifecycle markers alone cannot decide
+// either case: exited lands before the last running-change, so by the time
+// the process looks idle a finished poll and a failed start are the same
+// shape there (measured on the rig, 2026-11-06: six healthy polls, six false
+// "could not start" lines). The poll's verdict - reading or honest absence -
+// is the signal that survives every signal-order.
+function vramStartWarn(warned, hasReading) {
+  if (hasReading) return { warn: false, warned: false }
+  return { warn: !warned, warned: true }
+}
+
+// The severity token a band draws with: "plain" is the bar's own foreground,
+// amber and red are the repo's shared hues (VRAM_TOKEN_HEX above).
+function vramTokenFor(band) {
+  var b = Math.floor(Number(band))
+  if (!isFinite(b) || b < 0) b = 0
+  if (b > 2) b = 2
+  return b === 0 ? "plain" : (b === 1 ? "amber" : "red")
+}
+
+function vramTokenHex(token) {
+  var hex = VRAM_TOKEN_HEX[String(token === undefined || token === null ? "" : token)]
+  return hex === undefined ? null : hex
+}
+
+// --- VRAM telltale copy ------------------------------------------------------
+
+// The tooltip: what the GPU calls itself (device text, sanitized), the
+// reading, and the floor it is judged against. The numbers are the detail the
+// bar posture hides; this is the one place they show without the popup.
+function vramTooltip(reading, floorMib) {
+  if (!reading) return ""
+  var who = sanitizeText(reading.name, DEVICE_TEXT_MAX)
+  if (who === "") who = "VRAM"
+  var free = numberish(reading.freeMib)
+  var total = numberish(reading.totalMib)
+  if (free === null || total === null) return ""
+  return who + " \u2014 " + Math.round(free) + " MiB free of " + Math.round(total) +
+         " MiB \u00b7 floor " + Math.round(normalizeFloorMib(floorMib)) + " MiB"
+}
+
+function vramStateText(band) {
+  var b = Math.floor(Number(band))
+  if (!isFinite(b)) b = 0
+  if (b >= 2) return "below the floor"
+  if (b === 1) return "approaching the floor"
+  return "above the floor"
+}
+
+function vramFreeLine(reading) {
+  if (!reading) return ""
+  var free = numberish(reading.freeMib)
+  var total = numberish(reading.totalMib)
+  if (free === null || total === null) return ""
+  return Math.round(free) + " MiB free of " + Math.round(total) + " MiB"
+}
+
+function vramNameText(reading) {
+  if (!reading) return ""
+  var who = sanitizeText(reading.name, DEVICE_TEXT_MAX)
+  return who === "" ? "unknown GPU" : who
+}
+
+function vramFloorText(floorMib) {
+  return Math.round(normalizeFloorMib(floorMib)) + " MiB"
+}
+
+function vramFloorCaption() {
+  return "The floor is the vramFloorMib setting, in MiB. Unset it is " +
+         VRAM_FLOOR_DEFAULT_MIB + " MiB. The fill is the free VRAM above it."
+}
+
+function vramMissingText() {
+  return "No VRAM reading: nvidia-smi is missing or cannot reach the driver. The telltale comes back when a reading does."
 }
 
 // --- device text is data, never instructions --------------------------------

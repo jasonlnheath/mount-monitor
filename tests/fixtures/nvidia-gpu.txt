@@ -1,0 +1,11 @@
+# Real `nvidia-smi --query-gpu=index,name,memory.total,memory.used,memory.free --format=csv,nounits,noheader`
+# rows captured on this rig (RTX 5070 Ti), plus the shapes a poll can meet:
+# a quoted name the way a name containing a comma arrives, a missing free
+# column, an [N/A] row from a driver hiccup, and a zero-capacity row. Lines
+# starting with '#' are comments and are not rows.
+0, NVIDIA GeForce RTX 5070 Ti, 16303, 14174, 1737
+1, NVIDIA GeForce RTX 4090, 24564, 12000, 12564
+2, "GeForce GPU, special", 8192, 1024, 7168
+9, Card, 100, 30,
+3, Broken Card, [N/A], 512, 512
+4, Zero Card, 0, 0, 0
