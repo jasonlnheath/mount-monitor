@@ -2,7 +2,7 @@
 # Memory Monitor checks: the node tests over memory.js, quattro.js and
 # ringkit.js (ceilings, bands, hysteresis, the available-based RAM signal, swap
 # escalation, oomd visibility, VRAM, drive dedup, toast copy, DND routing, the
-# guard arm, the baseline log, onboarding, the trust boundary, the Quattro Dash
+# guard arm, the baseline log, onboarding, the trust boundary, the QuattroDash
 # bands, code taxonomy and copy-language rule), a conformance check that pins
 # RingKit against memory.js and mounts.js, the multi-instance gate (two live
 # widgets produce one alert, one log row, one arm), a check that install.sh

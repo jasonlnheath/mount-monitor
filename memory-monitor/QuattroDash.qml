@@ -6,13 +6,17 @@ import qs.Ui
 import "memory.js" as Memory
 import "quattro.js" as Quattro
 
-// Quattro Dash — Memory Monitor's instrument-cluster panel, the board-approved
+// QuattroDash — Memory Monitor's instrument-cluster panel, the board-approved
 // design (rounds 1-7, verdict "ship it"). A PopupCard at the shell-standard
 // width, mounted from MemoryMonitor.qml through its own Loader the way
-// MemoryPanel.qml is. Two round meters (RAM PRESSURE and ROOT DRIVE), a
-// SWAP RESERVE battery telltale with its LED bar, the codes area: two
-// columns under the check-engine heads, one amber for moderate codes and one
-// red for severe ones, and the reserved spares row the approved footer shows.
+// MemoryPanel.qml is. Three round meters (RAM PRESSURE, ROOT DRIVE) and the
+// SWAP RESERVE battery telltale with its LED bar, plus the VRAM COOLANT
+// reservoir the captain expected here: free VRAM above the floor, sampled by
+// this plugin's own nvidia-smi read and floored by its own vramFloorMib
+// setting. Then the codes area: ONE column under one check-engine head, red
+// and amber codes together, always most critical at the top, rows stretched
+// wide so each code carries its full description. The reserved spares row the
+// old footer showed is gone: future additions are not visible on the dash.
 // Hover any instrument or code for the two-column teaching decode; click a
 // moderate code to send the issue to the default agent, and a critical-band
 // one to put it through the arm's gate.
@@ -58,11 +62,37 @@ Panel {
   readonly property var vram: mon("vramReading", null)
   readonly property var devices: mon("hdDevices", [])
 
+  // The coolant card's floor, the PR-18 way: the widget's own vramFloorMib
+  // setting through memory.js, 3400 MiB unset, same default as the bar telltale.
+  function floorMib() {
+    return monitor && typeof monitor.vramFloorMib === "function"
+      ? monitor.vramFloorMib() : Memory.vramFloorMib(null)
+  }
+
   readonly property var reserve: Quattro.reserveReading(Memory.swapTotals(swaps))
   readonly property real psiSome: psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : -1
   readonly property var psiNeedle: Quattro.psiNeedleFrac(psiSome < 0 ? null : psiSome)
   readonly property var fuelNeedle: Quattro.fuelNeedleFrac(rootDrive === null ? null : rootDrive.pctFree)
   readonly property var codes: Quattro.codesFromReadings(ram, vram, devices)
+
+  // The coolant level and its band, quattro.js's mirrors of the PR-18
+  // decisions, over this plugin's own VRAM reading. A missing reading is a
+  // dim empty tank, never a confident zero.
+  readonly property var coolantLevel: Quattro.coolantFill(
+    vram === null ? null : vram.vramFreeMib,
+    vram === null ? null : vram.vramTotalMib,
+    floorMib())
+  readonly property var coolantZone: Quattro.coolantBand(
+    vram === null ? null : vram.vramFreeMib,
+    vram === null ? null : vram.vramTotalMib,
+    floorMib())
+  readonly property color coolantTint: coolantZone === 2 ? Quattro.PAL.redHot
+    : (coolantZone === 1 ? Quattro.PAL.amber
+    : (coolantZone === 0 ? Quattro.PAL.green : Quattro.PAL.faceSym))
+
+  // The one check-engine head tints by the most severe code showing.
+  readonly property color codesHeadTint: Quattro.codesHeadToken(codes) === "red" ? Quattro.PAL.redHot
+    : (Quattro.codesHeadToken(codes) === "amber" ? Quattro.PAL.amber : Quattro.PAL.faceSym)
 
   // Codes stay dimmed once their issue was dispatched (mockup .code.sent).
   property var sentCodes: ({})
@@ -104,9 +134,12 @@ Panel {
   // Layout measures. The mockup is designed on the 443px card (the
   // shell-standard Style.space(380) at this rig's font scale), inner width 419.
   // Instruments scale with the card; fonts stay at the shell's own tokens.
+  // Four lanes share the row now, so each is 100 units wide where the old
+  // three-lane row drew 112 to 132; the dials letterbox inside their lanes.
   readonly property real innerW: card.contentWidth - card.padding * 2
   readonly property real unit: innerW / 419
-  readonly property real dialW: 132 * unit
+  readonly property real laneW: 100 * unit
+  readonly property real dialW: laneW
   readonly property real dialH: 118 * unit
 
   CardBar { id: cardBar; api: root.bar }
@@ -132,7 +165,8 @@ Panel {
         width: parent.width
         spacing: Style.space(9)
 
-        // ---- The cluster row: RAM PRESSURE - SWAP RESERVE - ROOT DRIVE.
+        // ---- The cluster row: RAM PRESSURE - SWAP RESERVE - ROOT DRIVE -
+        //      VRAM COOLANT. Four lanes, one data source each.
         RowLayout {
           Layout.fillWidth: true
           spacing: 6
@@ -141,6 +175,8 @@ Panel {
             id: psiWrap
             spacing: 4 * root.unit
             Layout.alignment: Qt.AlignTop
+            Layout.preferredWidth: root.laneW
+            Layout.maximumWidth: root.laneW
 
             function tip() {
               return Quattro.psiTip(psiSome < 0 ? null : { some_avg10: psiSome })
@@ -176,21 +212,26 @@ Panel {
               font.pixelSize: Style.font.caption
               font.bold: true
               font.letterSpacing: 1.5
+              Layout.preferredWidth: root.laneW - text.length * 1.5
+              Layout.maximumWidth: root.laneW - text.length * 1.5
+              fontSizeMode: Text.HorizontalFit
+              minimumPixelSize: 7
+              horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
             }
           }
-
-          Item { Layout.fillWidth: true }
 
           ColumnLayout {
             id: battWrap
             spacing: 4 * root.unit
             Layout.alignment: Qt.AlignTop
+            Layout.preferredWidth: root.laneW
+            Layout.maximumWidth: root.laneW
 
             Rectangle {
               id: battBox
               Layout.alignment: Qt.AlignHCenter
-              width: 112 * root.unit
+              width: root.laneW
               height: battContent.implicitHeight + 17 * root.unit
               color: Quattro.PAL.face
               radius: 10
@@ -236,7 +277,7 @@ Panel {
 
                     Rectangle {
                       required property int index
-                      width: (92 * root.unit - (Quattro.LED_COUNT - 1) * 2) / Quattro.LED_COUNT
+                      width: (84 * root.unit - (Quattro.LED_COUNT - 1) * 2) / Quattro.LED_COUNT
                       height: 9
                       radius: 2
                       readonly property bool lit: index < Quattro.litSegments(root.reserve.pct)
@@ -257,7 +298,7 @@ Panel {
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
                 onContainsMouseChanged: if (!containsMouse) root.hideTip()
-                onPositionChanged: if (containsMouse) root.showTip(battWrap.tip(), battArea, mouse.x, mouse.y)
+                onPositionChanged: if (containsMouse) root.showTip(battBox.tip(), battArea, mouse.x, mouse.y)
               }
             }
 
@@ -268,16 +309,21 @@ Panel {
               font.pixelSize: Style.font.caption
               font.bold: true
               font.letterSpacing: 1.5
+              Layout.preferredWidth: root.laneW - text.length * 1.5
+              Layout.maximumWidth: root.laneW - text.length * 1.5
+              fontSizeMode: Text.HorizontalFit
+              minimumPixelSize: 7
+              horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
             }
           }
-
-          Item { Layout.fillWidth: true }
 
           ColumnLayout {
             id: fuelWrap
             spacing: 4 * root.unit
             Layout.alignment: Qt.AlignTop
+            Layout.preferredWidth: root.laneW
+            Layout.maximumWidth: root.laneW
 
             function tip() {
               return Quattro.fuelTip(root.rootDrive)
@@ -313,13 +359,73 @@ Panel {
               font.pixelSize: Style.font.caption
               font.bold: true
               font.letterSpacing: 1.5
+              Layout.preferredWidth: root.laneW - text.length * 1.5
+              Layout.maximumWidth: root.laneW - text.length * 1.5
+              fontSizeMode: Text.HorizontalFit
+              minimumPixelSize: 7
+              horizontalAlignment: Text.AlignHCenter
+              Layout.alignment: Qt.AlignHCenter
+            }
+          }
+
+          ColumnLayout {
+            id: coolantWrap
+            spacing: 4 * root.unit
+            Layout.alignment: Qt.AlignTop
+            Layout.preferredWidth: root.laneW
+            Layout.maximumWidth: root.laneW
+
+            function tip() {
+              return Quattro.coolantTip(
+                root.vram === null ? null : { present: true, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
+                root.floorMib())
+            }
+
+            Item {
+              width: root.dialW
+              height: root.dialH
+
+              QuattroCoolant {
+                anchors.fill: parent
+                fill: root.coolantLevel
+                tint: root.coolantTint
+              }
+
+              MouseArea {
+                id: coolantArea
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+                cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (!containsMouse) root.hideTip()
+                onPositionChanged: if (containsMouse) root.showTip(coolantWrap.tip(), coolantArea, mouse.x, mouse.y)
+              }
+            }
+
+            Text {
+              text: Quattro.INSTRUMENTS.coolant
+              color: root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1.5
+              Layout.preferredWidth: root.laneW - text.length * 1.5
+              Layout.maximumWidth: root.laneW - text.length * 1.5
+              fontSizeMode: Text.HorizontalFit
+              minimumPixelSize: 7
+              horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
             }
           }
         }
 
-        // ---- The codes area: amber column | hairline | red column, each under
-        //      its check-engine head. Rows are the monitor's own live faults.
+        // ---- The codes area: ONE column under one check-engine head. Red and
+        //      amber codes share the space, always most critical at the top,
+        //      rows stretched wide so each code carries its full description
+        //      (the captain's live-look ruling). Rows are the monitor's own
+        //      live faults; the head tints by the most severe code showing,
+        //      and an empty column says so in words instead of showing a
+        //      section with nothing under it.
         Item {
           Layout.fillWidth: true
           implicitHeight: 1
@@ -329,113 +435,41 @@ Panel {
           }
         }
 
-        RowLayout {
+        ColumnLayout {
           Layout.fillWidth: true
-          spacing: 10
+          spacing: 5
 
-          ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 5
-
-            Item {
-              Layout.alignment: Qt.AlignHCenter
-              width: 17
-              height: 17
-              QuattroSymbol {
-                anchors.fill: parent
-                symbol: "mil"
-                color: Quattro.PAL.amber
-              }
-            }
-
-            Repeater {
-              model: root.amberCodes
-
-              QuattroCodeRow {
-                required property var modelData
-                entry: modelData
-                severe: false
-                Layout.fillWidth: true
-              }
+          Item {
+            Layout.alignment: Qt.AlignHCenter
+            width: 17
+            height: 17
+            QuattroSymbol {
+              anchors.fill: parent
+              symbol: "mil"
+              color: root.codesHeadTint
             }
           }
-
-          Rectangle {
-            Layout.fillHeight: true
-            implicitWidth: 1
-            color: Quattro.PAL.line
-          }
-
-          ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 5
-
-            Item {
-              Layout.alignment: Qt.AlignHCenter
-              width: 17
-              height: 17
-              QuattroSymbol {
-                anchors.fill: parent
-                symbol: "mil"
-                color: Quattro.PAL.redHot
-              }
-            }
-
-            Repeater {
-              model: root.severeCodes
-
-              QuattroCodeRow {
-                required property var modelData
-                entry: modelData
-                severe: true
-                Layout.fillWidth: true
-              }
-            }
-          }
-        }
-
-        // ---- The reserved spares row: the approved footer. The three unlit
-        //      telltales for the lanes the design held back (oil, thermometer,
-        //      hazard triangle), and the caption that says so. The symbols and
-        //      the words are quattro.js data; this file only lays them out.
-        Item {
-          Layout.fillWidth: true
-          implicitHeight: 1
-          Rectangle {
-            anchors.fill: parent
-            color: Quattro.PAL.line
-          }
-        }
-
-        RowLayout {
-          Layout.alignment: Qt.AlignHCenter
-          spacing: 10
 
           Repeater {
-            model: Quattro.SPARES.symbols
+            model: root.codes
 
-            Item {
+            QuattroCodeRow {
               required property var modelData
-              width: 17
-              height: 17
-
-              QuattroSymbol {
-                anchors.fill: parent
-                symbol: parent.modelData
-                color: Quattro.PAL.faceSym
-              }
+              entry: modelData
+              Layout.fillWidth: true
             }
           }
 
           Text {
-            text: Quattro.SPARES.caption
+            visible: root.codes.length === 0
+            text: Quattro.codesEmptyText()
             color: root.dim
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 1.5
+            Layout.alignment: Qt.AlignHCenter
           }
         }
+
       }
     }
 
@@ -552,18 +586,6 @@ Panel {
         interval: 3800
       }
     }
-  }
-
-  // Which codes go in which column, severe first inside each.
-  readonly property var amberCodes: {
-    var out = []
-    for (var i = 0; i < codes.length; i++) if (codes[i].sev === "a") out.push(codes[i])
-    return out
-  }
-  readonly property var severeCodes: {
-    var out = []
-    for (var i = 0; i < codes.length; i++) if (codes[i].sev === "r") out.push(codes[i])
-    return out
   }
 
   // ---- Tooltip state and placement -------------------------------------------
@@ -715,19 +737,110 @@ Panel {
   }
 
   // ---------------------------------------------------------------------------
-  // QuattroCodeRow: one code chip. The code, its one-line description, the
-  // severity dot and both Fix lines are quattro.js data. Click sends the
-  // plugin's own agent prompt and lights the toast; a sent row dims.
+  // QuattroCoolant: the VRAM headroom tank, the PR-18 reservoir artwork. The
+  // level is the headroom quattro.js decided (coolantFill) and the tint the
+  // band chose (coolantBand); the geometry numbers are quattro.js's COOLANT
+  // record; this painter only draws, the same way QuattroDial only draws. The
+  // outline is stroked dimmer than the liquid, so the level reads before the
+  // tank does; the liquid's top edge carries the shallow fixed coolant wave,
+  // drawn once - nothing animates, because a telltale that moves on its own is
+  // a telltale that lies.
+  component QuattroCoolant : Item {
+    id: coolantTank
+
+    property real fill: 1
+    property color tint: "#ffffff"
+
+    onFillChanged: tank.requestPaint()
+    onTintChanged: tank.requestPaint()
+    Component.onCompleted: tank.requestPaint()
+
+    Canvas {
+      id: tank
+      anchors.fill: parent
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.reset()
+        var w = width
+        var h = height
+        if (w < 2 || h < 2) return
+        var C = Quattro.COOLANT
+        var lw = Math.max(1, Math.min(w, h) * C.strokeFract)
+        var m = lw * C.insetFract
+        var x = m
+        var y = m
+        var iw = w - m * 2
+        var ih = h - m * 2
+        var r = Math.min(iw, ih) * C.radiusFract
+
+        var frac = coolantTank.fill
+        if (!isFinite(frac)) frac = 0
+        if (frac < 0) frac = 0
+        if (frac > 1) frac = 1
+
+        // tank outline
+        ctx.beginPath()
+        roundedRect(ctx, x, y, iw, ih, r)
+        ctx.lineWidth = lw
+        ctx.strokeStyle = coolantTank.tint
+        ctx.globalAlpha = C.dimAlpha
+        ctx.stroke()
+
+        if (frac <= 0) return
+
+        // liquid, from the inner bottom up to the level, kept inside the
+        // stroke. A very low level draws a thin strip without a wave, because
+        // the wave needs room the strip does not have.
+        var level = y + ih * (1 - frac)
+        var minLevel = y + ih - Math.max(lw * 0.75, ih * C.stripFract)
+        var waveTop = Math.max(level, y + lw)
+        var surface = Math.min(waveTop, minLevel)
+        var amp = surface > minLevel - ih * C.waveFract ? 0 : ih * C.waveFract
+
+        ctx.beginPath()
+        ctx.moveTo(x + lw / 2, y + ih - lw / 2)
+        ctx.lineTo(x + lw / 2, surface + amp)
+        if (amp > 0) {
+          ctx.quadraticCurveTo(x + iw * 0.25, surface - amp, x + iw * 0.5, surface)
+          ctx.quadraticCurveTo(x + iw * 0.75, surface + amp, x + iw - lw / 2, surface + amp)
+        }
+        ctx.lineTo(x + iw - lw / 2, y + ih - lw / 2)
+        ctx.closePath()
+        ctx.fillStyle = coolantTank.tint
+        ctx.globalAlpha = 1.0
+        ctx.fill()
+      }
+
+      function roundedRect(ctx, x, y, w, h, r) {
+        ctx.moveTo(x + r, y)
+        ctx.lineTo(x + w - r, y)
+        ctx.arcTo(x + w, y, x + w, y + r, r)
+        ctx.lineTo(x + w, y + h - r)
+        ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
+        ctx.lineTo(x + r, y + h)
+        ctx.arcTo(x, y + h, x, y + h - r, r)
+        ctx.lineTo(x, y + r)
+        ctx.arcTo(x, y, x + r, y, r)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // QuattroCodeRow: one code chip in the merged column. The code, its reading
+  // line and its status line are quattro.js data. Rows stretch the full card
+  // width so each code carries more description than the old half-width chip;
+  // click sends the plugin's own agent prompt and lights the toast; a sent row
+  // dims.
   component QuattroCodeRow : Rectangle {
     id: codeRow
 
     property var entry: null
-    property bool severe: false
+    readonly property bool severe: entry !== null && entry.sev === "r"
     readonly property bool hovered: area.containsMouse
     readonly property bool sent: entry !== null && root.sentCodes[entry.code] === true
 
     radius: 8
-    height: 26
+    height: 44
     color: hovered ? Quattro.PAL.hoverBg : Quattro.PAL.face
     border.width: 1
     border.color: hovered ? (severe ? Quattro.PAL.redHi : Quattro.PAL.mut) : Quattro.PAL.line
@@ -754,7 +867,7 @@ Panel {
       anchors.fill: parent
       anchors.leftMargin: 9
       anchors.rightMargin: 9
-      spacing: 7
+      spacing: 9
 
       Text {
         text: codeRow.entry !== null ? codeRow.entry.code : ""
@@ -765,13 +878,27 @@ Panel {
         font.letterSpacing: 0.7
       }
 
-      Text {
-        text: codeRow.entry !== null ? codeRow.entry.desc : ""
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        elide: Text.ElideRight
+      ColumnLayout {
+        spacing: 1
         Layout.fillWidth: true
+
+        Text {
+          text: codeRow.entry !== null ? codeRow.entry.issue : ""
+          color: root.fg
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+          elide: Text.ElideRight
+          Layout.fillWidth: true
+        }
+
+        Text {
+          text: codeRow.entry !== null ? codeRow.entry.status : ""
+          color: codeRow.severe ? Quattro.PAL.redHot : Quattro.PAL.amber
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+          Layout.fillWidth: true
+        }
       }
 
       Rectangle {

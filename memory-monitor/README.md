@@ -15,7 +15,7 @@ already alerting on — so one drive produces one toast, not two.
 
 ## What the bar shows
 
-- **No alerts:** the Quattro Dash emblem — the standard check-engine telltale
+- **No alerts:** the QuattroDash emblem — the standard check-engine telltale
   (ISO 2575 artwork) in plain white. Monochrome means all systems go, just like
   an instrument cluster.
 - **Amber / red / critical:** the same check-engine telltale, tinted by the
@@ -23,7 +23,7 @@ already alerting on — so one drive produces one toast, not two.
   red with a breathing pulse), chosen by a deterministic rule (severity, then
   the smallest headroom to its own critical line, then a fixed type order). A
   resource that is not on the machine is never named.
-- **Click opens the Quattro Dash** instrument cluster. The tooltip always
+- **Click opens the QuattroDash** instrument cluster. The tooltip always
   carries the numbers in text.
 
 ## Thresholds: you set the ceilings
@@ -130,29 +130,35 @@ largest consumers of RAM, VRAM and drives, with ranked throttle/prune
 recommendations — nothing is killed or throttled without your word). On decline,
 monitoring continues and a critical still notifies you, with the guard-off copy.
 
-## Quattro Dash, the instrument cluster
+## QuattroDash, the instrument cluster
 
 Clicking the bar emblem opens the dashboard: two round meters (RAM PRESSURE
 reading the kernel's Pressure Stall Information from `/proc/pressure/memory`,
 some avg10, amber from 60, red at 80; ROOT DRIVE as a fuel gauge where F is
-100 percent free and the red zone sits below 10 percent free) and a SWAP
+100 percent free and the red zone sits below 10 percent free), a SWAP
 RESERVE battery telltale with a ten-segment LED bar (green at 25 percent or
 more, yellow from 10, red below 10, pulsing when red, no swap configured reads
-as the empty state). Under them, the codes area: two columns under check-engine
-heads, amber for moderate codes and red for severe ones. A code is the
-monitor's own live fault - a watched resource sitting over your amber or red
-ceiling - wearing an OBD-style name (P for System RAM, C for VRAM and drives,
-plus four stable digits), a one-line description, and a hover decode (Issue /
-Status / Fix). Clicking a code sends the same fixed prompt the toasts send to
-your default agent (inline when `agentInline` is set) and lights the green
-toast, red codes with the "processing now" wording added. Only a code at the
-critical band goes through the guard's arm gate first - the same
-single-flight, budget-gated check that owns every critical-band agent launch.
-Armed, the agent starts; refused, nothing starts and the red "not sent." toast
-says why: the guard is off, an agent is already on it, no memory headroom, or
-another screen owns the guard. Hovering any instrument
-gives the plain-words teaching decode, PSI included: it is a real kernel
-metric, not one we invented.
+as the empty state), and the VRAM COOLANT reservoir: free VRAM above the
+`vramFloorMib` floor (3400 MiB unset, the same semantics as Mount Monitor's
+bar telltale, sampled by this plugin's own nvidia-smi read), green above the
+approach zone, amber inside it, red below the floor, a dim empty tank when no
+reading exists. Under them, the codes area: ONE column under one check-engine
+head, red and amber codes together, always most critical at the top, rows
+stretched across the full card so each code carries its reading and its
+status. A code is the monitor's own live fault - a watched resource sitting
+over your amber or red ceiling - wearing an OBD-style name (P for System RAM,
+C for VRAM and drives, plus four stable digits) and a hover decode (Issue /
+Status / Fix). An empty column reads "all clear." under the unlit head; no
+severity ever gets an empty section of its own. Clicking a code sends the
+same fixed prompt the toasts send to your default agent (inline when
+`agentInline` is set) and lights the green toast, red codes with the
+"processing now" wording added. Only a code at the critical band goes through
+the guard's arm gate first - the same single-flight, budget-gated check that
+owns every critical-band agent launch. Armed, the agent starts; refused,
+nothing starts and the red "not sent." toast says why: the guard is off, an
+agent is already on it, no memory headroom, or another screen owns the guard.
+Hovering any instrument gives the plain-words teaching decode, PSI included:
+it is a real kernel metric, not one we invented.
 
 ## The detail window
 
@@ -218,6 +224,7 @@ On the widget's entry in `shell.json`:
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
+| `vramFloorMib` | `3400` | The QuattroDash coolant card's floor, in MiB. The fill is free VRAM above it. A display floor only; it sets no alert ceiling. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
 Thresholds and the guard answer are not `shell.json` settings — they live in
@@ -231,7 +238,7 @@ bash memory-monitor/tests/run.sh
 ```
 
 Node tests over `memory.js`, `quattro.js` and `ringkit.js` with fixtures for
-every parser, character-pinned toast copy per kind, the Quattro Dash bands and
+every parser, character-pinned toast copy per kind, the QuattroDash bands and
 code copy, the RingKit ↔ `mounts.js bandFor` conformance check, the
 hostile-label regression, the multi-instance one-alert/one-log-row/one-arm
 check, the install-layout check, an `install.sh` syntax check, a `SKILL.md`

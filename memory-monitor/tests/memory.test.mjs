@@ -236,12 +236,47 @@ test("a held band says it is held, in the detail window and on the bar, for ever
   assert.equal(Memory.latchedText(undefined), "", "a group that carries no latch flag is not called held");
   assert.equal(
     Memory.barTooltip([{ type: "ram", band: 2, pct: 93, latched: true }]).split("\n")[1],
-    "RAM 93% (red, held)",
+    "RAM  93% (red, held)",
   );
   assert.equal(
     Memory.barTooltip([{ type: "hd", band: 1, pct: 84, latched: false }]).split("\n")[1],
-    "HD 84% (amber)",
+    "HD  84% (amber)",
   );
+});
+
+test("the bar tooltip is two columns: the name on the left, the status on the right", () => {
+  // The captain's live-look ruling: the name sits in a left column, the status
+  // in a right column. The bar's tooltip font is the shell's monospace, so the
+  // name field is padded to one shared column and every status starts on it.
+  const tip = Memory.barTooltip([
+    { type: "ram", band: 0, pct: 42 },
+    { type: "vram", band: 1, pct: 63 },
+    { type: "hd", band: 2, pct: 97, latched: true },
+  ]);
+  assert.deepEqual(tip.split("\n"), [
+    "Memory Monitor",
+    "RAM   42% (none)",
+    "VRAM  63% (amber)",
+    "HD    97% (red, held)",
+  ]);
+  // Every status starts on the same column: two spaces past the longest name.
+  for (const line of tip.split("\n").slice(1)) {
+    assert.equal(line.charAt(5), " ", "the name field is the shared left column");
+    assert.equal(/\S/.test(line.slice(0, 5)), true, "the name occupies the left column");
+    assert.equal(/\S/.test(line.slice(6)), true, "the status occupies the right column");
+  }
+});
+
+test("a drive that is away keeps its row, with the honest status in the right column", () => {
+  const tip = Memory.barTooltip([
+    { type: "ram", band: 0, pct: 42 },
+    { type: "hd", absent: true, band: 0 },
+  ]);
+  assert.deepEqual(tip.split("\n"), [
+    "Memory Monitor",
+    "RAM  42% (none)",
+    "HD   not mounted now",
+  ]);
 });
 
 test("a drive that went away drops its alert", () => {
@@ -345,4 +380,22 @@ test("the constants QML reaches for actually cross the module boundary", () => {
     assert.notEqual(Memory[name], undefined, `${name} is invisible to QML`);
   }
   assert.equal(Memory.DEFAULT_CRITICAL, null, "critical ships unset");
+});
+
+// ---------------------------------------------------------------------------
+// VRAM COOLANT floor (the dash's fourth instrument). The PR-18 semantics: the
+// fill is free VRAM above the floor, and the floor is the plugin's own
+// vramFloorMib setting, 3400 MiB when unset - Mount Monitor's default.
+// ---------------------------------------------------------------------------
+
+test("the coolant floor is the vramFloorMib setting, 3400 MiB unset, never negative", () => {
+  assert.equal(Memory.vramFloorMib(null), 3400);
+  assert.equal(Memory.vramFloorMib(undefined), 3400);
+  assert.equal(Memory.vramFloorMib(""), 3400);
+  assert.equal(Memory.vramFloorMib("garbage"), 3400);
+  assert.equal(Memory.vramFloorMib(-5), 3400);
+  assert.equal(Memory.vramFloorMib(0), 0, "a floor at zero is a real answer and is honored");
+  assert.equal(Memory.vramFloorMib(4096), 4096);
+  assert.equal(Memory.vramFloorMib("5120"), 5120, "a string setting is a number the same way normalizeNumber reads one");
+  assert.equal(Memory.vramFloorMib(3400.7), 3401, "the floor is a whole-MiB line");
 });

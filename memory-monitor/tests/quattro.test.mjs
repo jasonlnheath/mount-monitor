@@ -1,4 +1,4 @@
-// Quattro Dash — the approved instrument-cluster popup for Memory Monitor.
+// QuattroDash — the approved instrument-cluster popup for Memory Monitor.
 //
 // Design source of truth: the board-approved mockup
 // data/mm-dashboard-standard-design/index.html (round 6, verdict "ship it") and
@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import path from "node:path";
-import { Memory, repoFile, same } from "./load.mjs";
+import { Memory, Mounts, repoFile, same } from "./load.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 
@@ -64,6 +64,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "ledBand", "litSegments", "reserveReading", "psiZone", "psiNeedleFrac",
     "fuelNeedleFrac", "needleAngleDeg", "psiTip", "battTip", "fuelTip",
     "codeTip", "codesFromReadings", "dispatchToast", "dispatchRefused", "gbFromKb",
+    "coolantFill", "coolantBand", "coolantTip", "codesHeadToken", "codesEmptyText",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -73,10 +74,11 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
 // Instrument names (round 5: brief names below each instrument)
 // ---------------------------------------------------------------------------
 
-test("the three instrument names are the approved ones", () => {
+test("the four instrument names are the approved ones", () => {
   assert.equal(Quattro.INSTRUMENTS.psi, "RAM PRESSURE");
   assert.equal(Quattro.INSTRUMENTS.batt, "SWAP RESERVE");
   assert.equal(Quattro.INSTRUMENTS.fuel, "ROOT DRIVE");
+  assert.equal(Quattro.INSTRUMENTS.coolant, "VRAM COOLANT");
 });
 
 // ---------------------------------------------------------------------------
@@ -362,6 +364,113 @@ test("codesFromReadings: severe rows sort ahead of moderate rows", () => {
   assert.equal(codes[1].sev, "a");
 });
 
+test("codesFromReadings: one column, most critical at the top, band descending under each severity", () => {
+  // The captain's live-look ruling: red and amber codes share ONE column,
+  // always most critical at the top. The list codesFromReadings returns is the
+  // column: critical (band 3) above red (band 2) above every amber, code
+  // ascending inside the same band so the order is stable.
+  const codes = Quattro.codesFromReadings(
+    { type: "ram", key: "ram", id: "mem-0aad21c9", band: 1, pct: 82 },
+    { type: "vram", key: "vram", id: "mem-1a56a487", band: 3, pct: 99 },
+    [
+      { type: "hd", key: "partuuid:aa01", id: "mem-2b4e1c05", band: 2, pct: 97, target: "/" },
+      { type: "hd", key: "partuuid:aa02", id: "mem-3c5f2d16", band: 1, pct: 84, target: "/mnt/backup" },
+      { type: "hd", key: "partuuid:aa03", id: "mem-4d603e27", band: 3, pct: 99, target: "/mnt/models" },
+    ]);
+  same(codes.map(c => c.sev + c.band), ["r3", "r3", "r2", "a1", "a1"]);
+});
+
+test("codesFromReadings: two ambers and no red are one amber list, with no empty section anywhere", () => {
+  const codes = Quattro.codesFromReadings(
+    { type: "ram", key: "ram", id: "mem-0aad21c9", band: 1, pct: 82 },
+    null,
+    [{ type: "hd", key: "partuuid:aa02", id: "mem-3c5f2d16", band: 1, pct: 84, target: "/mnt/backup" }]);
+  assert.equal(codes.length, 2);
+  for (const code of codes) assert.equal(code.sev, "a");
+  assert.equal(Quattro.codesHeadToken(codes), "amber", "the one head tints amber when only amber codes show");
+});
+
+test("codesHeadToken: the single check-engine head tints by the most severe code showing", () => {
+  const make = (ram, vram, devices) => Quattro.codesFromReadings(ram, vram, devices);
+  assert.equal(Quattro.codesHeadToken([]), "dim", "no codes is the unlit emblem, not an empty red section");
+  assert.equal(
+    Quattro.codesHeadToken(make({ type: "ram", key: "ram", id: "mem-0aad21c9", band: 1, pct: 82 }, null, [])),
+    "amber");
+  assert.equal(
+    Quattro.codesHeadToken(make(null, null, [{ type: "hd", key: "partuuid:aa01", id: "mem-2b4e1c05", band: 2, pct: 97, target: "/" }])),
+    "red");
+  assert.equal(
+    Quattro.codesHeadToken(make(
+      { type: "ram", key: "ram", id: "mem-0aad21c9", band: 1, pct: 82 },
+      null,
+      [{ type: "hd", key: "partuuid:aa01", id: "mem-2b4e1c05", band: 2, pct: 97, target: "/" }])),
+    "red", "one red code outranks every amber on the head");
+});
+
+test("codesEmptyText: the empty column says the machine is clear, in the terse register", () => {
+  assert.equal(Quattro.codesEmptyText(), "all clear.");
+});
+
+// ---------------------------------------------------------------------------
+// VRAM COOLANT (the captain's live-look item 3): the fourth instrument. The
+// fill and band mirrors of Mount Monitor's PR-18 telltale semantics, sampled
+// from this plugin's own nvidia-smi reading, floored by this plugin's own
+// vramFloorMib setting (3400 MiB unset, the PR-18 default).
+// ---------------------------------------------------------------------------
+
+test("coolantFill: free VRAM above the floor, as a fraction of everything above it (the PR-18 semantics)", () => {
+  assert.equal(Quattro.coolantFill(3400, 8186, 3400), 0, "at the floor the tank is empty");
+  assert.equal(Quattro.coolantFill(8186, 8186, 3400), 1, "at capacity the tank is full");
+  const half = Quattro.coolantFill(3400 + (8186 - 3400) / 2, 8186, 3400);
+  assert.equal(Math.abs(half - 0.5) < 1e-9, true, "half the headroom is half a tank");
+  assert.equal(Quattro.coolantFill(1000, 8186, 3400), 0, "below the floor clamps to empty, never negative");
+  assert.equal(Quattro.coolantFill(9000, 8186, 3400), 1, "above capacity clamps to full");
+  assert.equal(Quattro.coolantFill(1000, 8186, 9000), 0, "a floor at or above capacity leaves no usable headroom");
+  assert.equal(Quattro.coolantFill(null, 8186, 3400), 0, "no reading is an empty tank, not a lie");
+  assert.equal(Quattro.coolantFill(4000, 0, 3400), 0, "no capacity is an empty tank");
+});
+
+test("coolantFill and coolantBand agree with Mount Monitor's PR-18 decisions on the same numbers", () => {
+  // ringkit-conformance law, extended to the dash: the coolant card and the
+  // bar telltale cannot disagree about what the same free/total/floor means.
+  const cases = [
+    [3400, 8186, 3400], [8186, 8186, 3400], [1000, 8186, 3400], [4186, 8186, 3400],
+    [5000, 8186, 3400], [6000, 8186, 3400], [7500, 8186, 3400], [1000, 8186, 9000],
+    [3399, 8186, 3400], [4100, 24576, 3400], [9000, 24576, 3400],
+  ];
+  for (const [free, total, floor] of cases) {
+    assert.equal(Quattro.coolantFill(free, total, floor), Mounts.vramHeadroomFrac(free, total, floor),
+      `coolantFill(${free}, ${total}, ${floor}) must equal mounts.js vramHeadroomFrac`);
+    assert.equal(Quattro.coolantBand(free, total, floor), Mounts.rawVramBand(free, total, floor),
+      `coolantBand(${free}, ${total}, ${floor}) must equal mounts.js rawVramBand`);
+  }
+  // One deliberate difference on a missing reading: the telltale's rawVramBand
+  // says 0 (no alarm), the gauge says null (an unavailable reading never draws
+  // as healthy). Both honest, neither a 0% lie.
+  assert.equal(Quattro.coolantBand(null, 8186, 3400), null);
+  assert.equal(Mounts.rawVramBand(null, 8186, 3400), 0);
+});
+
+test("coolantBand: red below the floor, amber within the approach zone, green above, no reading is null", () => {
+  const total = 8186;
+  const floor = 3400;
+  assert.equal(Quattro.coolantBand(null, total, floor), null, "a missing reading never draws as healthy");
+  assert.equal(Quattro.coolantBand(3399, total, floor), 2, "below the floor is red");
+  assert.equal(Quattro.coolantBand(floor + 0.10 * total - 1, total, floor), 1, "the approach zone is amber");
+  assert.equal(Quattro.coolantBand(floor + 0.10 * total, total, floor), 0, "above the approach zone is green");
+});
+
+test("coolantTip: the four-row teaching decode with the live level and the floor named", () => {
+  const tip = Quattro.coolantTip({ present: true, freeMib: 4211, totalMib: 8186 }, 3400);
+  assert.equal(tip.header, "VRAM COOLANT");
+  same(tip.rows.map(r => r.label), ["Now:", "What:", "Why:", "Ranges:"]);
+  assert.equal(tip.rows[0].text, "4211 MiB free of 8186 MiB. Floor 3400 MiB.");
+  assert.equal(tip.rows[3].text.endsWith("vramFloorMib setting, 3400 MiB unset."), true,
+    "the ranges row names the setting and the default");
+  const empty = Quattro.coolantTip(null, 3400);
+  assert.equal(empty.rows[0].text, "no VRAM reading yet.", "a missing reading is said, not drawn as zero");
+});
+
 test("codeTip: the approved three-row decode with the severity color class", () => {
   const codes = Quattro.codesFromReadings(
     { type: "ram", key: "ram", id: "mem-0aad21c9", band: 2, pct: 96 }, null, []);
@@ -467,14 +576,22 @@ test("the fuel nozzle subpath is the mockup's relative lineto, not an absolute o
     "the nozzle's second pair must be the mockup's relative lineto");
 });
 
-test("the reserved spares footer is the approved mockup footer, exactly", () => {
+test("the reserved spares are a record, not a rendered row", () => {
+  // The captain's live-look ruling: future additions are not visible on the
+  // dashboard. The SPARES record (the caption and the three unlit telltales the
+  // approved footer once showed) stays in quattro.js as the note of what is
+  // held back, and the panel no longer draws any of it.
   assert.equal(Quattro.SPARES.caption, "FUTURE LANES (RESERVED)");
   same(Quattro.SPARES.symbols, ["oil", "thermo", "tri"]);
+  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
+  assert.equal(PANEL.includes("Quattro.SPARES"), false,
+    "the reserved spares row is not rendered on the dash");
+  assert.equal(PANEL.includes(Quattro.SPARES.caption), false,
+    "the reserved caption appears nowhere on the dash");
   for (const id of Quattro.SPARES.symbols) {
     const sym = Quattro.SYMBOLS[id];
-    assert.notEqual(sym, undefined, `reserved-lane symbol ${id} ships as artwork`);
-    assert.equal(sym.viewBox.length, 4, `${id} needs its four-number SVG viewBox`);
-    assert.equal(sym.items.length >= 1, true, `${id} needs items`);
+    assert.notEqual(sym, undefined, `reserved-lane symbol ${id} stays in the record as artwork`);
+    assert.equal(PANEL.includes(`"${id}"`), false, `the reserved symbol ${id} is not placed on the dash`);
   }
 });
 
@@ -519,6 +636,11 @@ test("the language rule holds over every string the popup copy can produce", () 
   for (const pctFree of [0, 9.9, 10, 45, 77, 100]) {
     pushTip(Quattro.fuelTip({ target: "/", device: "/dev/sda1", pctFree, pctUsed: 100 - pctFree, availKb: 123456789, sizeKb: 987654321 }));
   }
+  pushTip(Quattro.coolantTip(null, 3400));
+  for (const freeMib of [0, 1000, 3399, 3400, 3800, 4211, 8186]) {
+    pushTip(Quattro.coolantTip({ present: true, freeMib, totalMib: 8186 }, 3400));
+  }
+  texts.push(Quattro.codesEmptyText());
 
   for (const band of [1, 2, 3]) {
     for (const entry of [
@@ -543,7 +665,7 @@ test("the language rule holds over every string the popup copy can produce", () 
     texts.push(Quattro.dispatchRefused("C1500", why).text);
   }
   texts.push(Quattro.SPARES.caption);
-  texts.push(Quattro.INSTRUMENTS.psi, Quattro.INSTRUMENTS.batt, Quattro.INSTRUMENTS.fuel);
+  texts.push(Quattro.INSTRUMENTS.psi, Quattro.INSTRUMENTS.batt, Quattro.INSTRUMENTS.fuel, Quattro.INSTRUMENTS.coolant);
 
   const bad = texts.filter(t => /[\u2014\u2013;]/.test(t));
   assert.deepEqual(bad, [], `em dashes, en dashes and semicolons are banned from UI copy: ${JSON.stringify(bad)}`);
@@ -599,14 +721,33 @@ test("rootDriveReading: a full root reads zero free, and the real device row win
 test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence of its own", () => {
   const PANEL = repoFile("memory-monitor/QuattroDash.qml");
   for (const call of [
-    "Quattro.psiTip(", "Quattro.battTip(", "Quattro.fuelTip(", "Quattro.codeTip(",
-    "Quattro.codesFromReadings(", "Quattro.dispatchToast(", "Quattro.litSegments(",
-    "Quattro.ledBand(", "Quattro.INSTRUMENTS", "Quattro.PAL",
+    "Quattro.psiTip(", "Quattro.battTip(", "Quattro.fuelTip(", "Quattro.coolantTip(",
+    "Quattro.codeTip(", "Quattro.codesFromReadings(", "Quattro.dispatchToast(",
+    "Quattro.litSegments(", "Quattro.ledBand(", "Quattro.INSTRUMENTS", "Quattro.PAL",
     "Quattro.psiZoneArcs", "Quattro.fuelZoneArcs", "Quattro.dialTicks(",
     "Quattro.needleAngleDeg(", "Quattro.psiNeedleFrac(", "Quattro.fuelNeedleFrac(",
-    "Quattro.reserveReading(", "Quattro.SPARES",
+    "Quattro.reserveReading(", "Quattro.coolantFill(", "Quattro.coolantBand(",
+    "Quattro.codesHeadToken(", "Quattro.codesEmptyText(",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
+  }
+  // The codes column is ONE column, most critical at the top: the panel renders
+  // the codesFromReadings list directly and keeps no per-severity models of its
+  // own (the captain's live-look ruling; the old amber and red columns are gone).
+  assert.equal(PANEL.includes("model: root.codes"), true, "the single column renders the merged code list");
+  assert.equal(PANEL.includes("amberCodes"), false, "no separate amber column model survives");
+  assert.equal(PANEL.includes("severeCodes"), false, "no separate red column model survives");
+  // Every instrument's hover must call the tip declared on the id it names: a
+  // call into an id with no tip function throws on hover and the popup never
+  // comes up (the swap popup bug). Each <id>.tip( call needs an `id: <id>` that
+  // declares `function tip()`.
+  const declared = new Set([...PANEL.matchAll(/^\s*id:\s*(\w+)/gm)].map(m => m[1]));
+  const called = [...PANEL.matchAll(/\b(\w+)\.tip\(\)/g)].map(m => m[1]);
+  assert.equal(called.length >= 4, true, "psi, batt, fuel and the coolant all hover for their decode");
+  for (const id of called) {
+    const pattern = new RegExp(`id:\\s*${id}\\b[^]*?function tip\\(`);
+    assert.match(PANEL, pattern, `the ${id} hover calls a tip declared on the ${id} object`);
+    assert.equal(declared.has(id), true, `${id} is an id in this panel`);
   }
   // The ISO artwork comes from quattro.js through QuattroSymbol.qml - the panel
   // renders it, it does not carry it.
@@ -629,6 +770,15 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
   const longLiterals = PANEL.split("\n").filter(line =>
     /"[^"\n]{40,}"/.test(line) && !/console\.(warn|log|info|error)/.test(line));
   assert.deepEqual(longLiterals, [], "no fixed sentence lives in the dashboard panel");
+});
+
+test("the widget carries the coolant floor and the panel reads it through memory.js", () => {
+  const QML = repoFile("memory-monitor/MemoryMonitor.qml");
+  assert.match(QML, /function vramFloorMib\(\): int \{/, "the widget exposes the floor the PR-18 way");
+  assert.match(QML, /Memory\.vramFloorMib\(setting\("vramFloorMib", null\)\)/,
+    "the floor is this plugin's own vramFloorMib setting through the memory.js normalizer");
+  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
+  assert.equal(PANEL.includes("vramFloorMib"), true, "the dash reads the floor from the widget");
 });
 
 test("the bar widget mounts the dashboard and the badge opens it", () => {

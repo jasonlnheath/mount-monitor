@@ -37,13 +37,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `memory-monitor/tests/ringkit-conformance.test.mjs` proves `mounts.js bandFor`
   and `memory.js bandForPct` cannot disagree with it.
 - `memory-monitor/` is the sibling plugin (System RAM / VRAM / drive severity,
-  user-set ceilings, the Quattro Dash instrument cluster, the detail window, the
+  user-set ceilings, the QuattroDash instrument cluster, the detail window, the
   baseline log, the guard ask). It has
   its own `manifest.json`, `install.sh`, `README.md`, `skills/` and `tests/`; its
   `install.sh` copies `ringkit.js` beside the widget because the shell's plugin
   registry scans exactly one level. Its decisions live in
   `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`,
-  with the Quattro Dash popup's own decisions (LED bands, dial geometry, code
+  with the QuattroDash popup's own decisions (LED bands, dial geometry, code
   taxonomy, cluster copy, the ISO symbol artwork) in `memory-monitor/quattro.js`,
   rendered by `QuattroDash.qml` / `QuattroSymbol.qml` under the same
   plain-module law.
@@ -53,7 +53,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   agree — change both.
 
 Mount Monitor is disk/drive monitoring plus the VRAM headroom telltale the
-captain approved after the Quattro Dash merged (the bar telltale, its floor
+captain approved after the QuattroDash merged (the bar telltale, its floor
 setting, its guarded crossings, `VramSymbol.qml`, `VramPanel.qml`,
 `CardBar.qml` — the bar facade `VramPanel` instantiates because the omarchy
 shell exports no CardBar type, the same local facade memory-monitor ships; all

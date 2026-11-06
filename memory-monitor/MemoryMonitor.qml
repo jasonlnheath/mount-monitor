@@ -20,12 +20,12 @@ import "ringkit.js" as RingKit
 // critical band, no critical toast, and no glowing badge. Nothing here ever
 // writes a ceiling he did not set.
 //
-// The bar shows one emblem: the Quattro Dash check-engine telltale (the ISO
+// The bar shows one emblem: the QuattroDash check-engine telltale (the ISO
 // artwork QuattroSymbol renders), plain white when nothing is over a line and
 // tinted by the most severe resource — amber, red, and critical's pulse — with
 // severity, the palette token and the pulse still RingKit's decision
 // (badgeParams), so a bar carrying both plugins draws one severity language.
-// Clicking it opens the Quattro Dash; the detail window keeps the critical
+// Clicking it opens the QuattroDash; the detail window keeps the critical
 // click and the openDetail IPC.
 //
 // Toasts are events, not states: an alert fires on a band ascent or on one of
@@ -81,7 +81,7 @@ BarWidget {
   property var psi: null
   property var swaps: []
   property var zram: []
-  // Quattro Dash's root-drive reading (memory.js rootDriveReading). A reading,
+  // QuattroDash's root-drive reading (memory.js rootDriveReading). A reading,
   // not a watch decision: it feeds the fuel gauge whether or not the watch
   // list covers root, and it never produces an alert.
   property var rootReading: null
@@ -177,6 +177,13 @@ BarWidget {
 
   function agentCommandArgv(): var {
     return Memory.normalizeAgentCommand(setting("agentCommand", null));
+  }
+
+  // The QuattroDash coolant card's floor, the PR-18 way: this plugin's own
+  // vramFloorMib setting in MiB, 3400 MiB when unset, read through the
+  // memory.js normalizer. A display floor, never an alert ceiling.
+  function vramFloorMib(): int {
+    return Memory.vramFloorMib(setting("vramFloorMib", null));
   }
 
   // ---------------------------------------------------------------------------
@@ -645,7 +652,7 @@ BarWidget {
   // toast's notification id.
   // ---------------------------------------------------------------------------
 
-  // fromDash marks the Quattro Dash's critical-band code click: an arm with no
+  // fromDash marks the QuattroDash's critical-band code click: an arm with no
   // claim notice behind it, so it captures no printed id and a later death
   // retracts by a fresh toast instead of by a notice it never showed.
   function startArm(alert, fromDash): void {
@@ -699,7 +706,7 @@ BarWidget {
     armWatchdog.restart();
   }
 
-  // The Quattro Dash's critical-band code click is a critical dispatch, so it
+  // The QuattroDash's critical-band code click is a critical dispatch, so it
   // rides the arm: the same gate chain the queue-time arm passes, and the same
   // launch through startArm, which is what keeps the machine's single-flight
   // lane the one guarantee there is never a second agent on top of the armed
@@ -1436,7 +1443,7 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // The bar. One emblem — the Quattro Dash telltale — plain white when nothing
+  // The bar. One emblem — the QuattroDash telltale — plain white when nothing
   // is over a line, tinted by the most severe resource.
   // ---------------------------------------------------------------------------
 
@@ -1499,7 +1506,7 @@ BarWidget {
         readonly property var entry: root.badgeEntry
         readonly property int band: entry === null || entry === undefined ? 0 : (entry.band === undefined ? 0 : entry.band)
         readonly property bool latched: entry !== null && entry !== undefined && entry.latched === true
-        // Quattro Dash is the bar emblem (the approved round-2 spec): the
+        // QuattroDash is the bar emblem (the approved round-2 spec): the
         // check-engine telltale alone - monochrome = all systems go, yellow =
         // moderate, red = severe. Severity, the token that tints it and the
         // critical pulse stay RingKit's decision, so a bar carrying both
@@ -1540,7 +1547,7 @@ BarWidget {
   // ---------------------------------------------------------------------------
 
   // The bar-facing panel shape. The badge click and the shell's panel routing
-  // open the Quattro Dash instrument cluster (the approved round-2 ruling: the
+  // open the QuattroDash instrument cluster (the approved round-2 ruling: the
   // user clicks the emblem to open the dashboard); the critical-click IPC
   // (openDetail) still lands on the MemoryPanel detail window via showDetail.
   // Opening either counts as having seen the alert state.
