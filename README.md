@@ -123,11 +123,13 @@ and only you say what gets wired, pruned, compressed, or removed.
 
 Omarchy Quattro (Quickshell) with third-party `schemaVersion: 1` bar widgets,
 `findmnt` and `lsblk` from util-linux to read the mounts and the partition
-table, `notify-send` from libnotify for the alerts, and `udevadm` from systemd to
-notice a plugged drive right away. Without `notify-send` the rings still draw,
+table, `notify-send` from libnotify for the alerts, `udevadm` from systemd to
+notice a plugged drive right away, and `nvidia-smi` from the NVIDIA driver for
+the VRAM headroom telltale. Without `notify-send` the rings still draw,
 nothing alerts. Without `lsblk` the rings still draw, no onboarding notices.
 Without `udevadm` the rings still draw and still alert — detection just falls back
-to the 60-second sweep.
+to the 60-second sweep. Without `nvidia-smi` (or an NVIDIA GPU) the rings still
+draw and the telltale just never appears.
 
 ## Install
 
@@ -260,8 +262,8 @@ bash tests/run.sh
 That runs `node --test tests/` against the fixtures in `tests/fixtures/` (plus
 live `findmnt` and `lsblk` checks that skip when a mount or the tool is not
 present) and, when Qt's `qmllint` is installed, checks that `MountMonitor.qml`,
-`VramSymbol.qml` and `VramPanel.qml` parse and their `mounts.js` imports
-resolve. `testPct` is a setting for trying a band out:
+`VramSymbol.qml`, `VramPanel.qml` and `CardBar.qml` parse and their `mounts.js`
+imports resolve. `testPct` is a setting for trying a band out:
 `{ "id": "io.github.jasonlnheath.mount-monitor", "testPct": 98 }`
 reports every ring at 98% — display and alerts alike. Remove it when you are
 done.

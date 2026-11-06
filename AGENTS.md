@@ -54,7 +54,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 Mount Monitor is disk/drive monitoring plus the VRAM headroom telltale the
 captain approved after the Quattro Dash merged (the bar telltale, its floor
-setting, its guarded crossings, `VramSymbol.qml`, `VramPanel.qml`; all
+setting, its guarded crossings, `VramSymbol.qml`, `VramPanel.qml`,
+`CardBar.qml` — the bar facade `VramPanel` instantiates because the omarchy
+shell exports no CardBar type, the same local facade memory-monitor ships; all
 decisions in `mounts.js`, pinned by `tests/vram.test.mjs`). The telltale is
 silent: it draws and opens a popup, and never sends a notification — VRAM
 alerts remain Memory Monitor's job, and it samples its own `nvidia-smi` rather
@@ -78,9 +80,10 @@ not installed), the block-event detection decisions in `tests/detect.test.mjs`
 (including a live `udevadm monitor` + `udisksctl loop-setup` plug that skips where
 either is absent), the
 VRAM telltale decisions in `tests/vram.test.mjs` (floor recovery, the guarded
-crossings, fill fraction, nvidia-smi parser and copy, the RingKit palette pin,
-widget/popup delegation guards, and an offscreen `QT_QPA_PLATFORM` probe that
-loads `VramSymbol.qml` in a real Qt runtime and skips where `qml6` is absent),
+crossings, fill fraction, nvidia-smi parser and copy, the start-warning latch,
+the RingKit palette pin, widget/popup delegation guards, and an offscreen
+`QT_QPA_PLATFORM` probe that loads `VramSymbol.qml` in a real Qt runtime and
+skips where `qml6` is absent),
 the hostile-label regression in `tests/label-injection.test.mjs`, the
 spaced-mountpoint regression in `tests/spaced-mountpoint.test.mjs`, the RingKit
 contract in `tests/ringkit.test.mjs` (shared-module shape, band numbers, thresholds,
