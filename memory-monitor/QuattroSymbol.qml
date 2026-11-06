@@ -36,17 +36,27 @@ Item {
       yScale: root.fit
     }
 
+    // ShapePath is a QObject, not an Item, so a Repeater refuses it as a
+    // delegate ("Delegate must be of Item type") and the symbol draws nothing.
+    // Each artwork item therefore gets its own Shape - an Item the Repeater
+    // accepts - holding one ShapePath. Item children share this Shape's local
+    // coordinate system, so the fit Scale above carries them all: no path is
+    // ever created outside this Shape.
     Repeater {
       model: root.def ? root.def.items : null
 
-      ShapePath {
+      delegate: Shape {
         required property var modelData
-        strokeColor: modelData.stroke === true ? root.color : "transparent"
-        strokeWidth: modelData.stroke === true ? modelData.width : 0
-        fillColor: modelData.fill === true ? root.color : "transparent"
+        anchors.fill: parent
 
-        PathSvg {
-          path: modelData.d
+        ShapePath {
+          strokeColor: modelData.stroke === true ? root.color : "transparent"
+          strokeWidth: modelData.stroke === true ? modelData.width : 0
+          fillColor: modelData.fill === true ? root.color : "transparent"
+
+          PathSvg {
+            path: modelData.d
+          }
         }
       }
     }
