@@ -42,7 +42,7 @@ fi
 rm -rf "${plugin_dir:?}"
 mkdir -p "$plugin_dir"
 
-for name in manifest.json MemoryMonitor.qml MemoryPanel.qml memory.js README.md; do
+for name in manifest.json MemoryMonitor.qml MemoryPanel.qml QuattroDash.qml QuattroSymbol.qml CardBar.qml memory.js quattro.js README.md; do
   if [[ -f "$here/$name" ]]; then
     cp -a "$here/$name" "$plugin_dir/"
   fi

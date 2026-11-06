@@ -31,7 +31,6 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
 
-  readonly property var barIdentity: hostWidget || root
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(fg, 1.5)
   readonly property color warnColor: "#e0a030"
@@ -81,11 +80,16 @@ Panel {
     return text
   }
 
+  CardBar { id: cardBar; api: root.bar }
+
   PopupCard {
     id: card
     anchorItem: root.anchorItem
-    bar: root.bar
-    owner: root.barIdentity
+    bar: cardBar
+    // The card's close is this panel's own close (Panel.close), the way
+    // QuattroDash's card does it: the bar widget's close() closes the dash, so
+    // delegating to the widget would leave this window with no dismissal path.
+    owner: root
     open: root.opened
     contentWidth: Style.space(380)
     contentHeight: Math.min(card.availableCardHeight - card.padding * 2, content.implicitHeight + card.padding * 2)

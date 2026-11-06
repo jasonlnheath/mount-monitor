@@ -56,6 +56,15 @@ test("the arm is single-flight per machine", () => {
   assert.equal(Memory.shouldStartArm({ band: 2, guard: true }).start, false, "only the critical band arms");
   assert.equal(Memory.shouldStartArm({ band: 3, guard: true, budgetOk: false }).start, false);
   assert.equal(Memory.shouldStartArm({ band: 3, guard: true, writer: false }).start, false, "one instance owns the arm");
+  // The why tokens are the arm gate's own words, and quattro.js's refusal toast
+  // reads them back to the captain. A refusal the dashboard cannot name is a
+  // silent click, so every token has to stay stable.
+  same(Memory.shouldStartArm({ band: 2, guard: true }).why, "not-critical");
+  same(Memory.shouldStartArm({ band: 3, guard: false }).why, "guard-off");
+  same(Memory.shouldStartArm({ band: 3, guard: true, armLive: true }).why, "arm-live");
+  same(Memory.shouldStartArm({ band: 3, guard: true, budgetOk: false }).why, "no-headroom");
+  same(Memory.shouldStartArm({ band: 3, guard: true, writer: false }).why, "not-writer");
+  same(Memory.shouldStartArm({ band: 3, guard: true }).why, "");
   assert.equal(Memory.armIsLive({ outcome: "started" }), true);
   assert.equal(Memory.armIsLive({ outcome: "survived" }), false);
   assert.equal(Memory.armIsLive({ outcome: "refused" }), false);

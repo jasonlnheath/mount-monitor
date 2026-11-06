@@ -374,7 +374,9 @@ test("no shell string, no hand-built redirect, and no process call qmllint canno
 });
 
 test("the widget's own copy is only the bar's logo and the tooltip, both of which memory.js supplies", () => {
-  assert.equal(QML.includes("Memory.barLogoText()"), true);
+  // Quattro Dash is the bar emblem (the approved design): the MIL artwork
+  // renders through QuattroSymbol, so the widget's own copy is only the bar
+  // tooltip, which memory.js supplies.
   assert.equal(QML.includes("Memory.barTooltip(") || QML.includes("Memory.tooltipText("), true);
   const both = QML + "\n" + PANEL;
   assert.equal(both.includes("Memory.unavailableText("), true, "a missing reading is named, not drawn as zero");
@@ -383,4 +385,15 @@ test("the widget's own copy is only the bar's logo and the tooltip, both of whic
   assert.equal(both.includes("Memory.kernelCeilingText("), true, "oomd's ceiling is reported, not replaced");
   assert.equal(both.includes("Memory.swapText("), true);
   assert.equal(both.includes("Memory.psiText("), true);
+});
+
+test("a dash-launched severe dispatch rides the same arm gate the toast path rides", () => {
+  const dispatch = (QML.match(/function dispatchCriticalCode\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.notEqual(dispatch, "", "the widget owns the severe code's dispatch");
+  assert.match(dispatch, /Memory\.shouldStartArm\(/,
+    "the gate is the arm's own single-flight check, not a dash-local guess");
+  assert.match(dispatch, /Memory\.armBudgetCheck\(/, "the budget gate rides along");
+  assert.match(dispatch, /startArm\(alert, true\)/,
+    "the dispatched agent IS the arm: one flight, one agent, the v1 doctrine");
+  assert.match(dispatch, /why: decision\.why/, "the refusal names why so the dash can say so");
 });

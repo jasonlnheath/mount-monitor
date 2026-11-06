@@ -479,6 +479,11 @@ now named in this plan:
 
 ### Bar display
 
+[The badge presentation below was superseded 2026-11-05 by the Quattro Dash build
+(`docs/plans/2026-11-05-quattro-dash.md`): the bar shows one check-engine emblem
+in every state — no MM logo ring, no per-type graphic badges. The most-severe
+rule, the absent-mount rule and the held-band rule under it are unchanged.]
+
 - **No alerts:** the Memory Monitor logo — a **full ring filled in white with the letters "MM"
   in white in the middle**. Plain white, plain Jane, no bold, no color.
 - **Amber/red/critical:** the resource in trouble is shown — **only the MOST SEVERE alert**

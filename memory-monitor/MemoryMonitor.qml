@@ -20,11 +20,13 @@ import "ringkit.js" as RingKit
 // critical band, no critical toast, and no glowing badge. Nothing here ever
 // writes a ceiling he did not set.
 //
-// The bar shows one badge: the most severe resource. With nothing over a line it
-// is the plain white MM logo. Severity carries shape as well as hue — amber is a
-// partial fill with a steady badge, red is a full badge plus a warning glyph,
-// critical adds the pulse and halo — so amber-versus-red survives deuteranopia,
-// and the glyph carries the type.
+// The bar shows one emblem: the Quattro Dash check-engine telltale (the ISO
+// artwork QuattroSymbol renders), plain white when nothing is over a line and
+// tinted by the most severe resource — amber, red, and critical's pulse — with
+// severity, the palette token and the pulse still RingKit's decision
+// (badgeParams), so a bar carrying both plugins draws one severity language.
+// Clicking it opens the Quattro Dash; the detail window keeps the critical
+// click and the openDetail IPC.
 //
 // Toasts are events, not states: an alert fires on a band ascent or on one of
 // memory.js's re-fire conditions (severity increase, PSI crossing the stall
@@ -79,6 +81,10 @@ BarWidget {
   property var psi: null
   property var swaps: []
   property var zram: []
+  // Quattro Dash's root-drive reading (memory.js rootDriveReading). A reading,
+  // not a watch decision: it feeds the fuel gauge whether or not the watch
+  // list covers root, and it never produces an alert.
+  property var rootReading: null
 
   // ---- Band memory, keyed by memory.js's device/resource key. A configured
   //      target that is temporarily unmounted keeps its last band here.
@@ -334,6 +340,7 @@ BarWidget {
 
     var wanted = watchedMounts();
     hdRows = Memory.hdCandidates(findmntText, wanted);
+    rootReading = Memory.rootDriveReading(findmntText);
     // The rebuilt rows carry the held band the way ram.band carries bandOf
     // above — before the assignment, because the badge and tooltip bindings
     // evaluate on the assignment itself and never see a later in-place fix. A
@@ -638,7 +645,10 @@ BarWidget {
   // toast's notification id.
   // ---------------------------------------------------------------------------
 
-  function startArm(alert): void {
+  // fromDash marks the Quattro Dash's critical-band code click: an arm with no
+  // claim notice behind it, so it captures no printed id and a later death
+  // retracts by a fresh toast instead of by a notice it never showed.
+  function startArm(alert, fromDash): void {
     if (!isWriter) return;
     var eventKey = Memory.armEventKey(alert);
     if (Memory.armIsLive(arm) && liveArmKey === eventKey) return;
@@ -669,7 +679,7 @@ BarWidget {
       ? Memory.agentArgvWithInline(prompt, agentCommandArgv())
       : Memory.agentArgv(prompt, agentCommandArgv());
     liveArmKey = eventKey;
-    armClaimNotice = alert;
+    if (fromDash !== true) armClaimNotice = alert;
     arm = Memory.armRecord({
       eventKey: eventKey,
       type: alert.type,
@@ -680,13 +690,31 @@ BarWidget {
       target: alert.target,
       outcome: "started",
       startedAt: new Date().toISOString(),
-      claimId: noticePrintedId,
+      claimId: fromDash === true ? "" : noticePrintedId,
       inline: Memory.normalizeBool(setting("agentInline", false), false),
     });
     recordArm(arm);
     armProc.command = argv;
     armProc.running = true;
     armWatchdog.restart();
+  }
+
+  // The Quattro Dash's critical-band code click is a critical dispatch, so it
+  // rides the arm: the same gate chain the queue-time arm passes, and the same
+  // launch through startArm, which is what keeps the machine's single-flight
+  // lane the one guarantee there is never a second agent on top of the armed
+  // one. The refusal rides back to the dash so it can say so in words.
+  function dispatchCriticalCode(alert): var {
+    var budget = Memory.armBudgetCheck(ramReading, oomd, { psiFloor: Memory.PSI_STALL_FLOOR });
+    var decision = Memory.shouldStartArm({
+      band: alert.band,
+      guard: guardOn(),
+      armLive: Memory.armIsLive(arm),
+      budgetOk: budget.ok,
+      writer: isWriter,
+    });
+    if (decision.start) startArm(alert, true);
+    return { started: decision.start, why: decision.why };
   }
 
   function finishArm(outcome, survived, reasons): void {
@@ -942,7 +970,9 @@ BarWidget {
   }
 
   function showDetail(): void {
-    open();
+    unseenAlerts = [];
+    hideDash();
+    if (panelLoader.item) panelLoader.item.open();
   }
 
   // ---------------------------------------------------------------------------
@@ -1406,8 +1436,8 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // The bar. One badge, the most severe resource, or the plain white MM logo
-  // when nothing is over a line. Severity carries shape as well as hue.
+  // The bar. One emblem — the Quattro Dash telltale — plain white when nothing
+  // is over a line, tinted by the most severe resource.
   // ---------------------------------------------------------------------------
 
   function barEntries(): var {
@@ -1455,6 +1485,12 @@ BarWidget {
     tooltipText: Memory.barTooltip(badgeList)
     iconComponent: badgeComponent
 
+    // The captain's round-2 ruling: the user clicks the emblem to open the
+    // dashboard.
+    onPressed: function(button) {
+      if (button === Qt.LeftButton) root.togglePanel()
+    }
+
     Component {
       id: badgeComponent
 
@@ -1462,20 +1498,18 @@ BarWidget {
         id: badgeItem
         readonly property var entry: root.badgeEntry
         readonly property int band: entry === null || entry === undefined ? 0 : (entry.band === undefined ? 0 : entry.band)
-        readonly property real pct: entry === null || entry === undefined ? 0
-          : Math.min(1, Math.max(0, (entry.pct === undefined || entry.pct === null ? 0 : entry.pct) / 100))
-        readonly property string label: entry === null || entry === undefined ? Memory.barLogoText() : Memory.badgeLabel(entry.type)
-        // The badge itself is RingKit's decision, not this widget's: shape, the
-        // severity name, whether it pulses, whether it carries a halo, and which
-        // palette token paints it. Severity carries shape as well as hue here so
-        // amber-versus-red (the deuteranopia pair) survives without colour, and
-        // one kernel means a bar with both plugins draws them the same way.
+        readonly property bool latched: entry !== null && entry !== undefined && entry.latched === true
+        // Quattro Dash is the bar emblem (the approved round-2 spec): the
+        // check-engine telltale alone - monochrome = all systems go, yellow =
+        // moderate, red = severe. Severity, the token that tints it and the
+        // critical pulse stay RingKit's decision, so a bar carrying both
+        // plugins draws one severity language, and the artwork is the same ISO
+        // MIL path the dashboard renders through QuattroSymbol.
         readonly property var badge: RingKit.badgeParams(
           entry === null || entry === undefined ? "" : entry.type,
           band,
-          entry !== null && entry !== undefined && entry.latched === true)
-        readonly property string shape: badge.shape
-        readonly property color strokeColor: badge.colorToken === "plain" ? Color.foreground : RingKit.paletteToken(badge.colorToken)
+          latched)
+        readonly property color tint: badge.colorToken === "plain" ? Color.foreground : RingKit.paletteToken(badge.colorToken)
         readonly property bool pulse: badge.pulse
         property real glowPhase: 0
 
@@ -1486,91 +1520,13 @@ BarWidget {
           NumberAnimation { target: badgeItem; property: "glowPhase"; from: 1.0; to: 0.0; duration: 1000; easing.type: Easing.InOutSine }
         }
 
-        Canvas {
-          id: disc
-          anchors.fill: parent
-          onPaint: {
-            var ctx = getContext("2d")
-            ctx.reset()
-            var w = width
-            var h = height
-            var cx = w / 2
-            var cy = h / 2
-            var lw = Math.min(w, h) * 0.10
-            var r = Math.min(w, h) / 2 - lw / 2 - 0.5
-            var band = badgeItem.band
-
-            if (band === 0) {
-              // No alert: the MM logo. A full ring, filled, white.
-              ctx.beginPath()
-              ctx.arc(cx, cy, r, 0, Math.PI * 2)
-              ctx.lineWidth = lw
-              ctx.strokeStyle = badgeItem.strokeColor
-              ctx.globalAlpha = 1.0
-              ctx.stroke()
-              ctx.beginPath()
-              ctx.arc(cx, cy, r - lw * 0.9, 0, Math.PI * 2)
-              ctx.globalAlpha = 0.16
-              ctx.fillStyle = badgeItem.strokeColor
-              ctx.fill()
-              return
-            }
-
-            if (band === 3) {
-              // Critical adds the halo, breathing with the pulse.
-              ctx.beginPath()
-              ctx.arc(cx, cy, r + lw * 2.0, 0, Math.PI * 2)
-              ctx.fillStyle = badgeItem.strokeColor
-              ctx.globalAlpha = 0.10 + 0.24 * badgeItem.glowPhase
-              ctx.fill()
-            }
-
-            // Amber is a partial fill; red and critical are full. That is the
-            // shape half of the amber-versus-red distinction.
-            var fillTo = badgeItem.shape === "hollow" ? badgeItem.pct : 1.0
-            ctx.globalAlpha = 1.0
-            ctx.beginPath()
-            ctx.arc(cx, cy, r, 0, Math.PI * 2)
-            ctx.lineWidth = lw
-            ctx.strokeStyle = badgeItem.strokeColor
-            ctx.globalAlpha = 0.25
-            ctx.stroke()
-            ctx.globalAlpha = band === 3 ? 0.55 + 0.45 * badgeItem.glowPhase : 1.0
-            ctx.beginPath()
-            ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fillTo)
-            ctx.stroke()
-
-            // Red and critical carry a warning glyph, so the severity survives
-            // without colour and the glyph carries the type.
-            if (badgeItem.shape === "glyph" || badgeItem.shape === "pulse") {
-              ctx.globalAlpha = band === 3 ? 0.6 + 0.4 * badgeItem.glowPhase : 1.0
-              ctx.beginPath()
-              var g = r * 0.62
-              ctx.moveTo(cx, cy - g)
-              ctx.lineTo(cx + g * 0.86, cy + g * 0.7)
-              ctx.lineTo(cx - g * 0.86, cy + g * 0.7)
-              ctx.closePath()
-              ctx.lineWidth = lw * 0.7
-              ctx.stroke()
-            }
-          }
-          Connections {
-            target: badgeItem
-            function onBandChanged() { disc.requestPaint() }
-            function onPctChanged() { disc.requestPaint() }
-            function onStrokeColorChanged() { disc.requestPaint() }
-            function onGlowPhaseChanged() { disc.requestPaint() }
-            function onShapeChanged() { disc.requestPaint() }
-          }
-          Component.onCompleted: disc.requestPaint()
-        }
-
-        Text {
+        QuattroSymbol {
           anchors.centerIn: parent
-          text: badgeItem.label
-          color: badgeItem.strokeColor
-          font.pixelSize: Math.max(5, Math.round(parent.height * (badgeItem.band >= 2 ? 0.34 : 0.36)))
-          font.letterSpacing: 0.5
+          symbol: "mil"
+          width: 22
+          height: Math.round(22 * 53.03 / 79.55)
+          color: badgeItem.tint
+          opacity: badgeItem.pulse ? 0.6 + 0.4 * badgeItem.glowPhase : 1.0
         }
       }
     }
@@ -1583,42 +1539,96 @@ BarWidget {
   // is the shape the bar's panel routing looks for.
   // ---------------------------------------------------------------------------
 
-  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+  // The bar-facing panel shape. The badge click and the shell's panel routing
+  // open the Quattro Dash instrument cluster (the approved round-2 ruling: the
+  // user clicks the emblem to open the dashboard); the critical-click IPC
+  // (openDetail) still lands on the MemoryPanel detail window via showDetail.
+  // Opening either counts as having seen the alert state.
+  readonly property bool opened: dashLoader.item ? dashLoader.item.opened === true : false
+
+  // The bar keys the open-panel dot and popout switching on the bar-widget root
+  // (Bar.qml compares its active popout to the slot's item), while each popup
+  // card is owned by its own panel so every window keeps a dismissal path of
+  // its own. The widget carries the popout identity instead: a change in the
+  // panels' opened state registers and releases it with the bar's coordinator.
+  readonly property bool detailOpen: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property bool anySurfaceOpen: opened || detailOpen
+  onAnySurfaceOpenChanged: syncPopout()
+
+  function syncPopout(): void {
+    if (!bar || typeof bar.requestPopout !== "function") return;
+    if (anySurfaceOpen) bar.requestPopout(root);
+    else bar.releasePopout(root);
+  }
 
   function open(): void {
     unseenAlerts = [];
-    if (panelLoader.item) panelLoader.item.open();
+    hideDetail();
+    if (dashLoader.item) dashLoader.item.open();
   }
 
   function close(): void {
-    if (panelLoader.item) panelLoader.item.close();
+    hideDetail();
+    hideDash();
   }
 
   function togglePanel(): void {
-    if (panelLoader.item) panelLoader.item.toggle();
+    unseenAlerts = [];
+    hideDetail();
+    if (dashLoader.item) dashLoader.item.toggle();
   }
 
-  readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+  readonly property bool popoutSwitchClosing: dashLoader.item ? dashLoader.item.popoutSwitchClosing === true : false
 
   function closeForPopoutSwitch(): void {
-    if (panelLoader.item) panelLoader.item.closeForPopoutSwitch();
+    if (detailOpen === true && panelLoader.item) panelLoader.item.closeForPopoutSwitch();
+    else if (dashLoader.item) dashLoader.item.closeForPopoutSwitch();
+  }
+
+  function hideDetail(): void {
+    if (detailOpen === true && panelLoader.item) panelLoader.item.close();
+  }
+
+  function hideDash(): void {
+    if (opened === true && dashLoader.item) dashLoader.item.close();
   }
 
   function injectPanel(): void {
     var target = panelLoader.item;
-    if (!target) return;
-    if ("bar" in target) target.bar = root.bar;
-    if ("settings" in target) target.settings = root.settings;
-    if ("moduleName" in target) target.moduleName = root.moduleName;
-    if ("anchorItem" in target) target.anchorItem = badge;
-    if ("hostWidget" in target) target.hostWidget = root;
-    if ("monitor" in target) target.monitor = root;
+    if (target) {
+      if ("bar" in target) target.bar = root.bar;
+      if ("settings" in target) target.settings = root.settings;
+      if ("moduleName" in target) target.moduleName = root.moduleName;
+      if ("anchorItem" in target) target.anchorItem = badge;
+      if ("hostWidget" in target) target.hostWidget = root;
+      if ("monitor" in target) target.monitor = root;
+    }
+    var dash = dashLoader.item;
+    if (dash) {
+      if ("bar" in dash) dash.bar = root.bar;
+      if ("settings" in dash) dash.settings = root.settings;
+      if ("moduleName" in dash) dash.moduleName = root.moduleName;
+      if ("anchorItem" in dash) dash.anchorItem = badge;
+      if ("hostWidget" in dash) dash.hostWidget = root;
+      if ("monitor" in dash) dash.monitor = root;
+    }
   }
 
   Loader {
     id: panelLoader
     active: true
     source: Qt.resolvedUrl("MemoryPanel.qml")
+    visible: false
+    onLoaded: {
+      root.injectPanel();
+      Qt.callLater(root.injectPanel);
+    }
+  }
+
+  Loader {
+    id: dashLoader
+    active: true
+    source: Qt.resolvedUrl("QuattroDash.qml")
     visible: false
     onLoaded: {
       root.injectPanel();

@@ -775,6 +775,37 @@ function hdCandidates(text, targets) {
   return out;
 }
 
+// Quattro Dash's one dashboard reading: the ROOT row of the findmnt table, on
+// a real device, in percent FREE (the fuel gauge reads F = 100 percent free).
+// It is a reading, not a watch decision: root drive usage feeds the dashboard
+// whether or not the watch list covers it, and it never produces an alert.
+// A pseudo filesystem behind / (tmpfs and friends) is no root at all - the
+// same rule that keeps tmpfs off the bar.
+function rootDriveReading(text) {
+  for (const row of parseRows(text)) {
+    if (sanitizePath(row.TARGET) !== "/") continue;
+    if (!isRealDevice(row.SOURCE)) continue;
+    const usedBytes = asNumber(row.USED);
+    const availBytes = asNumber(row.AVAIL);
+    const pctUsed = asNumber(row["USE%"].replace("%", ""));
+    if (usedBytes === null || availBytes === null || pctUsed === null) continue;
+    const usedKb = Math.round(usedBytes / 1024);
+    const availKb = Math.round(availBytes / 1024);
+    return {
+      type: "root",
+      target: "/",
+      device: deviceOf(row.SOURCE),
+      fstype: sanitizeText(row.FSTYPE, 32),
+      pctUsed,
+      pctFree: Math.max(0, Math.min(100, 100 - pctUsed)),
+      usedKb,
+      availKb,
+      sizeKb: usedKb + availKb,
+    };
+  }
+  return null;
+}
+
 // Five btrfs subvolumes of one device are five detail rows and one alert event.
 // The device group carries the fullest mount on it, because that is the row the
 // alert is about.
@@ -2591,12 +2622,6 @@ function tooltipText(entry) {
   return lines.join("\n");
 }
 
-// The bar's no-alert state is the MM logo: a full ring, white, "MM" in the
-// middle. A badge appears only when a band is held.
-function barLogoText() {
-  return "MM";
-}
-
 function badgeLabel(type) {
   const key = sanitizeText(type, 16);
   if (key === "hd") return "HD";
@@ -2742,12 +2767,12 @@ function armIsLive(arm) {
 
 function shouldStartArm(opts) {
   const o = opts || {};
-  if (asNumber(o.band) !== 3) return { start: false, reason: "not the critical band" };
-  if (!normalizeBool(o.guard, true)) return { start: false, reason: "the standing guard is off" };
-  if (normalizeBool(o.armLive, false)) return { start: false, reason: "an arm is already live for this machine" };
-  if (!normalizeBool(o.budgetOk, true)) return { start: false, reason: "no headroom for the guard" };
-  if (!normalizeBool(o.writer, true)) return { start: false, reason: "another instance owns the arm" };
-  return { start: true, reason: "" };
+  if (asNumber(o.band) !== 3) return { start: false, reason: "not the critical band", why: "not-critical" };
+  if (!normalizeBool(o.guard, true)) return { start: false, reason: "the standing guard is off", why: "guard-off" };
+  if (normalizeBool(o.armLive, false)) return { start: false, reason: "an arm is already live for this machine", why: "arm-live" };
+  if (!normalizeBool(o.budgetOk, true)) return { start: false, reason: "no headroom for the guard", why: "no-headroom" };
+  if (!normalizeBool(o.writer, true)) return { start: false, reason: "another instance owns the arm", why: "not-writer" };
+  return { start: true, reason: "", why: "" };
 }
 
 function guardStateFor(opts) {
