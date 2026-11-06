@@ -452,6 +452,21 @@ function vramPollMs(band) {
   return VRAM_POLL_ESCALATED_MS
 }
 
+// The nvidia-smi start warning's latch for polls that ran: warn on the first
+// poll that came back without a usable reading, then hold that line until a
+// reading re-arms it. A binary that never exec'd reports no exit at all, so
+// it never reaches this call - that case is the widget's own never-started
+// guard, sharing the same latch. The lifecycle markers alone cannot decide
+// either case: exited lands before the last running-change, so by the time
+// the process looks idle a finished poll and a failed start are the same
+// shape there (measured on the rig, 2026-11-06: six healthy polls, six false
+// "could not start" lines). The poll's verdict - reading or honest absence -
+// is the signal that survives every signal-order.
+function vramStartWarn(warned, hasReading) {
+  if (hasReading) return { warn: false, warned: false }
+  return { warn: !warned, warned: true }
+}
+
 // The severity token a band draws with: "plain" is the bar's own foreground,
 // amber and red are the repo's shared hues (VRAM_TOKEN_HEX above).
 function vramTokenFor(band) {

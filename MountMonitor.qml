@@ -173,6 +173,17 @@ BarWidget {
       var resolved = Mounts.resolveVramBand(root.vramBand, reading.freeMib, reading.totalMib, root.vramFloorMib())
       root.vramBand = resolved.band
     }
+    // The start warning's verdict layer (Mounts.vramStartWarn): a poll that
+    // ran but came home without a reading says so once, and the next reading
+    // re-arms it. A binary that never exec'd reports no exit at all, so it
+    // never gets here - vramProc's running-change guard says that once
+    // instead, sharing the same latch. The lifecycle markers alone cannot
+    // decide either case: exited lands before the last running-change, so a
+    // finished poll and a failed start are the same shape there.
+    var startWarn = Mounts.vramStartWarn(vramProc.warnedNoStart, reading !== null)
+    vramProc.warnedNoStart = startWarn.warned
+    if (startWarn.warn)
+      console.warn("mount-monitor: nvidia-smi could not start, the VRAM telltale stays hidden")
   }
 
   // Keep the telltale in agreement with vramTelltale, mirroring syncMonitor:
@@ -591,9 +602,15 @@ BarWidget {
   }
 
   // The VRAM sample. One nvidia-smi --query-gpu call per poll (Mounts.nvidiaGpuArgs),
-  // first card only. nvidia-smi missing: a command that never started reports no
-  // exit, so the didStart marker is the only signal there is - the telltale just
-  // stays hidden, the way detection falls back without complaint.
+  // first card only. Two honest signals, because neither covers the other: a
+  // binary that never exec'd reports no exit at all, so the running-change
+  // guard says that once, latched; a poll that ran but came home without a
+  // reading is noteVram's verdict (Mounts.vramStartWarn), re-armed by the
+  // next reading. didStart is set once and never cleared - clearing it after
+  // a completed poll is what made every healthy poll read as a failed start
+  // (rig 2026-11-06: six healthy polls, six false "could not start" lines).
+  // The telltale just stays hidden, the way detection falls back without
+  // complaint.
   Process {
     id: vramProc
     command: Mounts.nvidiaGpuArgs()
@@ -606,10 +623,7 @@ BarWidget {
     stderr: StdioCollector {
       onStreamFinished: if (this.text.trim() !== "") console.warn("mount-monitor: nvidia-smi:", this.text.trim())
     }
-    onStarted: {
-      vramProc.didStart = true
-      vramProc.warnedNoStart = false
-    }
+    onStarted: vramProc.didStart = true
     onRunningChanged: {
       if (root.startFailed(vramProc) && !vramProc.warnedNoStart) {
         vramProc.warnedNoStart = true
@@ -617,7 +631,6 @@ BarWidget {
       }
     }
     onExited: function(exitCode, exitStatus) {
-      vramProc.didStart = false
       root.noteVram(vramProc.vramText, exitCode)
     }
   }

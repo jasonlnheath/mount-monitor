@@ -284,6 +284,40 @@ test("polling escalates only once the telltale is red", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The start warning: once per run of failed polls, re-armed by a reading
+// ---------------------------------------------------------------------------
+
+test("vramStartWarn says it once per run of failed polls, and a reading re-arms it", () => {
+  // A machine without nvidia-smi: the first poll that comes home without a
+  // reading says so; every later one is quiet, however many the keep-polling
+  // posture runs.
+  let state = Mounts.vramStartWarn(false, false);
+  assert.equal(state.warn, true, "the first failed poll warns");
+  assert.equal(state.warned, true, "and latches");
+  for (let i = 0; i < 6; i++) {
+    state = Mounts.vramStartWarn(state.warned, false);
+    assert.equal(state.warn, false, `failed poll ${i + 2} never repeats the line`);
+    assert.equal(state.warned, true);
+  }
+
+  // A healthy machine never warns, and the latch re-arms for free.
+  state = Mounts.vramStartWarn(state.warned, true);
+  assert.equal(state.warn, false);
+  assert.equal(state.warned, false, "a reading re-arms the latch");
+
+  // The failure after a reading is news again: the tool came back and went
+  // away, which is worth one line.
+  state = Mounts.vramStartWarn(state.warned, false);
+  assert.equal(state.warn, true);
+
+  // Junk inputs read as their obvious case: no latch is a first failure,
+  // any truthy latch holds, and a reading always re-arms.
+  assert.equal(Mounts.vramStartWarn(null, false).warn, true);
+  assert.equal(Mounts.vramStartWarn(1, false).warn, false);
+  assert.equal(Mounts.vramStartWarn(true, true).warned, false);
+});
+
+// ---------------------------------------------------------------------------
 // The nvidia-smi parser
 // ---------------------------------------------------------------------------
 
@@ -403,9 +437,24 @@ test("MountMonitor.qml builds its VRAM sampling and its band through the shared 
     [/Mounts\.vramHeadroomFrac\(/, "the fill must come from Mounts.vramHeadroomFrac"],
     [/Mounts\.vramTokenFor\(/, "the tint token must come from Mounts.vramTokenFor"],
     [/Mounts\.vramTokenHex\(/, "the token hex must come from Mounts.vramTokenHex"],
+    [/Mounts\.vramStartWarn\(/, "the start warning must be Mounts.vramStartWarn's decision"],
   ]) {
     assert.match(widgetQml, pattern, why);
   }
+});
+
+test("the start warning covers both failure shapes and healthy polls cannot trip it", () => {
+  // A poll that ran but brought no reading is the verdict layer's call.
+  assert.match(widgetQml, /Mounts\.vramStartWarn\(/, "the latch rule lives in mounts.js");
+  // A binary that never exec'd reports no exit at all, so that shape needs
+  // the never-started guard, said once and latched.
+  assert.match(widgetQml, /startFailed\(vramProc\) && !vramProc\.warnedNoStart/, "the never-started guard must be latched");
+  // The two poison lines that made this build read every healthy poll as a
+  // failed start (rig 2026-11-06: six healthy polls, six false warnings):
+  // re-arming the latch on started, and clearing didStart after a completed
+  // poll (exited lands before the last running-change).
+  assert.doesNotMatch(widgetQml, /onStarted:\s*\{[^}]*warnedNoStart/, "the latch must not re-arm on started: a failed exec can fire started");
+  assert.doesNotMatch(widgetQml, /vramProc\.didStart = false/, "a cleared didStart reads every finished poll as a failed start");
 });
 
 test("the telltale hides when there is no reading and when it is switched off", () => {
