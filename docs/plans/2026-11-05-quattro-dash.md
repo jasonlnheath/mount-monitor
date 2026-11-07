@@ -25,6 +25,16 @@ spares row is no longer drawn either: quattro.js keeps the SPARES record as a
 held-back note, nothing user-visible. Current behavior lives in
 `memory-monitor/README.md`, `quattro.js` and `QuattroDash.qml`.]
 
+[Superseded in part again by round 2, 2026-11-07
+(`docs/plans/2026-11-07-quattro-dash-round2.md`): the VRAM COOLANT reservoir
+lane became the centered ISO coolant light below the battery, the cluster row
+is three equal lanes, engine codes are DRIVE codes only (no RAM or VRAM codes;
+`codesFromReadings` takes the drive rows alone), the bar tooltip is the
+centered "Quattro Dash" title over name + color-dot rows, and a code click
+appends the dash's pre-computed diagnosis as a fenced JSON block. As before,
+current behavior lives in `memory-monitor/README.md`, `quattro.js` and
+`QuattroDash.qml`.]
+
 ## Ripples measured before writing anything
 
 1. **Panel mounting** — `MemoryPanel.qml` is a `qs.Ui.Panel` mounted by
