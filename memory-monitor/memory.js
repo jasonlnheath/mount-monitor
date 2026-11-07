@@ -2674,17 +2674,23 @@ function barTooltip(entries) {
   }
   if (rows.length === 0) return "Memory Monitor - nothing watched";
   // The captain's live-look ruling: the name sits in a left column and the
-  // status in a right column. The bar's tooltip renders plain text in the
-  // shell's monospace font, so the name field is padded to one shared column
-  // (two spaces past the longest name) and every status starts on it.
-  let longest = 0;
+  // status in a right column. The bar's tooltip is one centered Text sized to
+  // its widest line: each line is centered inside that width, so a row
+  // shorter than its neighbours drifts off the columns. Every row therefore
+  // spans the same total width - the name field padded to one shared column
+  // (two spaces past the longest name) and the status right-padded to the
+  // longest status.
+  let longestName = 0;
+  let longestStatus = 0;
   for (const row of rows) {
-    if (row.name.length > longest) longest = row.name.length;
+    if (row.name.length > longestName) longestName = row.name.length;
+    if (row.status.length > longestStatus) longestStatus = row.status.length;
   }
-  const pad = longest + 2;
+  const pad = longestName + 2;
+  const width = pad + longestStatus;
   const lines = ["Memory Monitor"];
   for (const row of rows) {
-    lines.push(row.name + " ".repeat(pad - row.name.length) + row.status);
+    lines.push((row.name + " ".repeat(pad - row.name.length) + row.status).padEnd(width));
   }
   return lines.join("\n");
 }

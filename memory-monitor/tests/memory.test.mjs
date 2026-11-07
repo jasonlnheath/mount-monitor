@@ -246,8 +246,9 @@ test("a held band says it is held, in the detail window and on the bar, for ever
 
 test("the bar tooltip is two columns: the name on the left, the status on the right", () => {
   // The captain's live-look ruling: the name sits in a left column, the status
-  // in a right column. The bar's tooltip font is the shell's monospace, so the
-  // name field is padded to one shared column and every status starts on it.
+  // in a right column. The bar's tooltip is one centered Text sized to its
+  // widest line, so every row spans the same total width - a shorter row
+  // would be centered and drift off the shared columns.
   const tip = Memory.barTooltip([
     { type: "ram", band: 0, pct: 42 },
     { type: "vram", band: 1, pct: 63 },
@@ -255,8 +256,8 @@ test("the bar tooltip is two columns: the name on the left, the status on the ri
   ]);
   assert.deepEqual(tip.split("\n"), [
     "Memory Monitor",
-    "RAM   42% (none)",
-    "VRAM  63% (amber)",
+    "RAM   42% (none)     ",
+    "VRAM  63% (amber)    ",
     "HD    97% (red, held)",
   ]);
   // Every status starts on the same column: two spaces past the longest name.
@@ -264,6 +265,12 @@ test("the bar tooltip is two columns: the name on the left, the status on the ri
     assert.equal(line.charAt(5), " ", "the name field is the shared left column");
     assert.equal(/\S/.test(line.slice(0, 5)), true, "the name occupies the left column");
     assert.equal(/\S/.test(line.slice(6)), true, "the status occupies the right column");
+  }
+  // The shell centers each line inside the widest one, so equal total widths
+  // are what keep the two columns aligned.
+  const widths = tip.split("\n").slice(1).map((line) => line.length);
+  for (const w of widths) {
+    assert.equal(w, widths[0], "every row spans the same total width");
   }
 });
 
@@ -274,7 +281,7 @@ test("a drive that is away keeps its row, with the honest status in the right co
   ]);
   assert.deepEqual(tip.split("\n"), [
     "Memory Monitor",
-    "RAM  42% (none)",
+    "RAM  42% (none)     ",
     "HD   not mounted now",
   ]);
 });

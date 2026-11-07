@@ -106,9 +106,9 @@ Memory Monitor's suite is `bash memory-monitor/tests/run.sh`: the same shape of
 tests over `memory-monitor/memory.js` (parsers against fixtures, character-pinned
 toast copy per kind, thresholds and hysteresis, the guard budget gate and arm
 lifecycle, the baseline log, onboarding, the multi-instance gate, the install
-layout, the delegation guards) and over `memory-monitor/quattro.js` (the Quattro
-Dash LED bands, PSI/fuel zones, code taxonomy and the no-em-dash copy rule)
-plus the RingKit conformance check that runs
+layout, the delegation guards) and over `memory-monitor/quattro.js` (the
+QuattroDash LED bands, PSI/fuel zones, code taxonomy and the no-em-dash copy
+rule) plus the RingKit conformance check that runs
 `ringkit.js`, `mounts.js bandFor` and `memory.js` against one set of band cases.
 
 ## Contracts worth not breaking
