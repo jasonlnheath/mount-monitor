@@ -17,14 +17,26 @@
 // terse and casual, five words ideal. tests/quattro.test.mjs scans every
 // output this module can produce for banned characters.
 //
-// The codes area renders what the monitor actually sees: each resource the
-// plugin watches that sits over its amber or red ceiling becomes a code row,
-// the way a real check-engine light shows active faults and clears when they
-// clear. A code is P (process) for System RAM and C (component) for VRAM and
-// drives, plus four stable digits, so the same condition wears the same code
-// while it is present. Both Fix lines are the locked design copies: moderate
-// codes say the click sends the pattern to the agent, severe codes say the
-// agent has the pattern and is processing now.
+// The codes area renders what the monitor actually sees: each watched DRIVE
+// sitting over its amber or red ceiling becomes a code row, the way a real
+// check-engine light shows active faults and clears when they clear. A code is
+// C (component) plus four stable digits, so the same condition wears the same
+// code while it is present. Round 2 doctrine (the captain's 2026-11-07
+// live-look ruling): System RAM and VRAM high are NEVER engine codes. RAM
+// monitoring is PRESSURE + SWAP RESERVE, never amount used, so RAM high is the
+// PSI gauge and the battery and nothing else; VRAM high lights the coolant
+// light only. Both Fix lines are the locked design copies: moderate codes say
+// the click sends the pattern to the agent, severe codes say the agent has the
+// pattern and is processing now. The click also carries the dash's own
+// pre-computed diagnosis (diagnosisJson) as a fenced JSON block in the agent
+// prompt, so Hermes explains from the dashboard's numbers instead of
+// re-diagnosing from scratch.
+//
+// Round 2 also replaced the VRAM COOLANT tank card with the STANDARD ISO
+// coolant warning light: the thermometer-in-liquid artwork this file already
+// owns (SYMBOLS.temp), centered below the battery, tinted green / amber / red
+// by coolantBand's own thresholds. The tank painter's coolantFill and COOLANT
+// geometry left with the card; the band and the tip stayed.
 //
 // The ISO 2575 / ISO 7000 telltale artwork in SYMBOLS is extracted verbatim
 // from the approved mockup (Public domain / CC0 on Wikimedia Commons, licenses
@@ -76,9 +88,9 @@ var LED_YELLOW_AT = 10;
 var PSI_AMBER_AT = 60;
 var PSI_RED_AT = 80;
 var FUEL_RED_BELOW = 10;
-// The coolant card's approach zone, a fixed MiB margin above the floor: amber
+// The coolant light's approach zone, a fixed MiB margin above the floor: amber
 // when free VRAM falls under the floor plus this much. The captain's
-// 2026-11-06 defaults steer set the card's lines at amber=1500 MiB free,
+// 2026-11-06 defaults steer set the light's lines at amber=1500 MiB free,
 // red=500 MiB free, so the margin is 1000 over the 500 default floor.
 var VRAM_AMBER_MARGIN_MIB = 1000;
 // The unset-floor fallback, mirroring memory.js VRAM_FLOOR_DEFAULT_MIB. The
@@ -159,17 +171,6 @@ var DIAL = {
   hubDotR: 3.2,
 };
 
-// --- coolant tank geometry (the PR-18 reservoir painter's numbers) -----------
-
-var COOLANT = {
-  strokeFract: 0.09,   // stroke width as a fraction of the smaller side
-  insetFract: 1.1,     // the outline's margin, in stroke widths
-  radiusFract: 0.14,   // corner radius as a fraction of the inner box
-  stripFract: 0.06,    // the thinnest liquid strip the painter draws
-  waveFract: 0.045,    // the surface wave amplitude, and the flat-strip threshold
-  dimAlpha: 0.45,      // the outline's alpha: the level reads before the tank
-};
-
 function polar(cx, cy, r, deg) {
   const a = ((deg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
@@ -240,36 +241,22 @@ function fuelNeedleFrac(pctFree) {
   return Math.max(0, Math.min(1, v / 100));
 }
 
-// --- the VRAM COOLANT instrument (the captain's live-look item 3) -----------
+// --- the VRAM COOLANT light (round 2) ---------------------------------------
 //
-// The dash's fourth lane, carrying the VRAM telltale the captain expected to
-// find here: a coolant reservoir whose filled level is free VRAM above the
-// floor. The sampling is this plugin's own (memory.js vramReading, the
-// nvidia-smi numbers), the floor is this plugin's own vramFloorMib setting
-// (memory.js vramFloorMib, 500 MiB unset). The fill below is a hand mirror of
-// Mount Monitor's mounts.js vramHeadroomFrac, pinned case-for-case by the
-// conformance test so the tank level and the bar telltale cannot disagree
-// about the same numbers. The band below is the captain's own: red below the
-// floor, amber a fixed 1000 MiB above it, so the unset lines are 500 and
-// 1500 MiB free (the captain's 2026-11-06 defaults steer).
-
-function coolantFill(freeMib, totalMib, floorMib) {
-  const free = asNumber(freeMib);
-  const total = asNumber(totalMib);
-  if (free === null || total === null || total <= 0) return 0;
-  const floor = asNumber(floorMib);
-  const base = floor === null || floor < 0 ? 0 : floor;
-  const denom = total - base;
-  if (denom <= 0) return 0;
-  const frac = (free - base) / denom;
-  if (frac < 0) return 0;
-  if (frac > 1) return 1;
-  return frac;
-}
+// The tank card is gone; the light is the STANDARD ISO coolant warning glyph,
+// the thermometer-in-liquid artwork SYMBOLS.temp already owns. What stays is
+// the band the light tints by, over this plugin's own VRAM reading (memory.js
+// vramReading, the nvidia-smi numbers), floored by this plugin's own
+// vramFloorMib setting (memory.js vramFloorMib, 500 MiB unset). The band is
+// the captain's own steer: red below the floor, amber a fixed 1000 MiB above
+// it, so the unset lines are 500 and 1500 MiB free. High VRAM lights this
+// light and throws no engine code.
 
 // The band on its own, forgetting history - a gauge has no crossing to guard:
 // 2 below the floor, 1 inside the approach zone, 0 above it. No reading is
 // null, the dash's rule that an unavailable reading never draws as healthy.
+// The thresholds are the captain's own steer: red at the floor (500 MiB free
+// unset), amber a fixed 1000 MiB above it (1500 free unset), green above that.
 function coolantBand(freeMib, totalMib, floorMib) {
   const free = asNumber(freeMib);
   const total = asNumber(totalMib);
@@ -281,21 +268,30 @@ function coolantBand(freeMib, totalMib, floorMib) {
   return 0;
 }
 
+// GiB with one decimal, the rounding the fuel gauge's mib() uses at the top
+// of its range. The coolant light's hover says used and reserved in these
+// units (round 2: the hover shows VRAM used / reserved).
+function gibFromMib(mibValue) {
+  const v = asNumber(mibValue);
+  if (v === null) return "unknown";
+  return (v / 1024).toFixed(1) + " GiB";
+}
+
 function coolantTip(reading, floorMib) {
   const r = reading || null;
   const floor = asNumber(floorMib);
   const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
+  const used = r === null ? null : asNumber(r.usedMib);
   const free = r === null ? null : asNumber(r.freeMib);
-  const total = r === null ? null : asNumber(r.totalMib);
-  const now = free === null || total === null
+  const now = used === null || free === null
     ? "no VRAM reading yet."
-    : String(Math.round(free)) + " MiB free of " + String(Math.round(total)) + " MiB. Floor " + String(Math.round(floorNow)) + " MiB.";
+    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved.";
   return {
     header: INSTRUMENTS.coolant,
     rows: [
       { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Coolant is your free VRAM above the floor. It is the headroom left for big model loads on the GPU." },
-      { label: "Why:", text: "When the tank runs dry the GPU has no room for the next model load." },
+      { label: "What:", text: "Coolant is the GPU memory left over after what the GPU is using. Reserved means free: the headroom for the next big model load." },
+      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
       { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
     ],
   };
@@ -373,14 +369,16 @@ function fuelTip(root) {
 }
 
 // --- codes: the monitor's own live state, as the approved taxonomy -----------
+//
+// Round 2 doctrine: DRIVE codes only. The hash input stays "hd|<key>", so a
+// drive keeps the code it wore before RAM and VRAM codes were retired.
 
 function codeFor(type, key) {
-  const letter = type === "ram" ? "P" : "C";
   const digits = ("0000" + (fnv1a(type + "|" + key) % 10000)).slice(-4);
-  return letter + digits;
+  return "C" + digits;
 }
 
-function codesFromReadings(ram, vram, devices) {
+function codesFromReadings(devices) {
   const out = [];
   function add(entry) {
     if (!entry) return;
@@ -421,8 +419,6 @@ function codesFromReadings(ram, vram, devices) {
       },
     });
   }
-  add(ram);
-  add(vram);
   if (devices) {
     for (let i = 0; i < devices.length; i += 1) add(devices[i]);
   }
@@ -468,6 +464,73 @@ function codeTip(code) {
       { label: "Fix:", text: c.fix },
     ],
   };
+}
+
+// --- the pre-computed diagnosis (round 2, the engine-code click) -------------
+//
+// The dash's own read on a code, sent with the click as a fenced JSON block
+// in the agent prompt, so Hermes explains from the dashboard's numbers
+// instead of re-diagnosing from scratch. The schema is the captain's: code,
+// severity, cause, top consumers, recommendation.
+//
+// Trust law, because targets and device names are written by whoever
+// formatted the filesystem: every device-controlled string passes through
+// sanitizePath, the fence is emitted on ONE line (JSON.stringify never emits
+// a raw newline, and a fence closes only at the start of a line, so a fence
+// sequence inside a string can never close the block), and the final scrub
+// replaces backticks and angle brackets wherever they survived. The header
+// sentence and the fence itself live in memory.js promptWithDiagnosis.
+
+function diagnosisSeverity(entry) {
+  return (entry || {}).sev === "r" ? "severe" : "moderate";
+}
+
+// The recommendation is the band's fixed advice, in the dash's own words. A
+// read-only mount has nothing to prune or compress there: only moving files
+// off is possible, the same honest wording the prompts and the skills carry.
+function diagnosisRecommendation(entry) {
+  const e = entry || {};
+  if (e.alert && e.alert.ro === true) {
+    return "read-only. nothing can be pruned or compressed here. move files off.";
+  }
+  return e.sev === "r"
+    ? "act now. move files off or prune before the drive fills."
+    : "plan a cleanup. prune, compress, or move files off.";
+}
+
+// Top consumers at the granularity the dash actually has: the device's own
+// mount-target rows, worst reading first, three at most. These are targets
+// on ONE device, not processes; the JSON says so by carrying only what the
+// monitor measured.
+function diagnosisConsumers(entry, rows) {
+  const list = rows === null || rows === undefined ? [] : rows;
+  const key = (entry === null || entry === undefined) || entry.alert === undefined || entry.alert === null ? "" : String(entry.alert.key);
+  const out = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const row = list[i];
+    if (!row || String(row.key) !== key) continue;
+    const pct = asNumber(row.pct);
+    out.push({
+      target: sanitizePath(row.target),
+      pct: pct === null ? null : Math.round(pct),
+      usedKb: asNumber(row.usedKb),
+      availKb: asNumber(row.availKb),
+    });
+  }
+  out.sort(function (a, b) { return ((b.pct === null ? 0 : b.pct) - (a.pct === null ? 0 : a.pct)); });
+  return out.slice(0, 3);
+}
+
+function diagnosisJson(entry, rows) {
+  const e = entry || {};
+  const doc = {
+    code: e.code,
+    severity: diagnosisSeverity(e),
+    cause: e.issue,
+    topConsumers: diagnosisConsumers(e, rows),
+    recommendation: diagnosisRecommendation(e),
+  };
+  return JSON.stringify(doc).replace(/[`<>]/g, " ");
 }
 
 // --- dispatch toast (the approved copy, verbatim) ----------------------------

@@ -31,6 +31,7 @@ function loadScript(file) {
 }
 
 export const Memory = loadScript("memory-monitor/memory.js");
+export const Quattro = loadScript("memory-monitor/quattro.js");
 export const RingKit = loadScript("ringkit.js");
 export const Mounts = loadScript("mounts.js");
 

@@ -410,8 +410,8 @@ BarWidget {
   // the release direction. On the sample that releases a band, evaluateBands()
   // has already written the released band into the bands memory while the rows
   // still carry the stale one — an early-returning applyBand never touches the
-  // entry when nothing fires — so the badge and tooltip would print "HD 30%
-  // (red)" for one sample after the red band has gone. Rebind from the band
+  // entry when nothing fires — so the badge tooltip would keep the red dot
+  // for one sample after the red band has gone. Rebind from the band
   // memory evaluateBands just wrote. The copy-and-reassign is not a style
   // choice: the badge and tooltip bindings evaluate on the property assignment
   // itself and never see a later in-place fix (see buildReadings).
@@ -657,7 +657,11 @@ BarWidget {
   // fromDash marks the QuattroDash's critical-band code click: an arm with no
   // claim notice behind it, so it captures no printed id and a later death
   // retracts by a fresh toast instead of by a notice it never showed.
-  function startArm(alert, fromDash): void {
+  // diagnosisJsonText is the dash's pre-computed diagnosis (round 2, item 8):
+  // a critical code's click arms with the same fenced block a moderate
+  // click's prompt carries. Queue-time arms pass nothing and keep the plain
+  // prompt.
+  function startArm(alert, fromDash, diagnosisJsonText): void {
     if (!isWriter) return;
     var eventKey = Memory.armEventKey(alert);
     if (Memory.armIsLive(arm) && liveArmKey === eventKey) return;
@@ -684,6 +688,9 @@ BarWidget {
       return;
     }
     var prompt = Memory.agentPrompt(alert, readingFor(alert.type, alert), oomd, baselinePath);
+    if (diagnosisJsonText !== undefined && diagnosisJsonText !== null && diagnosisJsonText !== "") {
+      prompt = Memory.promptWithDiagnosis(prompt, diagnosisJsonText);
+    }
     var argv = Memory.normalizeBool(setting("agentInline", false), false)
       ? Memory.agentArgvWithInline(prompt, agentCommandArgv())
       : Memory.agentArgv(prompt, agentCommandArgv());
@@ -712,8 +719,9 @@ BarWidget {
   // rides the arm: the same gate chain the queue-time arm passes, and the same
   // launch through startArm, which is what keeps the machine's single-flight
   // lane the one guarantee there is never a second agent on top of the armed
-  // one. The refusal rides back to the dash so it can say so in words.
-  function dispatchCriticalCode(alert): var {
+  // one. The refusal rides back to the dash so it can say so in words. The
+  // dash's diagnosis rides with it when the click brought one.
+  function dispatchCriticalCode(alert, diagnosisJsonText): var {
     var budget = Memory.armBudgetCheck(ramReading, oomd, { psiFloor: Memory.PSI_STALL_FLOOR });
     var decision = Memory.shouldStartArm({
       band: alert.band,
@@ -722,7 +730,7 @@ BarWidget {
       budgetOk: budget.ok,
       writer: isWriter,
     });
-    if (decision.start) startArm(alert, true);
+    if (decision.start) startArm(alert, true, diagnosisJsonText);
     return { started: decision.start, why: decision.why };
   }
 
@@ -1491,7 +1499,11 @@ BarWidget {
     id: badge
     bar: root.bar
     opticalSize: 22
-    tooltipText: Memory.barTooltip(badgeList)
+    // The popup's own hover decode lives under it once it is open (round 2,
+    // item 6): while a surface of this plugin is open the badge tooltip
+    // hides, the way Mount Monitor's ring tooltips hide while any popout is
+    // open.
+    tooltipText: root.anySurfaceOpen ? "" : Memory.barTooltip(badgeList)
     iconComponent: badgeComponent
 
     // The captain's round-2 ruling: the user clicks the emblem to open the

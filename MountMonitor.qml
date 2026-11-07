@@ -208,6 +208,18 @@ BarWidget {
   readonly property bool opened: vramPanelLoader.item ? vramPanelLoader.item.opened === true : false
   onOpenedChanged: syncPopout()
 
+  // While any bar popout is open, the bar's plugin api says so: the owner
+  // object when this widget owns it, an opaque {foreign: true} marker when a
+  // sibling plugin does (the QuattroDash - the ownership boundary is
+  // deliberate, so "the dash is open" reaches this plugin only as "a popout
+  // is open somewhere"), null when none is. Round 2, the captain's item 6:
+  // the per-ring hover pop-ups hide while a popup is open, because a bar
+  // tooltip drawn over the open popup cuts off against it.
+  readonly property bool popoutOpen: bar !== null
+    && bar !== undefined
+    && bar.activePopout !== null
+    && bar.activePopout !== undefined
+
   function syncPopout(): void {
     if (!bar || typeof bar.requestPopout !== "function") return
     if (opened) bar.requestPopout(root)
@@ -918,7 +930,7 @@ BarWidget {
         readonly property bool critical: effPct >= 98
         bar: root.bar
         opticalSize: 22
-        tooltipText: Mounts.tooltip(modelData)
+        tooltipText: root.popoutOpen ? "" : Mounts.tooltip(modelData)
         iconComponent: ringComponent
 
         Component {
@@ -1019,9 +1031,10 @@ BarWidget {
       visible: show
       bar: root.bar
       opticalSize: 22
-      tooltipText: root.vramReading !== null
-        ? Mounts.vramTooltip(root.vramReading, root.vramFloorMib())
-        : ""
+      tooltipText: root.popoutOpen ? ""
+        : (root.vramReading !== null
+          ? Mounts.vramTooltip(root.vramReading, root.vramFloorMib())
+          : "")
       iconComponent: vramComponent
 
       onPressed: function(button) {

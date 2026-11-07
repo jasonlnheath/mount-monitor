@@ -23,8 +23,12 @@ already alerting on — so one drive produces one toast, not two.
   red with a breathing pulse), chosen by a deterministic rule (severity, then
   the smallest headroom to its own critical line, then a fixed type order). A
   resource that is not on the machine is never named.
-- **Click opens the QuattroDash** instrument cluster. The tooltip always
-  carries the numbers in text.
+- **Click opens the QuattroDash** instrument cluster. The tooltip is the
+  popup's compact form: a centered "Quattro Dash" title, the RAM / VRAM /
+  Drive names in one aligned left column, and a status column that is a
+  color dot only (white nothing over the line, orange amber, red red and
+  critical). While a popup is open, bar hover tooltips hide instead of
+  cutting off against it.
 
 ## Thresholds: you set the ceilings
 
@@ -132,34 +136,40 @@ monitoring continues and a critical still notifies you, with the guard-off copy.
 
 ## QuattroDash, the instrument cluster
 
-Clicking the bar emblem opens the dashboard: two round meters (RAM PRESSURE
-reading the kernel's Pressure Stall Information from `/proc/pressure/memory`,
-some avg10, amber from 60, red at 80; ROOT DRIVE as a fuel gauge where F is
-100 percent free and the red zone sits below 10 percent free), a SWAP
-RESERVE battery telltale with a ten-segment LED bar (green at 25 percent or
-more, yellow from 10, red below 10, pulsing when red, no swap configured reads
-as the empty state), and the VRAM COOLANT reservoir: free VRAM above the
-`vramFloorMib` floor (500 MiB unset, the captain's 2026-11-06 defaults, sampled
-by this plugin's own nvidia-smi read), green above the approach zone (1000 MiB
-of headroom above the floor, so amber at 1500 MiB free when unset), amber
-inside it, red below the floor, a dim empty tank when no reading exists. Under
-them, the codes area: ONE column under one check-engine head, red and amber
-codes together, always most critical at the top, rows stretched across the
-full card so each code carries its reading and its status. A code is the
-monitor's own live fault - a watched resource sitting
-over your amber or red ceiling - wearing an OBD-style name (P for System RAM,
-C for VRAM and drives, plus four stable digits) and a hover decode (Issue /
-Status / Fix). An empty column reads "all clear." under the unlit head; no
-severity ever gets an empty section of its own. Clicking a code sends the
-same fixed prompt the toasts send to your default agent (inline when
-`agentInline` is set) and lights the green toast, red codes with the
-"processing now" wording added. Only a code at the critical band goes through
-the guard's arm gate first - the same single-flight, budget-gated check that
-owns every critical-band agent launch. Armed, the agent starts; refused,
-nothing starts and the red "not sent." toast says why: the guard is off, an
-agent is already on it, no memory headroom, or another screen owns the guard.
-Hovering any instrument gives the plain-words teaching decode, PSI included:
-it is a real kernel metric, not one we invented.
+Clicking the bar emblem opens the dashboard: two round meters drawn at
+exactly the same size (RAM PRESSURE reading the kernel's Pressure Stall
+Information from `/proc/pressure/memory`, some avg10, amber from 60, red at
+80; ROOT DRIVE as a fuel gauge where F is 100 percent free and the red zone
+sits below 10 percent free), a SWAP RESERVE battery telltale with a
+ten-segment LED bar (green at 25 percent or more, yellow from 10, red below
+10, pulsing when red, no swap configured reads as the empty state), and BELOW
+the battery, centered, the STANDARD ISO coolant warning light: the
+thermometer-in-liquid telltale, tinted by the free-VRAM thresholds (floor
+500 MiB unset, the captain's defaults, sampled by this plugin's own nvidia-smi
+read; red below the floor, amber the 1000 MiB approach zone above it, so amber
+at 1500 MiB free when unset, green above that, unlit when no reading exists).
+Hovering the light shows VRAM used / reserved in GiB. Under the cluster, the
+codes area: ONE column under one check-engine head, DRIVE codes only, always
+most critical at the top, rows stretched across the full card so each code
+carries its reading and its status. The doctrine is round 2's: RAM monitoring
+is PRESSURE + SWAP RESERVE, never amount used, so a high System RAM reading
+is the pressure gauge and the reserve battery and NO code; VRAM high lights
+the coolant light only. A code is a watched DRIVE sitting over your amber or
+red ceiling, wearing an OBD-style name (C plus four stable digits) and a
+hover decode (Issue / Status / Fix). An empty column reads "all clear." under
+the unlit head; no severity ever gets an empty section of its own. Clicking a
+code sends the same fixed prompt the toasts send to your default agent (inline
+when `agentInline` is set) with the dashboard's own pre-computed diagnosis
+appended as a fenced JSON block (code, severity, cause, top consumers,
+recommendation), so the agent explains from the dashboard's numbers, and
+lights the green toast, red codes with the "processing now" wording added.
+Only a code at the critical band goes through the guard's arm gate first - the
+same single-flight, budget-gated check that owns every critical-band agent
+launch; its prompt carries the diagnosis too. Armed, the agent starts;
+refused, nothing starts and the red "not sent." toast says why: the guard is
+off, an agent is already on it, no memory headroom, or another screen owns
+the guard. Hovering any instrument gives the plain-words teaching decode, PSI
+included: it is a real kernel metric, not one we invented.
 
 ## The detail window
 
@@ -225,7 +235,7 @@ On the widget's entry in `shell.json`:
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
-| `vramFloorMib` | `500` | The QuattroDash coolant card's floor, in MiB. The fill is free VRAM above it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. |
+| `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
 Thresholds and the guard answer are not `shell.json` settings — they live in

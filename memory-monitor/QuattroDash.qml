@@ -7,26 +7,28 @@ import "memory.js" as Memory
 import "quattro.js" as Quattro
 
 // QuattroDash — Memory Monitor's instrument-cluster panel, the board-approved
-// design (rounds 1-7, verdict "ship it"). A PopupCard at the shell-standard
-// width, mounted from MemoryMonitor.qml through its own Loader the way
-// MemoryPanel.qml is. Two round meters (RAM PRESSURE and ROOT DRIVE), the
-// SWAP RESERVE battery telltale with its LED bar, plus the VRAM COOLANT
-// reservoir the captain expected here: free VRAM above the floor, sampled by
-// this plugin's own nvidia-smi read and floored by its own vramFloorMib
-// setting. Then the codes area: ONE column under one check-engine head, red
-// and amber codes together, always most critical at the top, rows stretched
-// wide so each code carries its full description. The reserved spares row the
-// old footer showed is gone: future additions are not visible on the dash.
-// Hover any instrument or code for the two-column teaching decode; click a
-// moderate code to send the issue to the default agent, and a critical-band
-// one to put it through the arm's gate.
+// design (rounds 1-7, verdict "ship it"), reworked by the captain's round-2
+// live-look feedback (2026-11-07). A PopupCard at the shell-standard width,
+// mounted from MemoryMonitor.qml through its own Loader the way MemoryPanel
+// is. Two round meters (RAM PRESSURE and ROOT DRIVE) drawn at exactly the
+// same size, the SWAP RESERVE battery telltale with its LED bar, and BELOW
+// the battery the STANDARD ISO coolant warning light: the thermometer-in-
+// liquid telltale quattro.js owns, centered, tinted green / amber / red by
+// the free-VRAM thresholds (floor 500 MiB unset, amber 1000 MiB above it);
+// hovering it shows VRAM used / reserved. Then the codes area: ONE column
+// under one check-engine head, DRIVE codes only - RAM high is the pressure
+// gauge and the reserve battery, never a code, and VRAM high lights the
+// coolant light only. Clicking a code sends the plugin's agent prompt with
+// the dash's own pre-computed diagnosis appended as a fenced JSON block, so
+// Hermes explains from the dashboard's numbers.
 //
-// This file draws. Every decision lives in quattro.js (bands, needle geometry,
-// zones, LED counts, code taxonomy, all copy) and memory.js (the swap totals,
-// the agent prompt, the agent argv, the arm gate), so the fixed sentences the
-// design approved exist in exactly one testable place. The popup never renders
-// an unavailable reading as a number: a missing PSI or root reading hides its
-// needle and the Now line says so.
+// This file draws. Every decision lives in quattro.js (bands, needle
+// geometry, zones, LED counts, code taxonomy, the diagnosis JSON, all copy)
+// and memory.js (the swap totals, the agent prompt, the agent argv, the arm
+// gate), so the fixed sentences the design approved exist in exactly one
+// testable place. The popup never renders an unavailable reading as a
+// number: a missing PSI or root reading hides its needle and the Now line
+// says so.
 Panel {
   id: root
 
@@ -58,11 +60,11 @@ Panel {
   readonly property var psi: mon("psi", null)
   readonly property var swaps: mon("swaps", null)
   readonly property var rootDrive: mon("rootReading", null)
-  readonly property var ram: mon("ramReading", null)
   readonly property var vram: mon("vramReading", null)
   readonly property var devices: mon("hdDevices", [])
+  readonly property var hdRows: mon("hdRows", [])
 
-  // The coolant card's floor, the PR-18 way: the widget's own vramFloorMib
+  // The coolant light's floor: the widget's own vramFloorMib
   // setting through memory.js, 500 MiB unset (the captain's 2026-11-06
   // defaults steer, amber then at 1500 via the 1000 MiB approach margin; the
   // bar telltale keeps its own 3400).
@@ -75,15 +77,10 @@ Panel {
   readonly property real psiSome: psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : -1
   readonly property var psiNeedle: Quattro.psiNeedleFrac(psiSome < 0 ? null : psiSome)
   readonly property var fuelNeedle: Quattro.fuelNeedleFrac(rootDrive === null ? null : rootDrive.pctFree)
-  readonly property var codes: Quattro.codesFromReadings(ram, vram, devices)
 
-  // The coolant level and its band, quattro.js's mirrors of the PR-18
-  // decisions, over this plugin's own VRAM reading. A missing reading is a
-  // dim empty tank, never a confident zero.
-  readonly property var coolantLevel: Quattro.coolantFill(
-    vram === null ? null : vram.vramFreeMib,
-    vram === null ? null : vram.vramTotalMib,
-    floorMib())
+  // The coolant light's band (round 2: the tank card became the ISO light),
+  // quattro.js's coolantBand over this plugin's own VRAM reading. A missing
+  // reading is the unlit tint, never a confident green.
   readonly property var coolantZone: Quattro.coolantBand(
     vram === null ? null : vram.vramFreeMib,
     vram === null ? null : vram.vramTotalMib,
@@ -92,9 +89,10 @@ Panel {
     : (coolantZone === 1 ? Quattro.PAL.amber
     : (coolantZone === 0 ? Quattro.PAL.green : Quattro.PAL.faceSym))
 
-  // The one check-engine head tints by the most severe code showing.
-  readonly property color codesHeadTint: Quattro.codesHeadToken(codes) === "red" ? Quattro.PAL.redHot
-    : (Quattro.codesHeadToken(codes) === "amber" ? Quattro.PAL.amber : Quattro.PAL.faceSym)
+  // Round 2 doctrine: DRIVE codes only. RAM high is the pressure gauge and
+  // the reserve battery, never an engine code; VRAM high lights the coolant
+  // light only.
+  readonly property var codes: Quattro.codesFromReadings(devices)
 
   // Codes stay dimmed once their issue was dispatched (mockup .code.sent).
   property var sentCodes: ({})
@@ -106,14 +104,17 @@ Panel {
   }
 
   // The click path is the plugin's own typed argv: the SAME fixed prompt the
-  // toasts send, built by memory.js, one paragraph in one argv element, run
-  // detached, with the same agentInline setting every other click path honors.
-  // No shell, no sentence built here. A critical-band code is a critical
-  // dispatch, so it never launches an agent of its own: it asks the monitor to
-  // put it through the arm's gate and launch, and a refused click says so.
+  // toasts send, built by memory.js, with the dash's own pre-computed
+  // diagnosis (quattro.js, round 2 item 8) appended as a fenced JSON block.
+  // One paragraph in one argv element, run detached, with the same
+  // agentInline setting every other click path honors. No shell, no sentence
+  // built here. A critical-band code is a critical dispatch, so it never
+  // launches an agent of its own: it asks the monitor to put it through the
+  // arm's gate and launch, and a refused click says so.
   function dispatchCode(code) {
+    var diagnosis = Quattro.diagnosisJson(code, hdRows)
     if (Memory.isArmNotice(code.alert)) {
-      var decision = callMonitor("dispatchCriticalCode", [code.alert], null)
+      var decision = callMonitor("dispatchCriticalCode", [code.alert, diagnosis], null)
       if (decision === null || decision.started !== true) {
         showToast(Quattro.dispatchRefused(code.code, decision === null ? "" : decision.why), true)
         return
@@ -123,7 +124,9 @@ Panel {
       return
     }
     var reading = callMonitor("readingFor", [code.alert.type, code.alert], null)
-    var prompt = Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", ""))
+    var prompt = Memory.promptWithDiagnosis(
+      Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", "")),
+      diagnosis)
     var argv = Memory.normalizeBool(callMonitor("setting", ["agentInline", false], false), false)
       ? Memory.agentArgvWithInline(prompt, callMonitor("agentCommandArgv", [], null))
       : Memory.agentArgv(prompt, callMonitor("agentCommandArgv", [], null))
@@ -132,17 +135,24 @@ Panel {
     showToast(Quattro.dispatchToast(code.code, code.sev === "r"))
   }
 
+  // The codes area head tints by the most severe DRIVE code showing; a
+  // column with no drive codes is the unlit emblem, whatever RAM and VRAM
+  // are doing.
+  readonly property color codesHeadTint: Quattro.codesHeadToken(codes) === "red" ? Quattro.PAL.redHot
+    : (Quattro.codesHeadToken(codes) === "amber" ? Quattro.PAL.amber : Quattro.PAL.faceSym)
+
   // ---------------------------------------------------------------------------
   // Layout measures. The mockup is designed on the 443px card (the
   // shell-standard Style.space(380) at this rig's font scale), inner width 419.
   // Instruments scale with the card; fonts stay at the shell's own tokens.
-  // Four lanes share the row now, so each is 100 units wide where the old
-  // three-lane row drew 112 to 132; the dials letterbox inside their lanes.
+  // Three lanes share the row since round 2 (the coolant light moved below
+  // the battery), so each lane is a third of the row and both gauges draw at
+  // exactly the same size, the captain's item 3.
   readonly property real innerW: card.contentWidth - card.padding * 2
   readonly property real unit: innerW / 419
-  readonly property real laneW: 100 * unit
+  readonly property real laneW: (419 - 2 * 6) * unit / 3
   readonly property real dialW: laneW
-  readonly property real dialH: 118 * unit
+  readonly property real dialH: 124 * unit
 
   CardBar { id: cardBar; api: root.bar }
 
@@ -167,8 +177,9 @@ Panel {
         width: parent.width
         spacing: Style.space(9)
 
-        // ---- The cluster row: RAM PRESSURE - SWAP RESERVE - ROOT DRIVE -
-        //      VRAM COOLANT. Four lanes, one data source each.
+        // ---- The cluster row: RAM PRESSURE - SWAP RESERVE - ROOT DRIVE.
+        //      Three lanes, one data source each; the VRAM COOLANT light sits
+        //      centered below the battery, out of the row (round 2).
         RowLayout {
           Layout.fillWidth: true
           spacing: 6
@@ -214,12 +225,9 @@ Panel {
               font.pixelSize: Style.font.caption
               font.bold: true
               font.letterSpacing: 1.5
-              Layout.preferredWidth: root.laneW - text.length * 1.5
-              Layout.maximumWidth: root.laneW - text.length * 1.5
-              fontSizeMode: Text.HorizontalFit
-              minimumPixelSize: 7
               horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
+              Layout.fillWidth: true
             }
           }
 
@@ -311,12 +319,9 @@ Panel {
               font.pixelSize: Style.font.caption
               font.bold: true
               font.letterSpacing: 1.5
-              Layout.preferredWidth: root.laneW - text.length * 1.5
-              Layout.maximumWidth: root.laneW - text.length * 1.5
-              fontSizeMode: Text.HorizontalFit
-              minimumPixelSize: 7
               horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
+              Layout.fillWidth: true
             }
           }
 
@@ -361,63 +366,70 @@ Panel {
               font.pixelSize: Style.font.caption
               font.bold: true
               font.letterSpacing: 1.5
-              Layout.preferredWidth: root.laneW - text.length * 1.5
-              Layout.maximumWidth: root.laneW - text.length * 1.5
-              fontSizeMode: Text.HorizontalFit
-              minimumPixelSize: 7
               horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
+              Layout.fillWidth: true
             }
           }
 
-          ColumnLayout {
-            id: coolantWrap
-            spacing: 4 * root.unit
-            Layout.alignment: Qt.AlignTop
-            Layout.preferredWidth: root.laneW
-            Layout.maximumWidth: root.laneW
+        }
 
-            function tip() {
-              return Quattro.coolantTip(
-                root.vram === null ? null : { present: true, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
-                root.floorMib())
+        // ---- The VRAM COOLANT light (round 2): the STANDARD ISO coolant
+        //      warning glyph, the thermometer-in-liquid artwork quattro.js
+        //      owns, CENTERED in the dash BELOW the battery. The tank card is
+        //      gone; the light tinted by the free-VRAM thresholds is the whole
+        //      message, and high VRAM lights this light and throws no code.
+        //      Hover shows VRAM used / reserved.
+        // The wrap is a plain Item, not a ColumnLayout: in this Qt build a
+        // nested ColumnLayout caps at its implicit width and hugs left, while
+        // a plain Item honors Layout.fillWidth and stretches across the lane.
+        // Children anchor to its horizontal center.
+        Item {
+          id: coolantWrap
+          Layout.fillWidth: true
+          height: childrenRect.height
+
+          function tip() {
+            return Quattro.coolantTip(
+              root.vram === null ? null : { present: true, usedMib: root.vram.vramUsedMib, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
+              root.floorMib())
+          }
+
+          Item {
+            id: coolantGlyph
+            width: 40 * root.unit
+            height: 40 * root.unit
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            QuattroSymbol {
+              anchors.fill: parent
+              symbol: "temp"
+              color: root.coolantTint
             }
 
-            Item {
-              width: root.dialW
-              height: root.dialH
-
-              QuattroCoolant {
-                anchors.fill: parent
-                fill: root.coolantLevel
-                tint: root.coolantTint
-              }
-
-              MouseArea {
-                id: coolantArea
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.NoButton
-                cursorShape: Qt.PointingHandCursor
-                onContainsMouseChanged: if (!containsMouse) root.hideTip()
-                onPositionChanged: if (containsMouse) root.showTip(coolantWrap.tip(), coolantArea, mouse.x, mouse.y)
-              }
+            MouseArea {
+              id: coolantArea
+              anchors.fill: parent
+              hoverEnabled: true
+              acceptedButtons: Qt.NoButton
+              cursorShape: Qt.PointingHandCursor
+              onContainsMouseChanged: if (!containsMouse) root.hideTip()
+              onPositionChanged: if (containsMouse) root.showTip(coolantWrap.tip(), coolantArea, mouse.x, mouse.y)
             }
+          }
 
-            Text {
-              text: Quattro.INSTRUMENTS.coolant
-              color: root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              font.letterSpacing: 1.5
-              Layout.preferredWidth: root.laneW - text.length * 1.5
-              Layout.maximumWidth: root.laneW - text.length * 1.5
-              fontSizeMode: Text.HorizontalFit
-              minimumPixelSize: 7
-              horizontalAlignment: Text.AlignHCenter
-              Layout.alignment: Qt.AlignHCenter
-            }
+          Text {
+            id: coolantLabel
+            text: Quattro.INSTRUMENTS.coolant
+            anchors.top: coolantGlyph.bottom
+            anchors.topMargin: 4 * root.unit
+            anchors.horizontalCenter: parent.horizontalCenter
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.5
+            horizontalAlignment: Text.AlignHCenter
           }
         }
 
@@ -735,95 +747,6 @@ Panel {
       x: dial.width / 2 - width / 2
       y: dial.height * 0.66 - height / 2
       color: Quattro.PAL.faceSym
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // QuattroCoolant: the VRAM headroom tank, the PR-18 reservoir artwork. The
-  // level is the headroom quattro.js decided (coolantFill) and the tint the
-  // band chose (coolantBand); the geometry numbers are quattro.js's COOLANT
-  // record; this painter only draws, the same way QuattroDial only draws. The
-  // outline is stroked dimmer than the liquid, so the level reads before the
-  // tank does; the liquid's top edge carries the shallow fixed coolant wave,
-  // drawn once - nothing animates, because a telltale that moves on its own is
-  // a telltale that lies.
-  component QuattroCoolant : Item {
-    id: coolantTank
-
-    property real fill: 1
-    property color tint: "#ffffff"
-
-    onFillChanged: tank.requestPaint()
-    onTintChanged: tank.requestPaint()
-    Component.onCompleted: tank.requestPaint()
-
-    Canvas {
-      id: tank
-      anchors.fill: parent
-      onPaint: {
-        var ctx = getContext("2d")
-        ctx.reset()
-        var w = width
-        var h = height
-        if (w < 2 || h < 2) return
-        var C = Quattro.COOLANT
-        var lw = Math.max(1, Math.min(w, h) * C.strokeFract)
-        var m = lw * C.insetFract
-        var x = m
-        var y = m
-        var iw = w - m * 2
-        var ih = h - m * 2
-        var r = Math.min(iw, ih) * C.radiusFract
-
-        var frac = coolantTank.fill
-        if (!isFinite(frac)) frac = 0
-        if (frac < 0) frac = 0
-        if (frac > 1) frac = 1
-
-        // tank outline
-        ctx.beginPath()
-        roundedRect(ctx, x, y, iw, ih, r)
-        ctx.lineWidth = lw
-        ctx.strokeStyle = coolantTank.tint
-        ctx.globalAlpha = C.dimAlpha
-        ctx.stroke()
-
-        if (frac <= 0) return
-
-        // liquid, from the inner bottom up to the level, kept inside the
-        // stroke. A very low level draws a thin strip without a wave, because
-        // the wave needs room the strip does not have.
-        var level = y + ih * (1 - frac)
-        var minLevel = y + ih - Math.max(lw * 0.75, ih * C.stripFract)
-        var waveTop = Math.max(level, y + lw)
-        var surface = Math.min(waveTop, minLevel)
-        var amp = surface > minLevel - ih * C.waveFract ? 0 : ih * C.waveFract
-
-        ctx.beginPath()
-        ctx.moveTo(x + lw / 2, y + ih - lw / 2)
-        ctx.lineTo(x + lw / 2, surface + amp)
-        if (amp > 0) {
-          ctx.quadraticCurveTo(x + iw * 0.25, surface - amp, x + iw * 0.5, surface)
-          ctx.quadraticCurveTo(x + iw * 0.75, surface + amp, x + iw - lw / 2, surface + amp)
-        }
-        ctx.lineTo(x + iw - lw / 2, y + ih - lw / 2)
-        ctx.closePath()
-        ctx.fillStyle = coolantTank.tint
-        ctx.globalAlpha = 1.0
-        ctx.fill()
-      }
-
-      function roundedRect(ctx, x, y, w, h, r) {
-        ctx.moveTo(x + r, y)
-        ctx.lineTo(x + w - r, y)
-        ctx.arcTo(x + w, y, x + w, y + r, r)
-        ctx.lineTo(x + w, y + h - r)
-        ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
-        ctx.lineTo(x + r, y + h)
-        ctx.arcTo(x, y + h, x, y + h - r, r)
-        ctx.lineTo(x, y + r)
-        ctx.arcTo(x, y, x + r, y, r)
-      }
     }
   }
 

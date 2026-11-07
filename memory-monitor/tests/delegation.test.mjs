@@ -174,8 +174,8 @@ test("a band that releases leaves the rows, the badge and the tooltip in the sam
   // half of the same binding-timing rule: applyBand returns before it touches
   // the entry when nothing fires, so on the sample that releases a band the
   // rows still carry the stale band while the bands memory has already let it
-  // go — the bar would print "HD 30% (red)" for one sample after the red band
-  // has gone. The fix is ordering, and the node suite cannot run QML: the seam
+  // go — the badge tooltip would keep the red dot for one sample after the red
+  // band has gone. The fix is ordering, and the node suite cannot run QML: the seam
   // is pinned here, and the release behavior itself is proven live against the
   // headless rig.
   const commit = (QML.match(/function commitSample\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
@@ -393,7 +393,7 @@ test("a dash-launched severe dispatch rides the same arm gate the toast path rid
   assert.match(dispatch, /Memory\.shouldStartArm\(/,
     "the gate is the arm's own single-flight check, not a dash-local guess");
   assert.match(dispatch, /Memory\.armBudgetCheck\(/, "the budget gate rides along");
-  assert.match(dispatch, /startArm\(alert, true\)/,
+  assert.match(dispatch, /startArm\(alert, true, diagnosisJsonText\)/,
     "the dispatched agent IS the arm: one flight, one agent, the v1 doctrine");
   assert.match(dispatch, /why: decision\.why/, "the refusal names why so the dash can say so");
 });
