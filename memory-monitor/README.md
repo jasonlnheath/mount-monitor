@@ -152,8 +152,9 @@ thermometer-in-liquid telltale, tinted by the free-VRAM thresholds (floor
 500 MiB unset, the captain's defaults, sampled by this plugin's own nvidia-smi
 read; red below the floor, amber the 1000 MiB approach zone above it, so amber
 at 1500 MiB free when unset, green above that, unlit when no reading exists).
-Every amber and red band in the cluster is the settings row's recommended
-default; the row moves them live.
+The three percent-gauge bands start at the settings row's recommended
+defaults, the coolant light follows the VRAM floor until its sliders are
+touched, and the row moves them all live.
 Hovering the light shows VRAM used / reserved in GiB. Under the cluster, the
 codes area: ONE column under one check-engine head, DRIVE codes only, always
 most critical at the top, rows stretched across the full card so each code
