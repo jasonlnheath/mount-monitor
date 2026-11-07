@@ -966,10 +966,11 @@ BarWidget {
     if (key === "vram" && (stored === null || stored === undefined)) {
       // No dash pair yet: the PR-18 floor chain stays the red line, and the
       // amber rides the same fixed margin above it quattro.js has always drawn.
-      // A floor past the slider scale returns before gaugePair(), whose clamp
-      // would pull both lines onto GAUGE_MIB_MAX and recolor the bands.
+      // A pair the slider scale cannot hold returns before gaugePair(), whose
+      // clamp would pull the clipped lines onto GAUGE_MIB_MAX and recolor
+      // the bands.
       var floor = vramFloorMib();
-      if (floor > Quattro.GAUGE_MIB_MAX)
+      if (floor + Quattro.VRAM_AMBER_MARGIN_MIB > Quattro.GAUGE_MIB_MAX)
         return { amber: floor + Quattro.VRAM_AMBER_MARGIN_MIB, red: floor };
       return Quattro.gaugePair(key, { amber: null, red: floor });
     }

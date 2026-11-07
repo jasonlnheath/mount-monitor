@@ -294,6 +294,21 @@ function battTickFracs(pair) {
   ];
 }
 
+// The pair behind the coolant band and its hover decode. It arrives from the
+// monitor's gaugePairFor already sanitized, so it keeps gaugePair's junk
+// fallback and amber-over-red ordering but never the slider-range clamp: a
+// vramFloorMib above GAUGE_MIB_MAX hands over the raw floor chain, whose
+// lines legitimately sit past the slider scale.
+function coolantPairUnclamped(redMib, amberMib) {
+  const defaults = GAUGE_DEFAULTS.vram;
+  let red = asNumber(redMib);
+  if (red === null) red = defaults.red;
+  let amber = asNumber(amberMib);
+  if (amber === null)
+    amber = red !== defaults.red ? red + VRAM_AMBER_MARGIN_MIB : defaults.amber;
+  return { amber: Math.max(amber, red), red: red };
+}
+
 // The coolant band from the settings pair instead of the fixed margin. A junk
 // or missing amber line falls back to the fixed margin above the red one, the
 // same shape the locked coolantBand draws. No reading is null, the dash's rule
@@ -302,7 +317,7 @@ function coolantBandWith(freeMib, totalMib, redMib, amberMib) {
   const free = asNumber(freeMib);
   const total = asNumber(totalMib);
   if (free === null || total === null || total <= 0) return null;
-  const p = gaugePair("vram", { amber: amberMib, red: redMib });
+  const p = coolantPairUnclamped(redMib, amberMib);
   if (free < p.red) return 2;
   if (free < p.amber) return 1;
   return 0;
@@ -636,7 +651,7 @@ function fuelTipWith(root, amberUsed, redUsed) {
 }
 
 function coolantTipWith(reading, redMib, amberMib) {
-  const p = gaugePair("vram", { amber: amberMib, red: redMib });
+  const p = coolantPairUnclamped(redMib, amberMib);
   const r = reading || null;
   const used = r === null ? null : asNumber(r.usedMib);
   const free = r === null ? null : asNumber(r.freeMib);
