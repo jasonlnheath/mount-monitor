@@ -32,7 +32,9 @@ already alerting on — so one drive produces one toast, not two.
 
 ## Thresholds: you set the ceilings
 
-- **Amber 80%** and **red 90%** are the documented defaults.
+- **Amber 80%** and **red 90%** are the documented defaults, except System RAM,
+  whose recommended amber default is 70%: pressure is worth warning about
+  earlier than a drive filling up.
 - **Critical ships unset.** No critical band exists, no critical toast can fire,
   and the bar cannot glow for a ceiling you never chose. First run asks you for
   your ceilings; until the baseline log has enough samples the question says
@@ -41,7 +43,8 @@ already alerting on — so one drive produces one toast, not two.
   at. The recommendation is a recommendation, and your value wins.
 - One critical control per memory type — hard drive, VRAM, system RAM — set in
   the detail window or answered at onboarding. Each value records whether you
-  set it or it is still the default.
+  set it or it is still the default. The amber and red ceilings can also be
+  dragged live from the QuattroDash's gauge settings row.
 - Validation is `0 < amber < red < critical < 100`, with critical allowed to be
   unset. Thresholds live in `~/.local/state/memory-monitor/settings.json`.
 - Memory Monitor never writes a system limit. Your ceiling and the kernel's
@@ -170,6 +173,19 @@ refused, nothing starts and the red "not sent." toast says why: the guard is
 off, an agent is already on it, no memory headroom, or another screen owns
 the guard. Hovering any instrument gives the plain-words teaching decode, PSI
 included: it is a real kernel metric, not one we invented.
+
+The bottom of the dash carries the gauge settings row, collapsed until you
+open it: one amber/red slider pair per gauge, each with its one-sentence
+description in the row, and a reset button that writes back the recommended
+defaults. The pairs move the drawn bands live — the RAM and ROOT DRIVE dials
+redraw their zones, the SWAP RESERVE gauge gains threshold ticks under its LED
+bar, the VRAM COOLANT tube draws its amber and red as dashed floor lines — and
+red can never sit below amber: moving one slider through the other pushes it.
+There is no warning message; the push is the whole rule. The RAM pressure and
+root drive pairs are the plugin's real alert ceilings (the same numbers the
+detail window edits), and the reserve ticks and coolant lines are display
+pairs stored beside them in `~/.local/state/memory-monitor/settings.json`, so
+everything loads back on the next shell start.
 
 ## The detail window
 

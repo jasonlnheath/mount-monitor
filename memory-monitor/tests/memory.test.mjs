@@ -8,11 +8,33 @@ import { Memory, qtList, same } from "./load.mjs";
 test("amber and red ship as defaults, critical ships unset", () => {
   const t = Memory.normalizeThresholds(undefined);
   for (const kind of ["hd", "vram", "ram"]) {
-    assert.equal(t[kind].amber, 80, `${kind} amber default`);
+    assert.equal(t[kind].amber, kind === "ram" ? 70 : 80, `${kind} amber default`);
     assert.equal(t[kind].red, 90, `${kind} red default`);
     assert.equal(t[kind].critical, null, `${kind} critical ships unset`);
     assert.equal(t[kind].criticalSetBy, null);
   }
+});
+
+// The plugin writes its own defaults into the settings file. When the
+// recommended default moves (the captain's 2026-11-07 ruling moved RAM amber
+// to 70), a file entry the plugin itself wrote yields; a value the user or an
+// outside writer set keeps its value and its provenance.
+test("a plugin-written amber yields when the recommended default moves, a user amber never does", () => {
+  const pluginWrote = Memory.normalizeThresholds({ ram: { amber: 80, amberSetBy: null } });
+  assert.equal(pluginWrote.ram.amber, 70, "the old plugin-written 80 yields to the recommended 70");
+  assert.equal(pluginWrote.ram.amberSetBy, null);
+
+  const markedDefault = Memory.normalizeThresholds({ ram: { amber: 80, amberSetBy: "default" } });
+  assert.equal(markedDefault.ram.amber, 70);
+
+  const userSet = Memory.normalizeThresholds({ ram: { amber: 80, amberSetBy: "user" } });
+  assert.equal(userSet.ram.amber, 80, "a ceiling the user set is never re-defaulted");
+
+  const outsideWriter = Memory.normalizeThresholds({ ram: { amber: 85 } });
+  assert.equal(outsideWriter.ram.amber, 85, "no provenance key means an outside writer, kept");
+
+  const hdUntouched = Memory.normalizeThresholds({ hd: { amber: 80, amberSetBy: null } });
+  assert.equal(hdUntouched.hd.amber, 80, "hd's recommended default never changed");
 });
 
 test("a default is recorded as a default, a typed value as the user's", () => {
@@ -76,7 +98,7 @@ test("a ceiling the user set is never relabelled as a default", () => {
   assert.equal(set.ok, true);
   assert.equal(set.thresholds.ram.redSetBy, "user");
   assert.equal(Memory.ceilingText("ram", set).includes("(you set it)"), true);
-  assert.equal(Memory.ceilingText("ram", set).includes("amber 80% (default)"), true);
+  assert.equal(Memory.ceilingText("ram", set).includes("amber 70% (default)"), true);
 });
 
 test("the unset critical reads out loud in the detail window", () => {

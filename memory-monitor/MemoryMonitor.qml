@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "memory.js" as Memory
+import "quattro.js" as Quattro
 import "ringkit.js" as RingKit
 
 // Memory Monitor — the sibling plugin of Mount Monitor, and a separate product.
@@ -935,6 +936,98 @@ BarWidget {
     next.thresholds = result.thresholds;
     writeState(next);
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The QuattroDash gauge threshold settings (the captain's 2026-11-07 ruling):
+  // one amber/red pair per gauge, editable from the dash's settings row, and
+  // persisted in the plugin state file. The RAM pressure and root drive pairs
+  // ARE the plugin's alert ceilings, so they write through Memory.setCeiling
+  // and nothing else; the swap-reserve ticks and the coolant lines are display
+  // pairs stored beside them under gaugeSettings. The ordering law (red never
+  // below amber, inverted for the reserve and coolant marks) lives in
+  // quattro.js's slider model and is enforced mechanically, never in words.
+  //
+  // A drag lands here per movement, so the disk write is coalesced: the state
+  // updates live in memory and one timer flushes it once the dragging stops.
+  // ---------------------------------------------------------------------------
+
+  function gaugePairFor(key): var {
+    if (key === "psi") return Quattro.gaugePair(key, {
+      amber: thresholds("ram").amber,
+      red: thresholds("ram").red,
+    });
+    if (key === "hd") return Quattro.gaugePair(key, {
+      amber: thresholds("hd").amber,
+      red: thresholds("hd").red,
+    });
+    var stored = state && state.gaugeSettings ? state.gaugeSettings[key] : null;
+    if (key === "vram" && (stored === null || stored === undefined)) {
+      // No dash pair yet: the PR-18 floor chain stays the red line, and the
+      // amber rides the same fixed margin above it quattro.js has always drawn.
+      return Quattro.gaugePair(key, { amber: null, red: vramFloorMib() });
+    }
+    return Quattro.gaugePair(key, stored);
+  }
+
+  function setGaugePair(key, which, value): void {
+    var next = Quattro.adjustGaugePair(key, which, value, gaugePairFor(key));
+    var merged = JSON.parse(JSON.stringify(state));
+    if (key === "psi" || key === "hd") {
+      var type = key === "psi" ? "ram" : "hd";
+      // The ceiling store demands strictly amber < red, so the pair lands in
+      // three always-valid steps: lift red above both targets, drop amber in,
+      // then set red. Every step validates on its own; none reorders silently.
+      var cur = thresholds(type);
+      var safeRed = Math.max(cur.red, next.amber + 1, next.red);
+      var first = Memory.setCeiling({ thresholds: merged.thresholds }, type, "red", safeRed);
+      if (!first.ok) return;
+      var second = Memory.setCeiling({ thresholds: first.thresholds }, type, "amber", next.amber);
+      if (!second.ok) return;
+      var third = Memory.setCeiling({ thresholds: second.thresholds }, type, "red", next.red);
+      if (!third.ok) return;
+      merged.thresholds = third.thresholds;
+    } else {
+      var gauge = JSON.parse(JSON.stringify(merged.gaugeSettings || {}));
+      gauge[key] = next;
+      merged.gaugeSettings = gauge;
+    }
+    state = merged;
+    gaugeSaveTimer.restart();
+  }
+
+  function resetGaugeSettings(): void {
+    var merged = JSON.parse(JSON.stringify(state));
+    var thresholds = merged.thresholds;
+    var pairs = { psi: Quattro.GAUGE_DEFAULTS.psi, hd: Quattro.GAUGE_DEFAULTS.hd };
+    for (var key in pairs) {
+      var type = key === "psi" ? "ram" : "hd";
+      // The same three always-valid steps, so a reset works from any current
+      // pair, however far it sits above or below the recommended defaults.
+      var cur = Memory.thresholdsFor({ thresholds: thresholds }, type);
+      var safeRed = Math.max(cur.red, pairs[key].amber + 1, pairs[key].red);
+      var first = Memory.setCeiling({ thresholds: thresholds }, type, "red", safeRed);
+      if (!first.ok) return;
+      var second = Memory.setCeiling({ thresholds: first.thresholds }, type, "amber", pairs[key].amber);
+      if (!second.ok) return;
+      var third = Memory.setCeiling({ thresholds: second.thresholds }, type, "red", pairs[key].red);
+      if (!third.ok) return;
+      thresholds = third.thresholds;
+    }
+    merged.thresholds = thresholds;
+    merged.gaugeSettings = {
+      batt: JSON.parse(JSON.stringify(Quattro.GAUGE_DEFAULTS.batt)),
+      vram: JSON.parse(JSON.stringify(Quattro.GAUGE_DEFAULTS.vram)),
+    };
+    state = merged;
+    gaugeSaveTimer.restart();
+  }
+
+  Timer {
+    id: gaugeSaveTimer
+    interval: 400
+    repeat: false
+    onTriggered: root.saveState()
   }
 
   // ---------------------------------------------------------------------------

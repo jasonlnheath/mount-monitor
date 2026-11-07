@@ -94,6 +94,10 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "coolantBand", "coolantTip", "codesHeadToken", "codesEmptyText",
     "gibFromMib", "diagnosisSeverity", "diagnosisRecommendation",
     "diagnosisConsumers", "diagnosisJson",
+    "gaugePair", "adjustGaugePair", "gaugePairIsDefault", "gaugeRedAbove", "gaugeRange",
+    "gaugeClamp", "zoneArcsFor", "psiZoneArcsFor", "fuelZoneArcsFor", "ledBandWith",
+    "battTickFracs", "coolantBandWith", "gaugeTitle",
+    "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -727,6 +731,23 @@ test("the language rule holds over every string the popup copy can produce", () 
   for (const freeMib of [0, 1000, 3399, 3400, 3800, 4211, 8186]) {
     pushTip(Quattro.coolantTip({ present: true, usedMib: 8186 - freeMib, freeMib, totalMib: 8186 }, 3400));
   }
+  // The live-threshold variants the settings row drives, over junk and real
+  // pairs, so every ranges line keeps the language rule at any slider spot.
+  for (const pair of [null, {}, { amber: 70, red: 90 }, { amber: 55, red: 95 }, { amber: 30, red: 10 }, { amber: 6000, red: 800 }]) {
+    pushTip(Quattro.psiTipWith(null, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.psiTipWith({ some_avg10: 45.6 }, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.battTipWith({ present: true, pct: 15 }, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.battTipWith({ present: false, pct: 0 }, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.fuelTipWith(null, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.fuelTipWith({ pctFree: 45, availKb: 1, sizeKb: 1 }, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.coolantTipWith(null, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.coolantTipWith({ present: true, usedMib: 5186, freeMib: 3000, totalMib: 8186 }, pair === null ? null : pair.amber, pair === null ? null : pair.red));
+  }
+  texts.push(Quattro.SETTINGS.header, Quattro.SETTINGS.hint, Quattro.SETTINGS.reset,
+    Quattro.SETTINGS.amberLabel, Quattro.SETTINGS.redLabel);
+  for (const key of Quattro.GAUGE_KEYS) {
+    texts.push(Quattro.SETTINGS.copy[key], Quattro.gaugeTitle(key));
+  }
   texts.push(Quattro.codesEmptyText());
 
   for (const band of [1, 2, 3]) {
@@ -805,16 +826,35 @@ test("rootDriveReading: a full root reads zero free, and the real device row win
 test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence of its own", () => {
   const PANEL = repoFile("memory-monitor/QuattroDash.qml");
   for (const call of [
-    "Quattro.psiTip(", "Quattro.battTip(", "Quattro.fuelTip(", "Quattro.coolantTip(",
+    "Quattro.psiTipWith(", "Quattro.battTipWith(", "Quattro.fuelTipWith(", "Quattro.coolantTipWith(",
     "Quattro.codeTip(", "Quattro.codesFromReadings(", "Quattro.dispatchToast(",
-    "Quattro.litSegments(", "Quattro.ledBand(", "Quattro.INSTRUMENTS", "Quattro.PAL",
-    "Quattro.psiZoneArcs", "Quattro.fuelZoneArcs", "Quattro.dialTicks(",
+    "Quattro.litSegments(", "Quattro.ledBandWith(", "Quattro.INSTRUMENTS", "Quattro.PAL",
+    "Quattro.psiZoneArcsFor(", "Quattro.fuelZoneArcsFor(", "Quattro.dialTicks(",
     "Quattro.needleAngleDeg(", "Quattro.psiNeedleFrac(", "Quattro.fuelNeedleFrac(",
-    "Quattro.reserveReading(", "Quattro.coolantBand(", "Quattro.diagnosisJson(",
+    "Quattro.reserveReading(", "Quattro.coolantBandWith(", "Quattro.diagnosisJson(",
     "Memory.promptWithDiagnosis(",
     "Quattro.codesHeadToken(", "Quattro.codesEmptyText(",
+    // The gauge threshold settings row (the captain's 2026-11-07 ruling): the
+    // pairs, the ranges, the push model's law and the row's sentences are all
+    // quattro.js data the panel renders and the monitor owns on disk.
+    "Quattro.SETTINGS", "Quattro.GAUGE_KEYS",
+    "Quattro.gaugePair(", "Quattro.gaugeRange(", "Quattro.gaugeTitle(",
+    "Quattro.battTickFracs(",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
+  }
+  // The settings row edits through the widget's own functions, never by
+  // writing state or numbers of its own, and the sliders are hand-drawn, not
+  // Controls imports.
+  assert.equal(PANEL.includes("callMonitor(\"setGaugePair\""), true);
+  assert.equal(PANEL.includes("callMonitor(\"resetGaugeSettings\""), true);
+  assert.equal(PANEL.includes("callMonitor(\"gaugePairFor\""), true);
+  assert.equal(/QtQuick\.Controls/.test(PANEL), false, "the sliders are drawn by hand on the dash palette");
+  // The drawn gauges never hardcode a threshold: every zone list, LED band,
+  // tick row and coolant band comes from the monitor's pair through the With
+  // variants above, so a slider drag moves the gauge in the same frame.
+  for (const banned of ["Quattro.psiZoneArcs(", "Quattro.fuelZoneArcs(", "Quattro.ledBand(", "Quattro.coolantBand(", "Quattro.psiTip(", "Quattro.battTip(", "Quattro.fuelTip(", "Quattro.coolantTip("]) {
+    assert.equal(PANEL.includes(banned), false, `the locked-constant call ${banned} must not survive in the panel`);
   }
   // The codes column is ONE column, most critical at the top: the panel renders
   // the codesFromReadings list directly and keeps no per-severity models of its

@@ -78,13 +78,27 @@ Panel {
   readonly property var psiNeedle: Quattro.psiNeedleFrac(psiSome < 0 ? null : psiSome)
   readonly property var fuelNeedle: Quattro.fuelNeedleFrac(rootDrive === null ? null : rootDrive.pctFree)
 
+  // The gauge threshold pairs (the captain's 2026-11-07 ruling): one amber/red
+  // pair per gauge, read from the monitor's persisted state through
+  // gaugePairFor, and moved live by the settings row at the bottom. With no
+  // monitor attached the pairs fall back to quattro.js's recommended defaults.
+  function pairFor(key) {
+    var p = callMonitor("gaugePairFor", [key], null)
+    return p === null ? Quattro.gaugePair(key, null) : p
+  }
+  readonly property var psiPair: pairFor("psi")
+  readonly property var hdPair: pairFor("hd")
+  readonly property var battPair: pairFor("batt")
+  readonly property var vramPair: pairFor("vram")
+
   // The coolant light's band (round 2: the tank card became the ISO light),
-  // quattro.js's coolantBand over this plugin's own VRAM reading. A missing
-  // reading is the unlit tint, never a confident green.
-  readonly property var coolantZone: Quattro.coolantBand(
+  // quattro.js's coolantBandWith over this plugin's own VRAM reading, fed the
+  // settings pair, so the light's thresholds move live with the sliders. A
+  // missing reading is the unlit tint, never a confident green.
+  readonly property var coolantZone: Quattro.coolantBandWith(
     vram === null ? null : vram.vramFreeMib,
     vram === null ? null : vram.vramTotalMib,
-    floorMib())
+    root.vramPair.red, root.vramPair.amber)
   readonly property color coolantTint: coolantZone === 2 ? Quattro.PAL.redHot
     : (coolantZone === 1 ? Quattro.PAL.amber
     : (coolantZone === 0 ? Quattro.PAL.green : Quattro.PAL.faceSym))
@@ -192,7 +206,7 @@ Panel {
             Layout.maximumWidth: root.laneW
 
             function tip() {
-              return Quattro.psiTip(psiSome < 0 ? null : { some_avg10: psiSome })
+              return Quattro.psiTipWith(psiSome < 0 ? null : { some_avg10: psiSome }, root.psiPair.amber, root.psiPair.red)
             }
 
             Item {
@@ -201,7 +215,7 @@ Panel {
 
               QuattroDial {
                 anchors.fill: parent
-                zones: Quattro.psiZoneArcs
+                zones: Quattro.psiZoneArcsFor(root.psiPair.amber, root.psiPair.red)
                 labels: Quattro.psiLabels
                 needle: root.psiNeedle
                 faceSymbol: "temp"
@@ -249,7 +263,7 @@ Panel {
               border.color: Quattro.PAL.line
 
               function tip() {
-                return Quattro.battTip(root.reserve)
+                return Quattro.battTipWith(root.reserve, root.battPair.amber, root.battPair.red)
               }
 
               ColumnLayout {
@@ -266,11 +280,11 @@ Panel {
                     id: battIcon
                     anchors.fill: parent
                     symbol: "battery"
-                    color: root.reserve.pct >= Quattro.LED_GREEN_AT ? Quattro.PAL.green
-                      : (root.reserve.pct >= Quattro.LED_YELLOW_AT ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                    color: root.reserve.pct >= root.battPair.amber ? Quattro.PAL.green
+                      : (root.reserve.pct >= root.battPair.red ? Quattro.PAL.amber : Quattro.PAL.redHot)
 
                     SequentialAnimation {
-                      running: Quattro.ledBand(root.reserve.pct) === "red"
+                      running: Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red) === "red"
                       loops: Animation.Infinite
                       NumberAnimation { target: battIcon; property: "opacity"; from: 1.0; to: 0.4; duration: 550 }
                       NumberAnimation { target: battIcon; property: "opacity"; from: 0.4; to: 1.0; duration: 550 }
@@ -291,11 +305,41 @@ Panel {
                       height: 9
                       radius: 2
                       readonly property bool lit: index < Quattro.litSegments(root.reserve.pct)
-                      readonly property color bandColor: Quattro.ledBand(root.reserve.pct) === "green" ? Quattro.PAL.green
-                        : (Quattro.ledBand(root.reserve.pct) === "yellow" ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                      readonly property string ledWord: Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red)
+                      readonly property color bandColor: ledWord === "green" ? Quattro.PAL.green
+                        : (ledWord === "yellow" ? Quattro.PAL.amber : Quattro.PAL.redHot)
                       color: lit ? bandColor : Quattro.PAL.ledOff
                       border.width: 1
                       border.color: lit ? bandColor : Quattro.PAL.line
+                    }
+                  }
+                }
+
+                // The reserve's threshold ticks (the captain's 2026-11-07
+                // ruling): where the drawn amber and red lines sit, red below
+                // amber, because this gauge's bad end is empty.
+                Item {
+                  width: 84 * root.unit
+                  height: 5
+                  Layout.alignment: Qt.AlignHCenter
+
+                  Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: Quattro.PAL.line
+                  }
+
+                  Repeater {
+                    model: Quattro.battTickFracs(root.battPair)
+
+                    Rectangle {
+                      required property var modelData
+                      x: Math.max(0, Math.min(parent.width - 1.5, parent.width * modelData.f - 0.75))
+                      y: 0
+                      width: 1.5
+                      height: parent.height
+                      color: modelData.cls === "red" ? Quattro.PAL.redHot : Quattro.PAL.amber
                     }
                   }
                 }
@@ -333,7 +377,7 @@ Panel {
             Layout.maximumWidth: root.laneW
 
             function tip() {
-              return Quattro.fuelTip(root.rootDrive)
+              return Quattro.fuelTipWith(root.rootDrive, root.hdPair.amber, root.hdPair.red)
             }
 
             Item {
@@ -342,7 +386,7 @@ Panel {
 
               QuattroDial {
                 anchors.fill: parent
-                zones: Quattro.fuelZoneArcs
+                zones: Quattro.fuelZoneArcsFor(root.hdPair.amber, root.hdPair.red)
                 labels: Quattro.fuelLabels
                 needle: root.fuelNeedle
                 faceSymbol: "fuel"
@@ -390,9 +434,9 @@ Panel {
           height: childrenRect.height
 
           function tip() {
-            return Quattro.coolantTip(
+            return Quattro.coolantTipWith(
               root.vram === null ? null : { present: true, usedMib: root.vram.vramUsedMib, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
-              root.floorMib())
+              root.vramPair.red, root.vramPair.amber)
           }
 
           Item {
@@ -481,6 +525,105 @@ Panel {
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             Layout.alignment: Qt.AlignHCenter
+          }
+        }
+
+        // ---- The gauge settings row (the captain's 2026-11-07 ruling):
+        //      collapsible, at the bottom of the dash. One amber/red slider
+        //      pair per gauge, each with its one-sentence description in the
+        //      row itself, and a reset button. The pairs live in the
+        //      monitor's persisted state; a drag lands in setGaugePair and
+        //      every gauge above moves in the same frame. The row renders and
+        //      calls: every decision is quattro.js's or the monitor's.
+        Item {
+          Layout.fillWidth: true
+          implicitHeight: 1
+          Rectangle {
+            anchors.fill: parent
+            color: Quattro.PAL.line
+          }
+        }
+
+        property bool settingsOpen: false
+
+        Item {
+          id: settingsHeader
+          Layout.fillWidth: true
+          implicitHeight: 18
+
+          Text {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: Quattro.SETTINGS.header
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.5
+          }
+
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: content.settingsOpen ? "\u25be" : "\u25b8"
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: content.settingsOpen = !content.settingsOpen
+          }
+        }
+
+        Text {
+          visible: content.settingsOpen
+          text: Quattro.SETTINGS.hint
+          color: root.dim
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.Wrap
+          Layout.fillWidth: true
+        }
+
+        Repeater {
+          model: content.settingsOpen ? Quattro.GAUGE_KEYS : []
+
+          GaugeSettingsRow {
+            required property string modelData
+            gaugeKey: modelData
+            Layout.fillWidth: true
+          }
+        }
+
+        Rectangle {
+          visible: content.settingsOpen
+          Layout.alignment: Qt.AlignHCenter
+          width: 190
+          height: 24
+          radius: 8
+          color: resetArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+          border.width: 1
+          border.color: Quattro.PAL.line
+
+          Text {
+            anchors.centerIn: parent
+            text: Quattro.SETTINGS.reset
+            color: root.fg
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1
+          }
+
+          MouseArea {
+            id: resetArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: callMonitor("resetGaugeSettings", [], null)
           }
         }
 
@@ -832,6 +975,164 @@ Panel {
         radius: 3.5
         color: codeRow.sent ? Quattro.PAL.green : (codeRow.severe ? Quattro.PAL.redHot : Quattro.PAL.amber)
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GaugeSlider: one threshold slider, drawn by hand on the dash's palette.
+  // Click jumps, press-drag follows. The component never decides: it reports
+  // the dragged value through moved() and the monitor's slider model answers
+  // with the pushed pair, which re-binds value, so the constraint is felt in
+  // the handle, never said in words.
+  // ---------------------------------------------------------------------------
+  component GaugeSlider : Item {
+    id: slider
+
+    property real value: 0
+    property real min: 1
+    property real max: 99
+    property color tint: Quattro.PAL.amber
+    property string label: ""
+    signal moved(real newValue)
+
+    readonly property real frac: Math.max(0, Math.min(1, (value - min) / Math.max(1, max - min)))
+
+    width: 160
+    height: 30
+
+    Rectangle {
+      id: track
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      height: 6
+      radius: 3
+      color: Quattro.PAL.face
+      border.width: 1
+      border.color: Quattro.PAL.line
+    }
+
+    Rectangle {
+      anchors.left: parent.left
+      anchors.top: parent.top
+      width: parent.width * slider.frac
+      height: 6
+      radius: 3
+      color: slider.tint
+      opacity: 0.55
+    }
+
+    Rectangle {
+      anchors.top: parent.top
+      anchors.topMargin: -3
+      x: Math.max(0, Math.min(parent.width - 12, parent.width * slider.frac - 6))
+      width: 12
+      height: 12
+      radius: 6
+      color: slider.tint
+      border.width: 1
+      border.color: Quattro.PAL.face
+    }
+
+    Text {
+      anchors.left: parent.left
+      anchors.top: track.bottom
+      anchors.topMargin: 3
+      text: slider.label
+      color: slider.tint
+      font.family: Style.font.family
+      font.pixelSize: 9
+      font.bold: true
+      font.letterSpacing: 1
+    }
+
+    MouseArea {
+      function valueAt(px) {
+        var f = Math.max(0, Math.min(1, px / parent.width))
+        return Math.round(slider.min + f * (slider.max - slider.min))
+      }
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: function(mouse) { slider.moved(valueAt(mouse.x)) }
+      onPressed: function(mouse) { slider.moved(valueAt(mouse.x)) }
+      onPositionChanged: function(mouse) {
+        var v = valueAt(mouse.x)
+        if (v !== Math.round(slider.value)) slider.moved(v)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GaugeSettingsRow: one gauge's amber/red pair in the settings row, with its
+  // one-sentence description in the row itself (the captain's 2026-11-07
+  // ruling). The pair comes from the monitor's persisted state, the push law
+  // from quattro.js's slider model, the sentence from quattro.js's SETTINGS
+  // record; a drag lands in setGaugePair and every gauge on the dash moves in
+  // the same frame the state changes.
+  // ---------------------------------------------------------------------------
+  component GaugeSettingsRow : ColumnLayout {
+    id: gaugeRow
+
+    property string gaugeKey: ""
+    readonly property var pair: root.pairFor(gaugeKey)
+    readonly property var range: Quattro.gaugeRange(gaugeKey)
+
+    spacing: 3
+
+    RowLayout {
+      Layout.fillWidth: true
+
+      Text {
+        text: Quattro.gaugeTitle(gaugeRow.gaugeKey)
+        color: root.fg
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        font.bold: true
+        font.letterSpacing: 1
+      }
+
+      Item { Layout.fillWidth: true }
+
+      Text {
+        text: Quattro.SETTINGS.amberLabel + " " + gaugeRow.pair.amber + "   " + Quattro.SETTINGS.redLabel + " " + gaugeRow.pair.red
+        color: root.dim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    RowLayout {
+      Layout.fillWidth: true
+      spacing: 10
+
+      GaugeSlider {
+        Layout.fillWidth: true
+        value: gaugeRow.pair.amber
+        min: gaugeRow.range.min
+        max: gaugeRow.range.max
+        tint: Quattro.PAL.amber
+        label: Quattro.SETTINGS.amberLabel
+        onMoved: function(v) { callMonitor("setGaugePair", [gaugeRow.gaugeKey, "amber", v], null) }
+      }
+
+      GaugeSlider {
+        Layout.fillWidth: true
+        value: gaugeRow.pair.red
+        min: gaugeRow.range.min
+        max: gaugeRow.range.max
+        tint: Quattro.PAL.redHot
+        label: Quattro.SETTINGS.redLabel
+        onMoved: function(v) { callMonitor("setGaugePair", [gaugeRow.gaugeKey, "red", v], null) }
+      }
+    }
+
+    Text {
+      text: Quattro.SETTINGS.copy[gaugeRow.gaugeKey] || ""
+      color: root.dim
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.Wrap
+      Layout.fillWidth: true
     }
   }
 
