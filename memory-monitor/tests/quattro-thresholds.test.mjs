@@ -353,6 +353,37 @@ test("the panel renders the settings row from quattro.js and edits through the m
     "the settings row collapses");
   assert.equal(PANEL.includes("RESET TO DEFAULTS") || PANEL.includes("Quattro.SETTINGS.reset"), true,
     "the row carries the reset button");
-  assert.equal(/WARN|warning/i.test(PANEL.split("component GaugeSettingsRow")[1]?.split("component ")[0] || ""), false,
+});
+
+test("the settings copy carries no ordering warning, because the push model is the law", () => {
+  const strings = [Q.SETTINGS.hint].concat(Q.GAUGE_KEYS.map(key => Q.SETTINGS.copy[key]));
+  assert.equal(strings.some(s => /warn/i.test(s)), false,
     "no warning message guards the ordering: the push model does");
+});
+
+test("a refused threshold lands as quattro.js's toast naming the critical line", () => {
+  const t = Q.ceilingBlockedToast("psi", 70, 90);
+  assert.equal(t.mark, "\u2717");
+  assert.equal(t.code, "THRESHOLD");
+  assert.equal(t.text, "the RAM PRESSURE critical line at 70 must sit above red 90. lower critical first.");
+  assert.equal(/[\u2013\u2014;]/.test(t.text), false, "the refusal copy keeps the language law");
+
+  const hd = Q.ceilingBlockedToast("hd", 85, 90);
+  assert.equal(hd.text.includes("ROOT DRIVE"), true, "the toast names the gauge that blocked it");
+
+  const noCritical = Q.ceilingBlockedToast("psi", null, 90);
+  assert.equal(noCritical.text, "the RAM PRESSURE red line could not move to 90.",
+    "a refusal with no critical in the record still says what did not happen");
+});
+
+test("the widget returns quattro.js's toast on a blocked write and the dash shows it", () => {
+  const QML = repoFile("memory-monitor/MemoryMonitor.qml");
+  assert.equal(QML.includes("return Quattro.ceilingBlockedToast(key, cur.critical, next.red)"), true,
+    "a refused drag hands back quattro.js's toast instead of returning silently");
+  assert.equal(QML.includes("return Quattro.ceilingBlockedToast(key, cur.critical, pairs[key].red)"), true,
+    "a blocked reset hands back quattro.js's toast naming the blocking gauge");
+
+  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
+  assert.equal(PANEL.includes("root.showToast(refused, true)"), true,
+    "the dash surfaces the refused write through its own toast lane");
 });

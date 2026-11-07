@@ -98,6 +98,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "gaugeClamp", "zoneArcsFor", "psiZoneArcsFor", "fuelZoneArcsFor", "ledBandWith",
     "battTickFracs", "coolantBandWith", "gaugeTitle",
     "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
+    "ceilingBlockedToast",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -747,6 +748,12 @@ test("the language rule holds over every string the popup copy can produce", () 
     Quattro.SETTINGS.amberLabel, Quattro.SETTINGS.redLabel);
   for (const key of Quattro.GAUGE_KEYS) {
     texts.push(Quattro.SETTINGS.copy[key], Quattro.gaugeTitle(key));
+  }
+  // The refused-threshold toast, for every gauge and the no-critical fallback,
+  // so the blocked-write copy keeps the language law too.
+  for (const key of Quattro.GAUGE_KEYS) {
+    texts.push(Quattro.ceilingBlockedToast(key, 70, 90).text);
+    texts.push(Quattro.ceilingBlockedToast(key, null, 90).text);
   }
   texts.push(Quattro.codesEmptyText());
 

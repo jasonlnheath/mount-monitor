@@ -623,7 +623,10 @@ Panel {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: callMonitor("resetGaugeSettings", [], null)
+            onClicked: {
+              var refused = callMonitor("resetGaugeSettings", [], null)
+              if (refused !== null && refused !== undefined) root.showToast(refused, true)
+            }
           }
         }
 
@@ -1112,7 +1115,10 @@ Panel {
         max: gaugeRow.range.max
         tint: Quattro.PAL.amber
         label: Quattro.SETTINGS.amberLabel
-        onMoved: function(v) { callMonitor("setGaugePair", [gaugeRow.gaugeKey, "amber", v], null) }
+        onMoved: function(v) {
+          var refused = callMonitor("setGaugePair", [gaugeRow.gaugeKey, "amber", v], null)
+          if (refused !== null && refused !== undefined) root.showToast(refused, true)
+        }
       }
 
       GaugeSlider {
@@ -1122,7 +1128,10 @@ Panel {
         max: gaugeRow.range.max
         tint: Quattro.PAL.redHot
         label: Quattro.SETTINGS.redLabel
-        onMoved: function(v) { callMonitor("setGaugePair", [gaugeRow.gaugeKey, "red", v], null) }
+        onMoved: function(v) {
+          var refused = callMonitor("setGaugePair", [gaugeRow.gaugeKey, "red", v], null)
+          if (refused !== null && refused !== undefined) root.showToast(refused, true)
+        }
       }
     }
 

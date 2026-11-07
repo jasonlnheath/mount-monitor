@@ -866,6 +866,27 @@ function dispatchRefused(code, why) {
   };
 }
 
+// The settings row can ask for a red a user-set critical ceiling may not sit
+// under: the ceiling store's own law (critical above red) refuses the write,
+// and the refusal is said in words, the way every other declined action here
+// is. The toast names the gauge and both numbers, so the fix (lower critical
+// first) is one sentence away. A refusal with no critical in the record (not
+// reachable through the drawn sliders, which clamp inside the store's range)
+// still says what did not happen instead of nothing at all.
+function ceilingBlockedToast(key, critical, red) {
+  const c = asNumber(critical);
+  const r = asNumber(red);
+  const label = gaugeTitle(key);
+  const tail = c !== null && c > 0
+    ? "the " + label + " critical line at " + String(Math.round(c)) + " must sit above red " + String(Math.round(r)) + ". lower critical first."
+    : "the " + label + " red line could not move to " + String(Math.round(r)) + ".";
+  return {
+    mark: "\u2717",
+    code: "THRESHOLD",
+    text: tail,
+  };
+}
+
 // --- the reserved spares record (the approved footer, held back) -------------
 //
 // The captain's live-look ruling: future additions are not visible on the
