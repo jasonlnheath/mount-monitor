@@ -76,9 +76,14 @@ var LED_YELLOW_AT = 10;
 var PSI_AMBER_AT = 60;
 var PSI_RED_AT = 80;
 var FUEL_RED_BELOW = 10;
-// The coolant card's approach zone, the PR-18 fraction: amber when free VRAM
-// falls under the floor plus 10 percent of total capacity.
-var VRAM_AMBER_FRACT = 0.10;
+// The coolant card's approach zone, a fixed MiB margin above the floor: amber
+// when free VRAM falls under the floor plus this much. The captain's
+// 2026-11-06 defaults steer set the card's lines at amber=1500 MiB free,
+// red=500 MiB free, so the margin is 1000 over the 500 default floor.
+var VRAM_AMBER_MARGIN_MIB = 1000;
+// The unset-floor fallback, mirroring memory.js VRAM_FLOOR_DEFAULT_MIB. The
+// two plain modules cannot import each other, so the test pins both at 500.
+var VRAM_FLOOR_DEFAULT_MIB = 500;
 
 var psiZoneArcs = [
   { from: 0.60, to: 0.80, kind: "amber" },
@@ -241,10 +246,12 @@ function fuelNeedleFrac(pctFree) {
 // find here: a coolant reservoir whose filled level is free VRAM above the
 // floor. The sampling is this plugin's own (memory.js vramReading, the
 // nvidia-smi numbers), the floor is this plugin's own vramFloorMib setting
-// (memory.js vramFloorMib, 3400 MiB unset), and the two decisions below are
-// hand mirrors of Mount Monitor's mounts.js vramHeadroomFrac and rawVramBand,
-// pinned case-for-case by the conformance test so the dash card and the bar
-// telltale cannot disagree about the same numbers.
+// (memory.js vramFloorMib, 500 MiB unset). The fill below is a hand mirror of
+// Mount Monitor's mounts.js vramHeadroomFrac, pinned case-for-case by the
+// conformance test so the tank level and the bar telltale cannot disagree
+// about the same numbers. The band below is the captain's own: red below the
+// floor, amber a fixed 1000 MiB above it, so the unset lines are 500 and
+// 1500 MiB free (the captain's 2026-11-06 defaults steer).
 
 function coolantFill(freeMib, totalMib, floorMib) {
   const free = asNumber(freeMib);
@@ -270,14 +277,14 @@ function coolantBand(freeMib, totalMib, floorMib) {
   const floor = asNumber(floorMib);
   const base = floor === null || floor < 0 ? 0 : floor;
   if (free < base) return 2;
-  if (free < base + total * VRAM_AMBER_FRACT) return 1;
+  if (free < base + VRAM_AMBER_MARGIN_MIB) return 1;
   return 0;
 }
 
 function coolantTip(reading, floorMib) {
   const r = reading || null;
   const floor = asNumber(floorMib);
-  const floorNow = floor === null || floor < 0 ? 3400 : floor;
+  const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
   const free = r === null ? null : asNumber(r.freeMib);
   const total = r === null ? null : asNumber(r.totalMib);
   const now = free === null || total === null
@@ -289,7 +296,7 @@ function coolantTip(reading, floorMib) {
       { label: "Now:", text: now, cls: "now" },
       { label: "What:", text: "Coolant is your free VRAM above the floor. It is the headroom left for big model loads on the GPU." },
       { label: "Why:", text: "When the tank runs dry the GPU has no room for the next model load." },
-      { label: "Ranges:", text: "Red below the floor. Amber within 10 percent of total above it. Green above that. The floor is the vramFloorMib setting, 3400 MiB unset." },
+      { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
     ],
   };
 }

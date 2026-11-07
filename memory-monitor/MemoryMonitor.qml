@@ -180,8 +180,10 @@ BarWidget {
   }
 
   // The QuattroDash coolant card's floor, the PR-18 way: this plugin's own
-  // vramFloorMib setting in MiB, 3400 MiB when unset, read through the
-  // memory.js normalizer. A display floor, never an alert ceiling.
+  // vramFloorMib setting in MiB, 500 MiB when unset (the captain's
+  // 2026-11-06 defaults steer, amber then at 1500 via quattro.js's 1000 MiB
+  // approach margin), read through the memory.js normalizer. A display
+  // floor, never an alert ceiling.
   function vramFloorMib(): int {
     return Memory.vramFloorMib(setting("vramFloorMib", null));
   }

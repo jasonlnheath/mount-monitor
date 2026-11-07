@@ -385,17 +385,18 @@ test("the constants QML reaches for actually cross the module boundary", () => {
 // ---------------------------------------------------------------------------
 // VRAM COOLANT floor (the dash's fourth instrument). The PR-18 semantics: the
 // fill is free VRAM above the floor, and the floor is the plugin's own
-// vramFloorMib setting, 3400 MiB when unset - Mount Monitor's default.
+// vramFloorMib setting, 500 MiB when unset (the captain's 2026-11-06
+// defaults steer, red=500 amber=1500; Mount Monitor's telltale keeps 3400).
 // ---------------------------------------------------------------------------
 
-test("the coolant floor is the vramFloorMib setting, 3400 MiB unset, never negative", () => {
-  assert.equal(Memory.vramFloorMib(null), 3400);
-  assert.equal(Memory.vramFloorMib(undefined), 3400);
-  assert.equal(Memory.vramFloorMib(""), 3400);
-  assert.equal(Memory.vramFloorMib("garbage"), 3400);
-  assert.equal(Memory.vramFloorMib(-5), 3400);
+test("the coolant floor is the vramFloorMib setting, 500 MiB unset, never negative", () => {
+  assert.equal(Memory.vramFloorMib(null), 500);
+  assert.equal(Memory.vramFloorMib(undefined), 500);
+  assert.equal(Memory.vramFloorMib(""), 500);
+  assert.equal(Memory.vramFloorMib("garbage"), 500);
+  assert.equal(Memory.vramFloorMib(-5), 500);
   assert.equal(Memory.vramFloorMib(0), 0, "a floor at zero is a real answer and is honored");
   assert.equal(Memory.vramFloorMib(4096), 4096);
   assert.equal(Memory.vramFloorMib("5120"), 5120, "a string setting is a number the same way normalizeNumber reads one");
-  assert.equal(Memory.vramFloorMib(3400.7), 3401, "the floor is a whole-MiB line");
+  assert.equal(Memory.vramFloorMib(500.7), 501, "the floor is a whole-MiB line");
 });

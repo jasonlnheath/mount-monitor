@@ -1223,13 +1223,19 @@ function vramReading(gpu, apps) {
 //
 // The PR-18 semantics, mirrored: the coolant fill is free VRAM above the
 // user's floor, and the floor is the plugin's own `vramFloorMib` setting in
-// MiB, 3400 when unset - the same default Mount Monitor's telltale reads. A
-// floor at zero is a real answer (a floor at zero never alarms) and is
-// honored. The fill and band decisions themselves live in quattro.js next to
-// the other dashboard instruments; the conformance test pins them to
-// mounts.js so the two plugins cannot disagree.
+// MiB. The captain's 2026-11-06 defaults steer set the card's own lines:
+// red below 500 MiB free, amber below 1500 MiB free when unset - so the
+// floor defaults to 500 and the amber approach margin (quattro.js
+// VRAM_AMBER_MARGIN_MIB) lands the amber line at 1500. Mount Monitor's bar
+// telltale keeps its own 3400 default; the two plugins' defaults are
+// deliberately different now. A floor at zero is a real answer (a floor at
+// zero never alarms) and is honored. The fill decision itself lives in
+// quattro.js next to the other dashboard instruments; the conformance test
+// pins it to mounts.js so the tank level cannot disagree with the telltale
+// about the same numbers. The band lines are the captain's own and are not
+// a rawVramBand mirror.
 
-var VRAM_FLOOR_DEFAULT_MIB = 3400;
+var VRAM_FLOOR_DEFAULT_MIB = 500;
 
 function vramFloorMib(raw) {
   const value = normalizeNumber(raw, -1);

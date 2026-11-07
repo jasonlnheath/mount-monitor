@@ -139,10 +139,10 @@ some avg10, amber from 60, red at 80; ROOT DRIVE as a fuel gauge where F is
 RESERVE battery telltale with a ten-segment LED bar (green at 25 percent or
 more, yellow from 10, red below 10, pulsing when red, no swap configured reads
 as the empty state), and the VRAM COOLANT reservoir: free VRAM above the
-`vramFloorMib` floor (3400 MiB unset, the same semantics as Mount Monitor's
-bar telltale, sampled by this plugin's own nvidia-smi read), green above the
-approach zone, amber inside it, red below the floor, a dim empty tank when no
-reading exists. Under them, the codes area: ONE column under one check-engine
+`vramFloorMib` floor (500 MiB unset, the captain's 2026-11-06 defaults, sampled
+by this plugin's own nvidia-smi read), green above the approach zone (1000 MiB
+of headroom above the floor, so amber at 1500 MiB free when unset), amber
+inside it, red below the floor, a dim empty tank when no reading exists. Under them, the codes area: ONE column under one check-engine
 head, red and amber codes together, always most critical at the top, rows
 stretched across the full card so each code carries its reading and its
 status. A code is the monitor's own live fault - a watched resource sitting
@@ -224,7 +224,7 @@ On the widget's entry in `shell.json`:
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
-| `vramFloorMib` | `3400` | The QuattroDash coolant card's floor, in MiB. The fill is free VRAM above it. A display floor only; it sets no alert ceiling. |
+| `vramFloorMib` | `500` | The QuattroDash coolant card's floor, in MiB. The fill is free VRAM above it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
 Thresholds and the guard answer are not `shell.json` settings — they live in

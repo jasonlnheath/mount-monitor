@@ -63,7 +63,9 @@ Panel {
   readonly property var devices: mon("hdDevices", [])
 
   // The coolant card's floor, the PR-18 way: the widget's own vramFloorMib
-  // setting through memory.js, 3400 MiB unset, same default as the bar telltale.
+  // setting through memory.js, 500 MiB unset (the captain's 2026-11-06
+  // defaults steer, amber then at 1500 via the 1000 MiB approach margin; the
+  // bar telltale keeps its own 3400).
   function floorMib() {
     return monitor && typeof monitor.vramFloorMib === "function"
       ? monitor.vramFloorMib() : Memory.vramFloorMib(null)

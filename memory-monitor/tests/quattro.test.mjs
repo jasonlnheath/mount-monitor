@@ -432,9 +432,12 @@ test("codesEmptyText: the empty column says the machine is clear, in the terse r
 
 // ---------------------------------------------------------------------------
 // VRAM COOLANT (the captain's live-look item 3): the fourth instrument. The
-// fill and band mirrors of Mount Monitor's PR-18 telltale semantics, sampled
-// from this plugin's own nvidia-smi reading, floored by this plugin's own
-// vramFloorMib setting (3400 MiB unset, the PR-18 default).
+// fill mirrors Mount Monitor's PR-18 tank semantics, sampled from this
+// plugin's own nvidia-smi reading, floored by this plugin's own
+// vramFloorMib setting. The captain's 2026-11-06 defaults steer set the
+// card's own band lines: red below 500 MiB free, amber below 1500 MiB free
+// when unset (a fixed 1000 MiB approach margin above the floor); the bar
+// telltale keeps its own 3400 default.
 // ---------------------------------------------------------------------------
 
 test("coolantFill: free VRAM above the floor, as a fraction of everything above it (the PR-18 semantics)", () => {
@@ -449,45 +452,56 @@ test("coolantFill: free VRAM above the floor, as a fraction of everything above 
   assert.equal(Quattro.coolantFill(4000, 0, 3400), 0, "no capacity is an empty tank");
 });
 
-test("coolantFill and coolantBand agree with Mount Monitor's PR-18 decisions on the same numbers", () => {
-  // ringkit-conformance law, extended to the dash: the coolant card and the
-  // bar telltale cannot disagree about what the same free/total/floor means.
+test("coolantFill agrees with Mount Monitor's PR-18 fill on the same numbers", () => {
+  // Conformance law: the coolant tank level and the bar telltale cannot
+  // disagree about what the same free/total/floor means. The fill is the
+  // shared decision and stays a case-for-case mirror of mounts.js
+  // vramHeadroomFrac. The band is not mirrored: the captain's defaults steer
+  // gave the card its own lines (see the coolantBand tests below).
   const cases = [
     [3400, 8186, 3400], [8186, 8186, 3400], [1000, 8186, 3400], [4186, 8186, 3400],
     [5000, 8186, 3400], [6000, 8186, 3400], [7500, 8186, 3400], [1000, 8186, 9000],
     [3399, 8186, 3400], [4100, 24576, 3400], [9000, 24576, 3400],
+    [600, 8186, 500], [1500, 8186, 500], [4211, 8186, 500],
   ];
   for (const [free, total, floor] of cases) {
     assert.equal(Quattro.coolantFill(free, total, floor), Mounts.vramHeadroomFrac(free, total, floor),
       `coolantFill(${free}, ${total}, ${floor}) must equal mounts.js vramHeadroomFrac`);
-    assert.equal(Quattro.coolantBand(free, total, floor), Mounts.rawVramBand(free, total, floor),
-      `coolantBand(${free}, ${total}, ${floor}) must equal mounts.js rawVramBand`);
   }
-  // One deliberate difference on a missing reading: the telltale's rawVramBand
-  // says 0 (no alarm), the gauge says null (an unavailable reading never draws
-  // as healthy). Both honest, neither a 0% lie.
-  assert.equal(Quattro.coolantBand(null, 8186, 3400), null);
-  assert.equal(Mounts.rawVramBand(null, 8186, 3400), 0);
 });
 
-test("coolantBand: red below the floor, amber within the approach zone, green above, no reading is null", () => {
+test("coolantBand: the captain's lines, red below the floor, amber 1000 MiB above it, green above that, no reading is null", () => {
   const total = 8186;
-  const floor = 3400;
-  assert.equal(Quattro.coolantBand(null, total, floor), null, "a missing reading never draws as healthy");
-  assert.equal(Quattro.coolantBand(3399, total, floor), 2, "below the floor is red");
-  assert.equal(Quattro.coolantBand(floor + 0.10 * total - 1, total, floor), 1, "the approach zone is amber");
-  assert.equal(Quattro.coolantBand(floor + 0.10 * total, total, floor), 0, "above the approach zone is green");
+  // The unset defaults, exactly the steer's numbers: red at 500, amber at 1500.
+  assert.equal(Quattro.coolantBand(null, total, 500), null, "a missing reading never draws as healthy");
+  assert.equal(Quattro.coolantBand(499, total, 500), 2, "below the 500 floor is red");
+  assert.equal(Quattro.coolantBand(500, total, 500), 1, "at the floor the approach zone opens");
+  assert.equal(Quattro.coolantBand(1499, total, 500), 1, "1499 free is amber, one under the 1500 line");
+  assert.equal(Quattro.coolantBand(1500, total, 500), 0, "1500 free is green, the steer's amber line");
+  // A raised floor moves both lines, the margin staying 1000 MiB.
+  assert.equal(Quattro.coolantBand(1999, total, 2000), 2, "below a raised floor is red");
+  assert.equal(Quattro.coolantBand(2999, total, 2000), 1, "the approach zone rides the floor");
+  assert.equal(Quattro.coolantBand(3000, total, 2000), 0, "floor plus margin is green");
+  // One deliberate difference from the bar telltale on a missing reading: the
+  // telltale's rawVramBand says 0 (no alarm), the gauge says null (an
+  // unavailable reading never draws as healthy). Both honest, neither a 0% lie.
+  assert.equal(Mounts.rawVramBand(null, total, 500), 0);
 });
 
 test("coolantTip: the four-row teaching decode with the live level and the floor named", () => {
-  const tip = Quattro.coolantTip({ present: true, freeMib: 4211, totalMib: 8186 }, 3400);
+  const tip = Quattro.coolantTip({ present: true, freeMib: 4211, totalMib: 8186 }, 500);
   assert.equal(tip.header, "VRAM COOLANT");
   same(tip.rows.map(r => r.label), ["Now:", "What:", "Why:", "Ranges:"]);
-  assert.equal(tip.rows[0].text, "4211 MiB free of 8186 MiB. Floor 3400 MiB.");
-  assert.equal(tip.rows[3].text.endsWith("vramFloorMib setting, 3400 MiB unset."), true,
+  assert.equal(tip.rows[0].text, "4211 MiB free of 8186 MiB. Floor 500 MiB.");
+  assert.equal(tip.rows[3].text.endsWith("vramFloorMib setting, 500 MiB unset."), true,
     "the ranges row names the setting and the default");
-  const empty = Quattro.coolantTip(null, 3400);
+  assert.equal(tip.rows[3].text.startsWith("Red below the floor. Amber within 1000 MiB of the floor above it."), true,
+    "the ranges row teaches the fixed margin, not a fraction of total");
+  const empty = Quattro.coolantTip(null, 500);
   assert.equal(empty.rows[0].text, "no VRAM reading yet.", "a missing reading is said, not drawn as zero");
+  const unset = Quattro.coolantTip({ present: true, freeMib: 900, totalMib: 8186 });
+  assert.equal(unset.rows[0].text, "900 MiB free of 8186 MiB. Floor 500 MiB.",
+    "no floor argument falls back to the steer's 500 default");
 });
 
 test("codeTip: the approved three-row decode with the severity color class", () => {
