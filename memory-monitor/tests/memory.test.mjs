@@ -224,7 +224,7 @@ test("nothing watched and nothing held means no badge at all", () => {
   assert.equal(Memory.mostSevereForBar([{ type: "hd", band: 2, pct: 91, absent: true }]), null);
 });
 
-test("a held band says it is held, in the detail window and on the bar, for every resource", () => {
+test("a held band says it is held in the detail window only; the bar popup drops the held column, for every resource", () => {
   const held = { type: "ram", band: 2, pct: 93, latched: true, memAvailableKb: 1, memTotalKb: 2, swapPct: null };
   assert.match(Memory.tooltipText(held), /held: this band has not released yet/);
   const released = { type: "ram", band: 2, pct: 93, latched: false, memAvailableKb: 1, memTotalKb: 2, swapPct: null };
