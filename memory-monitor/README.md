@@ -256,12 +256,12 @@ On the widget's entry in `shell.json`:
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
-| `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. |
+| `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. The light follows it until the dash's gauge settings row sets the coolant thresholds. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
 Thresholds and the guard answer are not `shell.json` settings — they live in
-`~/.local/state/memory-monitor/settings.json`, written by onboarding and the
-detail window.
+`~/.local/state/memory-monitor/settings.json`, written by onboarding, the
+detail window, and the dash's gauge settings row.
 
 ## Tests
 
