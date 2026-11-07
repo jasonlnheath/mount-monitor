@@ -142,10 +142,11 @@ as the empty state), and the VRAM COOLANT reservoir: free VRAM above the
 `vramFloorMib` floor (500 MiB unset, the captain's 2026-11-06 defaults, sampled
 by this plugin's own nvidia-smi read), green above the approach zone (1000 MiB
 of headroom above the floor, so amber at 1500 MiB free when unset), amber
-inside it, red below the floor, a dim empty tank when no reading exists. Under them, the codes area: ONE column under one check-engine
-head, red and amber codes together, always most critical at the top, rows
-stretched across the full card so each code carries its reading and its
-status. A code is the monitor's own live fault - a watched resource sitting
+inside it, red below the floor, a dim empty tank when no reading exists. Under
+them, the codes area: ONE column under one check-engine head, red and amber
+codes together, always most critical at the top, rows stretched across the
+full card so each code carries its reading and its status. A code is the
+monitor's own live fault - a watched resource sitting
 over your amber or red ceiling - wearing an OBD-style name (P for System RAM,
 C for VRAM and drives, plus four stable digits) and a hover decode (Issue /
 Status / Fix). An empty column reads "all clear." under the unlit head; no
