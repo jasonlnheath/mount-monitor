@@ -374,7 +374,7 @@ test("no shell string, no hand-built redirect, and no process call qmllint canno
 });
 
 test("the widget's own copy is only the bar's logo and the tooltip, both of which memory.js supplies", () => {
-  // Quattro Dash is the bar emblem (the approved design): the MIL artwork
+  // QuattroDash is the bar emblem (the approved design): the MIL artwork
   // renders through QuattroSymbol, so the widget's own copy is only the bar
   // tooltip, which memory.js supplies.
   assert.equal(QML.includes("Memory.barTooltip(") || QML.includes("Memory.tooltipText("), true);

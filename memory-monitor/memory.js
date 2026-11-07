@@ -775,7 +775,7 @@ function hdCandidates(text, targets) {
   return out;
 }
 
-// Quattro Dash's one dashboard reading: the ROOT row of the findmnt table, on
+// QuattroDash's one dashboard reading: the ROOT row of the findmnt table, on
 // a real device, in percent FREE (the fuel gauge reads F = 100 percent free).
 // It is a reading, not a watch decision: root drive usage feeds the dashboard
 // whether or not the watch list covers it, and it never produces an alert.
@@ -1217,6 +1217,30 @@ function vramReading(gpu, apps) {
     band: 0,
     latched: false,
   };
+}
+
+// --- VRAM COOLANT floor (the QuattroDash card) -------------------------------
+//
+// The PR-18 semantics, mirrored: the coolant fill is free VRAM above the
+// user's floor, and the floor is the plugin's own `vramFloorMib` setting in
+// MiB. The captain's 2026-11-06 defaults steer set the card's own lines:
+// red below 500 MiB free, amber below 1500 MiB free when unset - so the
+// floor defaults to 500 and the amber approach margin (quattro.js
+// VRAM_AMBER_MARGIN_MIB) lands the amber line at 1500. Mount Monitor's bar
+// telltale keeps its own 3400 default; the two plugins' defaults are
+// deliberately different now. A floor at zero is a real answer (a floor at
+// zero never alarms) and is honored. The fill decision itself lives in
+// quattro.js next to the other dashboard instruments; the conformance test
+// pins it to mounts.js so the tank level cannot disagree with the telltale
+// about the same numbers. The band lines are the captain's own and are not
+// a rawVramBand mirror.
+
+var VRAM_FLOOR_DEFAULT_MIB = 500;
+
+function vramFloorMib(raw) {
+  const value = normalizeNumber(raw, -1);
+  if (value === null || value < 0) return VRAM_FLOOR_DEFAULT_MIB;
+  return Math.round(value);
 }
 
 function nvidiaMissingVerdict(text) {
@@ -2633,17 +2657,40 @@ function badgeLabel(type) {
 function barTooltip(entries) {
   const list = asList(entries) || [];
   if (list.length === 0) return "Memory Monitor - nothing watched";
-  const lines = ["Memory Monitor"];
+  const rows = [];
   for (const entry of list) {
     if (entry === null || entry === undefined) continue;
     const label = badgeLabel(entry.type);
     if (label.length === 0) continue;
     if (normalizeBool(entry.absent, false)) {
-      lines.push(label + ": not mounted now");
+      rows.push({ name: label, status: "not mounted now" });
       continue;
     }
     const held = normalizeBool(entry.latched, false) ? ", held" : "";
-    lines.push(label + " " + readingPct(entry.pct) + "% (" + (BAND_NAMES[asNumber(entry.band) || 0] || "none") + held + ")");
+    rows.push({
+      name: label,
+      status: readingPct(entry.pct) + "% (" + (BAND_NAMES[asNumber(entry.band) || 0] || "none") + held + ")",
+    });
+  }
+  if (rows.length === 0) return "Memory Monitor - nothing watched";
+  // The captain's live-look ruling: the name sits in a left column and the
+  // status in a right column. The bar's tooltip is one centered Text sized to
+  // its widest line: each line is centered inside that width, so a row
+  // shorter than its neighbours drifts off the columns. Every row therefore
+  // spans the same total width - the name field padded to one shared column
+  // (two spaces past the longest name) and the status right-padded to the
+  // longest status.
+  let longestName = 0;
+  let longestStatus = 0;
+  for (const row of rows) {
+    if (row.name.length > longestName) longestName = row.name.length;
+    if (row.status.length > longestStatus) longestStatus = row.status.length;
+  }
+  const pad = longestName + 2;
+  const width = pad + longestStatus;
+  const lines = ["Memory Monitor"];
+  for (const row of rows) {
+    lines.push((row.name + " ".repeat(pad - row.name.length) + row.status).padEnd(width));
   }
   return lines.join("\n");
 }

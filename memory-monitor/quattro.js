@@ -1,4 +1,4 @@
-// quattro.js — the Quattro Dash decision kernel: the approved instrument-
+// quattro.js — the QuattroDash decision kernel: the approved instrument-
 // cluster popup for Memory Monitor (board verdict "ship it", design rounds 1-7
 // at data/mm-dashboard-standard-design/ in the firstmate home).
 //
@@ -8,8 +8,9 @@
 // locked design defaults live here as named constants: the LED bands
 // (green >= 25 / yellow 10-25 / red < 10), the PSI zones (amber 60-80, red at
 // 80 and above), the fuel red zone (below 10 percent free), the 240-degree
-// dial, the instrument names (RAM PRESSURE / SWAP RESERVE / ROOT DRIVE), the
-// two-column popup content, the code taxonomy, and the dispatch toast copy.
+// dial, the instrument names (RAM PRESSURE / SWAP RESERVE / ROOT DRIVE /
+// VRAM COOLANT), the two-column popup content, the code taxonomy, and the
+// dispatch toast copy.
 //
 // The language rule is round 4's, and it is law: NO em dashes, NO en dashes,
 // NO semicolons in any string this module can produce. The copy register is
@@ -38,9 +39,10 @@
 // of the ringkit.js primitives, kept by hand because a QML JavaScript module
 // cannot import another one.
 
-// --- instrument names (round 5: brief names below each instrument) ----------
+// --- instrument names (round 5: brief names below each instrument; the VRAM
+// --- COOLANT lane joined them at the captain's live-look ruling) ------------
 
-var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE" };
+var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE", coolant: "VRAM COOLANT" };
 
 // --- palette (the approved mockup's colors, by role) -------------------------
 
@@ -74,6 +76,14 @@ var LED_YELLOW_AT = 10;
 var PSI_AMBER_AT = 60;
 var PSI_RED_AT = 80;
 var FUEL_RED_BELOW = 10;
+// The coolant card's approach zone, a fixed MiB margin above the floor: amber
+// when free VRAM falls under the floor plus this much. The captain's
+// 2026-11-06 defaults steer set the card's lines at amber=1500 MiB free,
+// red=500 MiB free, so the margin is 1000 over the 500 default floor.
+var VRAM_AMBER_MARGIN_MIB = 1000;
+// The unset-floor fallback, mirroring memory.js VRAM_FLOOR_DEFAULT_MIB. The
+// two plain modules cannot import each other, so the test pins both at 500.
+var VRAM_FLOOR_DEFAULT_MIB = 500;
 
 var psiZoneArcs = [
   { from: 0.60, to: 0.80, kind: "amber" },
@@ -149,6 +159,17 @@ var DIAL = {
   hubDotR: 3.2,
 };
 
+// --- coolant tank geometry (the PR-18 reservoir painter's numbers) -----------
+
+var COOLANT = {
+  strokeFract: 0.09,   // stroke width as a fraction of the smaller side
+  insetFract: 1.1,     // the outline's margin, in stroke widths
+  radiusFract: 0.14,   // corner radius as a fraction of the inner box
+  stripFract: 0.06,    // the thinnest liquid strip the painter draws
+  waveFract: 0.045,    // the surface wave amplitude, and the flat-strip threshold
+  dimAlpha: 0.45,      // the outline's alpha: the level reads before the tank
+};
+
 function polar(cx, cy, r, deg) {
   const a = ((deg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
@@ -217,6 +238,67 @@ function fuelNeedleFrac(pctFree) {
   const v = asNumber(pctFree);
   if (v === null) return null;
   return Math.max(0, Math.min(1, v / 100));
+}
+
+// --- the VRAM COOLANT instrument (the captain's live-look item 3) -----------
+//
+// The dash's fourth lane, carrying the VRAM telltale the captain expected to
+// find here: a coolant reservoir whose filled level is free VRAM above the
+// floor. The sampling is this plugin's own (memory.js vramReading, the
+// nvidia-smi numbers), the floor is this plugin's own vramFloorMib setting
+// (memory.js vramFloorMib, 500 MiB unset). The fill below is a hand mirror of
+// Mount Monitor's mounts.js vramHeadroomFrac, pinned case-for-case by the
+// conformance test so the tank level and the bar telltale cannot disagree
+// about the same numbers. The band below is the captain's own: red below the
+// floor, amber a fixed 1000 MiB above it, so the unset lines are 500 and
+// 1500 MiB free (the captain's 2026-11-06 defaults steer).
+
+function coolantFill(freeMib, totalMib, floorMib) {
+  const free = asNumber(freeMib);
+  const total = asNumber(totalMib);
+  if (free === null || total === null || total <= 0) return 0;
+  const floor = asNumber(floorMib);
+  const base = floor === null || floor < 0 ? 0 : floor;
+  const denom = total - base;
+  if (denom <= 0) return 0;
+  const frac = (free - base) / denom;
+  if (frac < 0) return 0;
+  if (frac > 1) return 1;
+  return frac;
+}
+
+// The band on its own, forgetting history - a gauge has no crossing to guard:
+// 2 below the floor, 1 inside the approach zone, 0 above it. No reading is
+// null, the dash's rule that an unavailable reading never draws as healthy.
+function coolantBand(freeMib, totalMib, floorMib) {
+  const free = asNumber(freeMib);
+  const total = asNumber(totalMib);
+  if (free === null || total === null || total <= 0) return null;
+  const floor = asNumber(floorMib);
+  const base = floor === null || floor < 0 ? 0 : floor;
+  if (free < base) return 2;
+  if (free < base + VRAM_AMBER_MARGIN_MIB) return 1;
+  return 0;
+}
+
+function coolantTip(reading, floorMib) {
+  const r = reading || null;
+  const floor = asNumber(floorMib);
+  const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
+  const free = r === null ? null : asNumber(r.freeMib);
+  const total = r === null ? null : asNumber(r.totalMib);
+  const now = free === null || total === null
+    ? "no VRAM reading yet."
+    : String(Math.round(free)) + " MiB free of " + String(Math.round(total)) + " MiB. Floor " + String(Math.round(floorNow)) + " MiB.";
+  return {
+    header: INSTRUMENTS.coolant,
+    rows: [
+      { label: "Now:", text: now, cls: "now" },
+      { label: "What:", text: "Coolant is your free VRAM above the floor. It is the headroom left for big model loads on the GPU." },
+      { label: "Why:", text: "When the tank runs dry the GPU has no room for the next model load." },
+      { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
+    ],
+  };
 }
 
 function gbFromKb(kb) {
@@ -307,16 +389,13 @@ function codesFromReadings(ram, vram, devices) {
     const severe = band >= 2;
     const kind = entry.type === "ram" ? "ram" : (entry.type === "vram" ? "vram" : "hd");
     const subject = kind === "ram" ? "System RAM" : (kind === "vram" ? "VRAM" : "Drive");
-    const descWord = kind === "hd" ? "drive" : kind;
     const pct = asNumber(entry.pct);
     const where = kind === "hd" && entry.target ? " " + sanitizePath(entry.target) : "";
     const reading = pct === null ? "unknown" : String(Math.round(pct));
-    const word = severe ? "red" : "amber";
     out.push({
       code: codeFor(kind, entry.key),
       sev: severe ? "r" : "a",
       band: band,
-      desc: descWord + " over the " + word + " line",
       issue: subject + where + " reading " + reading + " percent.",
       status: severe ? "severe, over your red ceiling." : "moderate, over your amber ceiling.",
       fix: severe
@@ -353,6 +432,29 @@ function codesFromReadings(ram, vram, devices) {
     return a.code < b.code ? -1 : a.code > b.code ? 1 : 0;
   });
   return out;
+}
+
+// The one check-engine head over the merged column. It tints by the most
+// severe code showing: red when any severe code shows, amber when only
+// moderate ones do, and the unlit emblem color when the column is empty. The
+// captain's live-look ruling: red and amber codes share ONE space, most
+// critical at the top, and no severity ever gets an empty section of its own.
+function codesHeadToken(codes) {
+  const list = codes === null || codes === undefined ? [] : codes;
+  let token = "dim";
+  for (let i = 0; i < list.length; i += 1) {
+    const code = list[i];
+    if (!code) continue;
+    if (code.sev === "r") return "red";
+    if (code.sev === "a") token = "amber";
+  }
+  return token;
+}
+
+// The line the empty column shows under the unlit head, so no codes never
+// reads as a broken section.
+function codesEmptyText() {
+  return "all clear.";
 }
 
 function codeTip(code) {
@@ -398,7 +500,13 @@ function dispatchRefused(code, why) {
   };
 }
 
-// --- the reserved spares row (the approved footer, captain's ruling) ---------
+// --- the reserved spares record (the approved footer, held back) -------------
+//
+// The captain's live-look ruling: future additions are not visible on the
+// dashboard. The three reserved lanes (oil, thermometer, hazard triangle) are
+// no longer drawn; this record is the note of what is held back, and the
+// SYMBOLS artwork stays so the lanes can be lit for real when their data
+// sources exist. Nothing here is user-visible.
 
 var SPARES = {
   caption: "FUTURE LANES (RESERVED)",
