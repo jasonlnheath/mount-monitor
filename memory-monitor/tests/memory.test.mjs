@@ -234,37 +234,45 @@ test("a held band says it is held, in the detail window and on the bar, for ever
   assert.equal(Memory.latchedText(true), "held: this band has not released yet");
   assert.equal(Memory.latchedText(false), "");
   assert.equal(Memory.latchedText(undefined), "", "a group that carries no latch flag is not called held");
-  assert.equal(
-    Memory.barTooltip([{ type: "ram", band: 2, pct: 93, latched: true }]).split("\n")[1],
-    "RAM  93% (red, held)",
-  );
-  assert.equal(
-    Memory.barTooltip([{ type: "hd", band: 1, pct: 84, latched: false }]).split("\n")[1],
-    "HD  84% (amber)",
-  );
+  // Round 2, the captain's edits: the bar popup's status column is a color
+  // dot ONLY - no percent, no band word, no held. A held band says it is
+  // held in the detail window (above); the bar popup cannot say it anymore.
+  assert.equal(Memory.barTooltip([{ type: "ram", band: 2, pct: 93, latched: true }]).includes("held"), false,
+    "the held column is gone from the bar popup");
+  assert.equal(Memory.barTooltip([{ type: "ram", band: 2, pct: 93, latched: true }]).includes("93%"), false,
+    "no reading rides the bar popup either");
 });
 
-test("the bar tooltip is two columns: the name on the left, the status on the right", () => {
-  // The captain's live-look ruling: the name sits in a left column, the status
-  // in a right column. The bar's tooltip is one centered Text sized to its
-  // widest line, so every row spans the same total width - a shorter row
-  // would be centered and drift off the shared columns.
+test("bandDot: white none, orange amber, red red and critical", () => {
+  assert.equal(Memory.bandDot(0), "\u26AA");
+  assert.equal(Memory.bandDot(1), "\uD83D\uDFE0");
+  assert.equal(Memory.bandDot(2), "\uD83D\uDD34");
+  assert.equal(Memory.bandDot(3), "\uD83D\uDD34");
+  assert.equal(Memory.bandDot(null), "\u26AA");
+  assert.equal(Memory.bandDot(undefined), "\u26AA");
+});
+
+test("the bar popup is a name column and a color-dot column under a centered title", () => {
+  // Round 2, the captain's edits on the preview board: the real name up top,
+  // no column headers, no Free column, status = color dot only, and the RAM
+  // / VRAM / Drive labels line up. The bar's tooltip is one centered Text
+  // sized to its widest line, so every row still spans the same total width
+  // and the two columns hold; the title line stays short and centers.
   const tip = Memory.barTooltip([
     { type: "ram", band: 0, pct: 42 },
     { type: "vram", band: 1, pct: 63 },
     { type: "hd", band: 2, pct: 97, latched: true },
   ]);
   assert.deepEqual(tip.split("\n"), [
-    "Memory Monitor",
-    "RAM   42% (none)     ",
-    "VRAM  63% (amber)    ",
-    "HD    97% (red, held)",
+    "Quattro Dash",
+    "RAM    \u26AA ",
+    "VRAM   \uD83D\uDFE0",
+    "Drive  \uD83D\uDD34",
   ]);
-  // Every status starts on the same column: two spaces past the longest name.
+  // Every dot starts on the same column: two spaces past the longest name.
   for (const line of tip.split("\n").slice(1)) {
-    assert.equal(line.charAt(5), " ", "the name field is the shared left column");
-    assert.equal(/\S/.test(line.slice(0, 5)), true, "the name occupies the left column");
-    assert.equal(/\S/.test(line.slice(6)), true, "the status occupies the right column");
+    assert.equal(/\S/.test(line.slice(0, 7)), true, "the name occupies the left column");
+    assert.equal(/\S/.test(line.slice(7)), true, "the dot occupies the right column");
   }
   // The shell centers each line inside the widest one, so equal total widths
   // are what keep the two columns aligned.
@@ -274,16 +282,21 @@ test("the bar tooltip is two columns: the name on the left, the status on the ri
   }
 });
 
-test("a drive that is away keeps its row, with the honest status in the right column", () => {
+test("a drive that is away keeps its row, with the white dot in the status column", () => {
   const tip = Memory.barTooltip([
     { type: "ram", band: 0, pct: 42 },
     { type: "hd", absent: true, band: 0 },
   ]);
   assert.deepEqual(tip.split("\n"), [
-    "Memory Monitor",
-    "RAM  42% (none)     ",
-    "HD   not mounted now",
+    "Quattro Dash",
+    "RAM    \u26AA",
+    "Drive  \u26AA",
   ]);
+});
+
+test("an empty watch list is the title alone", () => {
+  assert.equal(Memory.barTooltip([]), "Quattro Dash");
+  assert.equal(Memory.barTooltip(null), "Quattro Dash");
 });
 
 test("a drive that went away drops its alert", () => {

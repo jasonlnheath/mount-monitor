@@ -393,7 +393,7 @@ test("a dash-launched severe dispatch rides the same arm gate the toast path rid
   assert.match(dispatch, /Memory\.shouldStartArm\(/,
     "the gate is the arm's own single-flight check, not a dash-local guess");
   assert.match(dispatch, /Memory\.armBudgetCheck\(/, "the budget gate rides along");
-  assert.match(dispatch, /startArm\(alert, true\)/,
+  assert.match(dispatch, /startArm\(alert, true, diagnosisJsonText\)/,
     "the dispatched agent IS the arm: one flight, one agent, the v1 doctrine");
   assert.match(dispatch, /why: decision\.why/, "the refusal names why so the dash can say so");
 });
