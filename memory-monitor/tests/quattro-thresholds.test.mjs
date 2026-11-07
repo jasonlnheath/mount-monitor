@@ -5,8 +5,8 @@
 // ordering law (red never sits below amber, inverted where the marks count
 // what is LEFT) is enforced mechanically in quattro.js's slider model, never
 // with a warning. RAM pressure and root drive pairs are the plugin's real
-// alert ceilings; the swap-reserve ticks and the coolant lines are display
-// pairs persisted beside them in the plugin state file.
+// alert ceilings; the swap-reserve ticks and the coolant thresholds are
+// display pairs persisted beside them in the plugin state file.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Memory, repoFile, same } from "./load.mjs";
@@ -234,6 +234,20 @@ test("coolantBandWith bands from the drawn thresholds, with the margin fallback"
   assert.equal(Q.coolantBandWith(400, null, 500, 1500), null);
 });
 
+test("the coolant band and hover keep a floor-chain pair past the slider scale", () => {
+  // vramFloorMib 12288 with no stored pair hands the raw chain (amber 13288,
+  // red 12288) to the band and the hover decode; neither may clamp it to the
+  // 8192 slider ceiling or the light draws green where the floor is red.
+  assert.equal(Q.coolantBandWith(10000, 16310, 12288, 13288), 2, "free below the floor stays red");
+  assert.equal(Q.coolantBandWith(12600, 16310, 12288, 13288), 1, "the approach zone lights between the lines");
+  assert.equal(Q.coolantBandWith(14000, 16310, 12288, 13288), 0);
+  assert.equal(Q.coolantBandWith(12287, 16310, 12288, 13288), 2, "one MiB below the floor is red");
+  assert.equal(Q.coolantBandWith(400, 16310, null, null), 2, "a junk pair falls back to the recommended 500/1500");
+  const tip = Q.coolantTipWith({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288, 13288);
+  assert.ok(tip.rows[0].text.includes("Thresholds at 13288 and 12288 MiB free"), tip.rows[0].text);
+  assert.ok(tip.rows[3].text.includes("Red below 12288 MiB free. Amber below 13288 MiB free."), tip.rows[3].text);
+});
+
 // ---------------------------------------------------------------------------
 // The settings row's copy: one sentence per setting, in the row
 // ---------------------------------------------------------------------------
@@ -252,7 +266,7 @@ test("every gauge the row offers carries its own one-sentence description", () =
   assert.equal(Q.gaugeTitle("vram"), "VRAM COOLANT");
   assert.equal(Q.SETTINGS.header.length > 0, true);
   assert.equal(Q.SETTINGS.reset.length > 0, true);
-  assert.equal(Q.SETTINGS.hint.includes("Red never sits below amber"), true,
+  assert.equal(Q.SETTINGS.hint.includes("Red never crosses amber"), true,
     "the row says the law in words once, but never enforces it with a warning");
 });
 

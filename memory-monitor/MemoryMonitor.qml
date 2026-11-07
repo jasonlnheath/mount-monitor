@@ -943,10 +943,11 @@ BarWidget {
   // one amber/red pair per gauge, editable from the dash's settings row, and
   // persisted in the plugin state file. The RAM pressure and root drive pairs
   // ARE the plugin's alert ceilings, so they write through Memory.setCeiling
-  // and nothing else; the swap-reserve ticks and the coolant lines are display
-  // pairs stored beside them under gaugeSettings. The ordering law (red never
-  // below amber, inverted for the reserve and coolant marks) lives in
-  // quattro.js's slider model and is enforced mechanically, never in words.
+  // and nothing else; the swap-reserve ticks and the coolant thresholds are
+  // display pairs stored beside them under gaugeSettings. The ordering law
+  // (red never below amber, inverted for the reserve and coolant marks)
+  // lives in quattro.js's slider model and is enforced mechanically, never
+  // in words.
   //
   // A drag lands here per movement, so the disk write is coalesced: the state
   // updates live in memory and one timer flushes it once the dragging stops.
@@ -965,7 +966,13 @@ BarWidget {
     if (key === "vram" && (stored === null || stored === undefined)) {
       // No dash pair yet: the PR-18 floor chain stays the red line, and the
       // amber rides the same fixed margin above it quattro.js has always drawn.
-      return Quattro.gaugePair(key, { amber: null, red: vramFloorMib() });
+      // A pair the slider scale cannot hold returns before gaugePair(), whose
+      // clamp would pull the clipped lines onto GAUGE_MIB_MAX and recolor
+      // the bands.
+      var floor = vramFloorMib();
+      if (floor + Quattro.VRAM_AMBER_MARGIN_MIB > Quattro.GAUGE_MIB_MAX)
+        return { amber: floor + Quattro.VRAM_AMBER_MARGIN_MIB, red: floor };
+      return Quattro.gaugePair(key, { amber: null, red: floor });
     }
     return Quattro.gaugePair(key, stored);
   }
