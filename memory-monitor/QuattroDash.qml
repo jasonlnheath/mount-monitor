@@ -380,10 +380,14 @@ Panel {
         //      gone; the light tinted by the free-VRAM thresholds is the whole
         //      message, and high VRAM lights this light and throws no code.
         //      Hover shows VRAM used / reserved.
-        ColumnLayout {
+        // The wrap is a plain Item, not a ColumnLayout: in this Qt build a
+        // nested ColumnLayout caps at its implicit width and hugs left, while
+        // a plain Item honors Layout.fillWidth and stretches across the lane.
+        // Children anchor to its horizontal center.
+        Item {
           id: coolantWrap
           Layout.fillWidth: true
-          spacing: 4 * root.unit
+          height: childrenRect.height
 
           function tip() {
             return Quattro.coolantTip(
@@ -392,9 +396,10 @@ Panel {
           }
 
           Item {
+            id: coolantGlyph
             width: 40 * root.unit
             height: 40 * root.unit
-            Layout.alignment: Qt.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
 
             QuattroSymbol {
               anchors.fill: parent
@@ -414,14 +419,17 @@ Panel {
           }
 
           Text {
+            id: coolantLabel
             text: Quattro.INSTRUMENTS.coolant
+            anchors.top: coolantGlyph.bottom
+            anchors.topMargin: 4 * root.unit
+            anchors.horizontalCenter: parent.horizontalCenter
             color: root.dim
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             font.bold: true
             font.letterSpacing: 1.5
             horizontalAlignment: Text.AlignHCenter
-            Layout.alignment: Qt.AlignHCenter
           }
         }
 
