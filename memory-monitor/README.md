@@ -179,11 +179,12 @@ open it: one amber/red slider pair per gauge, each with its one-sentence
 description in the row, and a reset button that writes back the recommended
 defaults. The pairs move the drawn bands live — the RAM and ROOT DRIVE dials
 redraw their zones, the SWAP RESERVE gauge gains threshold ticks under its LED
-bar, the VRAM COOLANT tube draws its amber and red as dashed floor lines — and
-red can never sit below amber: moving one slider through the other pushes it.
+bar, and the VRAM COOLANT light re-tints green, amber, or red as free VRAM
+crosses its thresholds — and red never crosses amber: moving one slider
+through the other pushes it.
 There is no warning message; the push is the whole rule. The RAM pressure and
 root drive pairs are the plugin's real alert ceilings (the same numbers the
-detail window edits), and the reserve ticks and coolant lines are display
+detail window edits), and the reserve ticks and coolant thresholds are display
 pairs stored beside them in `~/.local/state/memory-monitor/settings.json`, so
 everything loads back on the next shell start.
 

@@ -659,7 +659,7 @@ function coolantTipWith(reading, redMib, amberMib) {
 
 var SETTINGS = {
   header: "GAUGE SETTINGS",
-  hint: "Drag a slider to move its band. Red never sits below amber.",
+  hint: "Drag a slider to move its band. Red never crosses amber.",
   reset: "RESET TO DEFAULTS",
   amberLabel: "AMBER",
   redLabel: "RED",

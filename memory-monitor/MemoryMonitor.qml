@@ -943,10 +943,11 @@ BarWidget {
   // one amber/red pair per gauge, editable from the dash's settings row, and
   // persisted in the plugin state file. The RAM pressure and root drive pairs
   // ARE the plugin's alert ceilings, so they write through Memory.setCeiling
-  // and nothing else; the swap-reserve ticks and the coolant lines are display
-  // pairs stored beside them under gaugeSettings. The ordering law (red never
-  // below amber, inverted for the reserve and coolant marks) lives in
-  // quattro.js's slider model and is enforced mechanically, never in words.
+  // and nothing else; the swap-reserve ticks and the coolant thresholds are
+  // display pairs stored beside them under gaugeSettings. The ordering law
+  // (red never below amber, inverted for the reserve and coolant marks)
+  // lives in quattro.js's slider model and is enforced mechanically, never
+  // in words.
   //
   // A drag lands here per movement, so the disk write is coalesced: the state
   // updates live in memory and one timer flushes it once the dragging stops.

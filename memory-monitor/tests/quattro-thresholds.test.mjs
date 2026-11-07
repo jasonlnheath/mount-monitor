@@ -5,8 +5,8 @@
 // ordering law (red never sits below amber, inverted where the marks count
 // what is LEFT) is enforced mechanically in quattro.js's slider model, never
 // with a warning. RAM pressure and root drive pairs are the plugin's real
-// alert ceilings; the swap-reserve ticks and the coolant lines are display
-// pairs persisted beside them in the plugin state file.
+// alert ceilings; the swap-reserve ticks and the coolant thresholds are
+// display pairs persisted beside them in the plugin state file.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Memory, repoFile, same } from "./load.mjs";
@@ -252,7 +252,7 @@ test("every gauge the row offers carries its own one-sentence description", () =
   assert.equal(Q.gaugeTitle("vram"), "VRAM COOLANT");
   assert.equal(Q.SETTINGS.header.length > 0, true);
   assert.equal(Q.SETTINGS.reset.length > 0, true);
-  assert.equal(Q.SETTINGS.hint.includes("Red never sits below amber"), true,
+  assert.equal(Q.SETTINGS.hint.includes("Red never crosses amber"), true,
     "the row says the law in words once, but never enforces it with a warning");
 });
 
