@@ -410,8 +410,8 @@ BarWidget {
   // the release direction. On the sample that releases a band, evaluateBands()
   // has already written the released band into the bands memory while the rows
   // still carry the stale one — an early-returning applyBand never touches the
-  // entry when nothing fires — so the badge and tooltip would print "HD 30%
-  // (red)" for one sample after the red band has gone. Rebind from the band
+  // entry when nothing fires — so the badge tooltip would keep the red dot
+  // for one sample after the red band has gone. Rebind from the band
   // memory evaluateBands just wrote. The copy-and-reassign is not a style
   // choice: the badge and tooltip bindings evaluate on the property assignment
   // itself and never see a later in-place fix (see buildReadings).

@@ -88,9 +88,9 @@ var LED_YELLOW_AT = 10;
 var PSI_AMBER_AT = 60;
 var PSI_RED_AT = 80;
 var FUEL_RED_BELOW = 10;
-// The coolant card's approach zone, a fixed MiB margin above the floor: amber
+// The coolant light's approach zone, a fixed MiB margin above the floor: amber
 // when free VRAM falls under the floor plus this much. The captain's
-// 2026-11-06 defaults steer set the card's lines at amber=1500 MiB free,
+// 2026-11-06 defaults steer set the light's lines at amber=1500 MiB free,
 // red=500 MiB free, so the margin is 1000 over the 500 default floor.
 var VRAM_AMBER_MARGIN_MIB = 1000;
 // The unset-floor fallback, mirroring memory.js VRAM_FLOOR_DEFAULT_MIB. The
