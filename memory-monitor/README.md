@@ -141,16 +141,19 @@ monitoring continues and a critical still notifies you, with the guard-off copy.
 
 Clicking the bar emblem opens the dashboard: two round meters drawn at
 exactly the same size (RAM PRESSURE reading the kernel's Pressure Stall
-Information from `/proc/pressure/memory`, some avg10, amber from 60, red at
-80; ROOT DRIVE as a fuel gauge where F is 100 percent free and the red zone
-sits below 10 percent free), a SWAP RESERVE battery telltale with a
-ten-segment LED bar (green at 25 percent or more, yellow from 10, red below
+Information from `/proc/pressure/memory`, some avg10, amber from 70, red at
+90; ROOT DRIVE as a fuel gauge where F is 100 percent free, the amber zone
+from 20 down to 10 percent free, the red zone below 10 percent free), a SWAP
+RESERVE battery telltale with a
+ten-segment LED bar (green at 20 percent or more, yellow from 10, red below
 10, pulsing when red, no swap configured reads as the empty state), and BELOW
 the battery, centered, the STANDARD ISO coolant warning light: the
 thermometer-in-liquid telltale, tinted by the free-VRAM thresholds (floor
 500 MiB unset, the captain's defaults, sampled by this plugin's own nvidia-smi
 read; red below the floor, amber the 1000 MiB approach zone above it, so amber
 at 1500 MiB free when unset, green above that, unlit when no reading exists).
+Every amber and red band in the cluster is the settings row's recommended
+default; the row moves them live.
 Hovering the light shows VRAM used / reserved in GiB. Under the cluster, the
 codes area: ONE column under one check-engine head, DRIVE codes only, always
 most critical at the top, rows stretched across the full card so each code

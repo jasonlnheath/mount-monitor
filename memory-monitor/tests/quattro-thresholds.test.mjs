@@ -379,7 +379,7 @@ test("a refused threshold lands as quattro.js's toast naming the critical line",
   const t = Q.ceilingBlockedToast("psi", 70, 90);
   assert.equal(t.mark, "\u2717");
   assert.equal(t.code, "THRESHOLD");
-  assert.equal(t.text, "the RAM PRESSURE critical line at 70 must sit above red 90. lower critical first.");
+  assert.equal(t.text, "the RAM PRESSURE critical line at 70 must sit above red 90. raise critical first.");
   assert.equal(/[\u2013\u2014;]/.test(t.text), false, "the refusal copy keeps the language law");
 
   const hd = Q.ceilingBlockedToast("hd", 85, 90);

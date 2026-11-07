@@ -239,8 +239,8 @@ function gaugePairIsDefault(key, pair) {
 }
 
 // Live dial zones from a pair. The drive gauge needle reads percent FREE, so
-// its used-percent thresholds flip ends when they land on the dial; the locked
-// fuel arcs are exactly what the defaults produce.
+// its used-percent thresholds flip ends when they land on the dial; at the
+// defaults the red zone is the locked one and the amber band extends it.
 function zoneArcsFor(key, amber, red) {
   const p = gaugePair(key, { amber: amber, red: red });
   const a = Math.max(0, Math.min(1, p.amber / 100));
@@ -884,7 +884,7 @@ function dispatchRefused(code, why) {
 // The settings row can ask for a red a user-set critical ceiling may not sit
 // under: the ceiling store's own law (critical above red) refuses the write,
 // and the refusal is said in words, the way every other declined action here
-// is. The toast names the gauge and both numbers, so the fix (lower critical
+// is. The toast names the gauge and both numbers, so the fix (raise critical
 // first) is one sentence away. A refusal with no critical in the record (not
 // reachable through the drawn sliders, which clamp inside the store's range)
 // still says what did not happen instead of nothing at all.
@@ -893,7 +893,7 @@ function ceilingBlockedToast(key, critical, red) {
   const r = asNumber(red);
   const label = gaugeTitle(key);
   const tail = c !== null && c > 0
-    ? "the " + label + " critical line at " + String(Math.round(c)) + " must sit above red " + String(Math.round(r)) + ". lower critical first."
+    ? "the " + label + " critical line at " + String(Math.round(c)) + " must sit above red " + String(Math.round(r)) + ". raise critical first."
     : "the " + label + " red line could not move to " + String(Math.round(r)) + ".";
   return {
     mark: "\u2717",

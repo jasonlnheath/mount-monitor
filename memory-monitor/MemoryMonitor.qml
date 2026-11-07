@@ -985,18 +985,25 @@ BarWidget {
       // The ceiling store demands strictly amber < red, so the pair lands in
       // three always-valid steps: lift red above both targets, drop amber in,
       // then set red. Every step validates on its own; none reorders silently.
-      // A step the critical ceiling blocks is not silent either: the refused
-      // drag hands the dash quattro.js's toast naming the critical line, and
-      // returns without touching the stored state.
+      // A step whose level already sits at its target is skipped, so a level
+      // the drag never moved keeps its provenance. A step the critical ceiling
+      // blocks is not silent either: the refused drag hands the dash
+      // quattro.js's toast naming the critical line, and returns without
+      // touching the stored state.
       var cur = thresholds(type);
-      var safeRed = Math.max(cur.red, next.amber + 1, next.red);
-      var first = Memory.setCeiling({ thresholds: merged.thresholds }, type, "red", safeRed);
-      if (!first.ok) return Quattro.ceilingBlockedToast(key, cur.critical, next.red);
-      var second = Memory.setCeiling({ thresholds: first.thresholds }, type, "amber", next.amber);
-      if (!second.ok) return Quattro.ceilingBlockedToast(key, cur.critical, next.red);
-      var third = Memory.setCeiling({ thresholds: second.thresholds }, type, "red", next.red);
-      if (!third.ok) return Quattro.ceilingBlockedToast(key, cur.critical, next.red);
-      merged.thresholds = third.thresholds;
+      var steps = [
+        ["red", Math.max(cur.red, next.amber + 1, next.red)],
+        ["amber", next.amber],
+        ["red", next.red],
+      ];
+      var out = merged.thresholds;
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i][1] === Memory.thresholdsFor({ thresholds: out }, type)[steps[i][0]]) continue;
+        var step = Memory.setCeiling({ thresholds: out }, type, steps[i][0], steps[i][1]);
+        if (!step.ok) return Quattro.ceilingBlockedToast(key, cur.critical, next.red);
+        out = step.thresholds;
+      }
+      merged.thresholds = out;
     } else {
       var gauge = JSON.parse(JSON.stringify(merged.gaugeSettings || {}));
       gauge[key] = next;
@@ -1014,21 +1021,25 @@ BarWidget {
     for (var key in pairs) {
       var type = key === "psi" ? "ram" : "hd";
       // The same three always-valid steps, so a reset works from any current
-      // pair, however far it sits above or below the recommended defaults. A
-      // user-set critical ceiling can block the restore (critical must sit
+      // pair, however far it sits above or below the recommended defaults, and
+      // a level already at its target is skipped so untouched provenance stays.
+      // A user-set critical ceiling can block the restore (critical must sit
       // above red, and the recommended red may climb past it): the reset then
       // says which gauge's critical line blocked it, through quattro.js's
       // toast, and touches nothing. Critical ceilings are the user's own and
       // reset never lowers one.
       var cur = Memory.thresholdsFor({ thresholds: thresholds }, type);
-      var safeRed = Math.max(cur.red, pairs[key].amber + 1, pairs[key].red);
-      var first = Memory.setCeiling({ thresholds: thresholds }, type, "red", safeRed);
-      if (!first.ok) return Quattro.ceilingBlockedToast(key, cur.critical, pairs[key].red);
-      var second = Memory.setCeiling({ thresholds: first.thresholds }, type, "amber", pairs[key].amber);
-      if (!second.ok) return Quattro.ceilingBlockedToast(key, cur.critical, pairs[key].red);
-      var third = Memory.setCeiling({ thresholds: second.thresholds }, type, "red", pairs[key].red);
-      if (!third.ok) return Quattro.ceilingBlockedToast(key, cur.critical, pairs[key].red);
-      thresholds = third.thresholds;
+      var steps = [
+        ["red", Math.max(cur.red, pairs[key].amber + 1, pairs[key].red)],
+        ["amber", pairs[key].amber],
+        ["red", pairs[key].red],
+      ];
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i][1] === Memory.thresholdsFor({ thresholds: thresholds }, type)[steps[i][0]]) continue;
+        var step = Memory.setCeiling({ thresholds: thresholds }, type, steps[i][0], steps[i][1]);
+        if (!step.ok) return Quattro.ceilingBlockedToast(key, cur.critical, pairs[key].red);
+        thresholds = step.thresholds;
+      }
     }
     merged.thresholds = thresholds;
     merged.gaugeSettings = {
