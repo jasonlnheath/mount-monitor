@@ -110,14 +110,6 @@ var VRAM_AMBER_MARGIN_MIB = 1000;
 // two plain modules cannot import each other, so the test pins both at 500.
 var VRAM_FLOOR_DEFAULT_MIB = 500;
 
-var psiZoneArcs = [
-  { from: 0.60, to: 0.80, kind: "amber" },
-  { from: 0.80, to: 1.0, kind: "red" },
-];
-var fuelZoneArcs = [
-  { from: 0.0, to: 0.10, kind: "red" },
-];
-
 var psiLabels = [
   { f: 0, t: "0" },
   { f: 0.25, t: "25" },
@@ -232,12 +224,6 @@ function adjustGaugePair(key, which, value, current) {
   return { amber: Math.max(now.amber, moved), red: moved };
 }
 
-function gaugePairIsDefault(key, pair) {
-  const p = gaugePair(key, pair);
-  const d = GAUGE_DEFAULTS[key] || GAUGE_DEFAULTS.psi;
-  return p.amber === d.amber && p.red === d.red;
-}
-
 // Live dial zones from a pair. The drive gauge needle reads percent FREE, so
 // its used-percent thresholds flip ends when they land on the dial; at the
 // defaults the red zone is the locked one and the amber band extends it.
@@ -272,6 +258,9 @@ function fuelZoneArcsFor(amberUsed, redUsed) {
     { from: lo, to: hi, kind: "amber" },
   ];
 }
+
+var psiZoneArcs = psiZoneArcsFor(PSI_AMBER_AT, PSI_RED_AT);
+var fuelZoneArcs = [{ from: 0, to: FUEL_RED_BELOW / 100, kind: "red" }];
 
 // The battery band from the pair: green at amber or more, yellow between red
 // and amber, red below red. ledBand keeps the locked 25/10 constants for the
@@ -399,11 +388,7 @@ function dialTicks() {
 // --- readings to needles and bands -------------------------------------------
 
 function ledBand(pct) {
-  const v = asNumber(pct);
-  if (v === null) return "red";
-  if (v >= LED_GREEN_AT) return "green";
-  if (v >= LED_YELLOW_AT) return "yellow";
-  return "red";
+  return ledBandWith(pct, LED_GREEN_AT, LED_YELLOW_AT);
 }
 
 function litSegments(pct) {
@@ -425,11 +410,7 @@ function reserveReading(swapTotals) {
 }
 
 function psiZone(psi) {
-  const v = asNumber(psi);
-  if (v === null) return null;
-  if (v >= PSI_RED_AT) return "red";
-  if (v >= PSI_AMBER_AT) return "amber";
-  return "green";
+  return psiZoneWith(psi, PSI_AMBER_AT, PSI_RED_AT);
 }
 
 function psiNeedleFrac(psi) {
@@ -461,14 +442,9 @@ function fuelNeedleFrac(pctFree) {
 // The thresholds are the captain's own steer: red at the floor (500 MiB free
 // unset), amber a fixed 1000 MiB above it (1500 free unset), green above that.
 function coolantBand(freeMib, totalMib, floorMib) {
-  const free = asNumber(freeMib);
-  const total = asNumber(totalMib);
-  if (free === null || total === null || total <= 0) return null;
   const floor = asNumber(floorMib);
   const base = floor === null || floor < 0 ? 0 : floor;
-  if (free < base) return 2;
-  if (free < base + VRAM_AMBER_MARGIN_MIB) return 1;
-  return 0;
+  return coolantBandWith(freeMib, totalMib, base, base + VRAM_AMBER_MARGIN_MIB);
 }
 
 // GiB with one decimal, the rounding the fuel gauge's mib() uses at the top
@@ -481,23 +457,11 @@ function gibFromMib(mibValue) {
 }
 
 function coolantTip(reading, floorMib) {
-  const r = reading || null;
   const floor = asNumber(floorMib);
   const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
-  const used = r === null ? null : asNumber(r.usedMib);
-  const free = r === null ? null : asNumber(r.freeMib);
-  const now = used === null || free === null
-    ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved.";
-  return {
-    header: INSTRUMENTS.coolant,
-    rows: [
-      { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Coolant is the GPU memory left over after what the GPU is using. Reserved means free: the headroom for the next big model load." },
-      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
-      { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
-    ],
-  };
+  const tip = coolantTipWith(reading, floorNow, floorNow + VRAM_AMBER_MARGIN_MIB);
+  tip.rows[3].text = "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset.";
+  return tip;
 }
 
 function gbFromKb(kb) {
@@ -517,66 +481,26 @@ function psiZoneWord(psi) {
 }
 
 function psiTip(psi) {
-  const some = asNumber(psi && psi.some_avg10);
-  const word = psiZoneWord(some);
-  const now = some === null || word === null
-    ? "no pressure reading yet."
-    : some.toFixed(1) + " PSI, " + word + ".";
-  return {
-    header: INSTRUMENTS.psi,
-    rows: [
-      { label: "Now:", text: now, cls: "now" },
-      { label: "Metric:", text: "PSI is a real kernel metric. It stands for Pressure Stall Information and comes from /proc/pressure/memory in Linux. It reports the percent of time programs were stalled waiting for RAM, averaged over the last 10 seconds." },
-      { label: "What:", text: "We show the kernel\u2019s \u201csome\u201d average, meaning at least one program was stuck waiting for RAM. The scale is 0 to 100 because that is exactly how the kernel reports it." },
-      { label: "Why:", text: "High pressure means the machine is starved for memory. Everything slows down and crashes get more likely." },
-      { label: "Ranges:", text: "Green below 60. Amber from 60 to 80. Red at 80 and above, which needs attention now." },
-    ],
-  };
+  return psiTipWith(psi, PSI_AMBER_AT, PSI_RED_AT);
 }
 
 function battTip(reserve) {
-  const r = reserve || { present: false, pct: 0 };
-  const pct = asNumber(r.pct);
-  const now = r.present === true && pct !== null
-    ? String(Math.round(pct)) + " percent remaining right now."
-    : "no swap is configured.";
-  const word = ledBand(pct);
-  return {
-    header: INSTRUMENTS.batt,
-    rows: [
-      { label: "Reserve:", text: now, cls: "now" },
-      { label: "What:", text: "Emergency swap is spare disk space the kernel uses when RAM runs out. It is the reserve that keeps the machine alive under memory pressure." },
-      { label: "Why:", text: "When this reserve drains to empty, the system stops like a car out of fuel." },
-      { label: "Ranges:", text: "Green at 25 percent or more. Yellow from 10 to 25. Red below 10. Right now: " + word + ".", cls: word === "red" ? "st-r" : (word === "yellow" ? "st-a" : "") },
-    ],
-  };
+  return battTipWith(reserve, LED_GREEN_AT, LED_YELLOW_AT);
 }
 
 function fuelTip(root) {
-  const r = root || null;
-  const pctFree = r === null ? null : asNumber(r.pctFree);
-  const gb = r === null ? null : gbFromKb(r.availKb);
-  const gbTotal = r === null ? null : gbFromKb(r.sizeKb);
-  const now = pctFree === null || gb === null || gbTotal === null
-    ? "no root reading yet."
-    : gb + " GB free of " + gbTotal + " GB (" + Math.round(pctFree) + " percent).";
-  return {
-    header: INSTRUMENTS.fuel,
-    rows: [
-      { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Fuel shows free space on the root drive, the disk that holds the OS and your files. F means 100 percent free, E means none." },
-      { label: "Why:", text: "When the root drive fills up the system can freeze or fail to write. Performance hinges on keeping it free." },
-      { label: "Ranges:", text: "Red below 10 percent free. Keep the needle away from E." },
-    ],
-  };
+  const tip = fuelTipWith(root, GAUGE_DEFAULTS.hd.amber, GAUGE_DEFAULTS.hd.red);
+  tip.rows[3].text = "Red below " + FUEL_RED_BELOW + " percent free. Keep the needle away from E.";
+  return tip;
 }
 
 // --- live-threshold tips ------------------------------------------------------
 //
 // The same four decodes with the drawn thresholds in the Ranges line, so hover
-// copy always matches what the gauges draw. The locked tips above stay exactly
-// as the design approved them, for the fallback paths and the pins; the dash
-// calls these, because its gauges follow the settings pair.
+// copy always matches what the gauges draw. The dash calls these, because its
+// gauges follow the settings pair; the locked decodes above are thin wrappers
+// over these at the locked constants, with the fuel and coolant tips keeping
+// their genuinely distinct locked Ranges wording.
 
 function psiZoneWith(psi, amber, red) {
   const p = gaugePair("psi", { amber: amber, red: red });

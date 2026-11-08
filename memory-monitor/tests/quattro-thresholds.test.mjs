@@ -166,15 +166,6 @@ test("every adjust result satisfies the ceiling store's strict order, swept over
   }
 });
 
-test("gaugePairIsDefault names the pairs the reset button would write", () => {
-  for (const key of Q.GAUGE_KEYS) {
-    assert.equal(Q.gaugePairIsDefault(key, null), true, `${key} unset is default`);
-    assert.equal(Q.gaugePairIsDefault(key, Q.GAUGE_DEFAULTS[key]), true);
-    assert.equal(Q.gaugePairIsDefault(key, { amber: Q.GAUGE_DEFAULTS[key].amber + 1, red: Q.GAUGE_DEFAULTS[key].red }), false);
-    assert.equal(Q.gaugePairIsDefault(key, { amber: Q.GAUGE_DEFAULTS[key].amber, red: Q.GAUGE_DEFAULTS[key].red + 1 }), false);
-  }
-});
-
 // ---------------------------------------------------------------------------
 // The drawn bands follow the pair live
 // ---------------------------------------------------------------------------

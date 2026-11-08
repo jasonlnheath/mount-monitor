@@ -94,7 +94,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "coolantBand", "coolantTip", "codesHeadToken", "codesEmptyText",
     "gibFromMib", "diagnosisSeverity", "diagnosisRecommendation",
     "diagnosisConsumers", "diagnosisJson",
-    "gaugePair", "adjustGaugePair", "gaugePairIsDefault", "gaugeRedAbove", "gaugeRange",
+    "gaugePair", "adjustGaugePair", "gaugeRedAbove", "gaugeRange",
     "gaugeClamp", "zoneArcsFor", "psiZoneArcsFor", "fuelZoneArcsFor", "ledBandWith",
     "battTickFracs", "coolantBandWith", "gaugeTitle",
     "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
