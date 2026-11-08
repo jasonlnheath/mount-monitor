@@ -657,7 +657,7 @@ function coolantTipWith(reading, redMib, amberMib) {
   const free = r === null ? null : asNumber(r.freeMib);
   const now = used === null || free === null
     ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved. Thresholds at " + String(Math.round(p.amber)) + " and " + String(Math.round(p.red)) + " MiB free.";
+    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved.";
   return {
     header: INSTRUMENTS.coolant,
     rows: [
