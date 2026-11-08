@@ -263,8 +263,8 @@ var psiZoneArcs = psiZoneArcsFor(PSI_AMBER_AT, PSI_RED_AT);
 var fuelZoneArcs = [{ from: 0, to: FUEL_RED_BELOW / 100, kind: "red" }];
 
 // The battery band from the pair: green at amber or more, yellow between red
-// and amber, red below red. ledBand keeps the locked 25/10 constants for the
-// copy paths; the drawn gauge follows the pair.
+// and amber, red below red. ledBand is the locked-constants form the tests pin;
+// the dash and the tips call this with the drawn pair.
 function ledBandWith(pct, amber, red) {
   const p = gaugePair("batt", { amber: amber, red: red });
   const v = asNumber(pct);
