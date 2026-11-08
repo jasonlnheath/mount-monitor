@@ -32,7 +32,9 @@ already alerting on — so one drive produces one toast, not two.
 
 ## Thresholds: you set the ceilings
 
-- **Amber 80%** and **red 90%** are the documented defaults.
+- **Amber 80%** and **red 90%** are the documented defaults, except System RAM,
+  whose recommended amber default is 70%: pressure is worth warning about
+  earlier than a drive filling up.
 - **Critical ships unset.** No critical band exists, no critical toast can fire,
   and the bar cannot glow for a ceiling you never chose. First run asks you for
   your ceilings; until the baseline log has enough samples the question says
@@ -41,7 +43,8 @@ already alerting on — so one drive produces one toast, not two.
   at. The recommendation is a recommendation, and your value wins.
 - One critical control per memory type — hard drive, VRAM, system RAM — set in
   the detail window or answered at onboarding. Each value records whether you
-  set it or it is still the default.
+  set it or it is still the default. The amber and red ceilings can also be
+  dragged live from the QuattroDash's gauge settings row.
 - Validation is `0 < amber < red < critical < 100`, with critical allowed to be
   unset. Thresholds live in `~/.local/state/memory-monitor/settings.json`.
 - Memory Monitor never writes a system limit. Your ceiling and the kernel's
@@ -138,16 +141,20 @@ monitoring continues and a critical still notifies you, with the guard-off copy.
 
 Clicking the bar emblem opens the dashboard: two round meters drawn at
 exactly the same size (RAM PRESSURE reading the kernel's Pressure Stall
-Information from `/proc/pressure/memory`, some avg10, amber from 60, red at
-80; ROOT DRIVE as a fuel gauge where F is 100 percent free and the red zone
-sits below 10 percent free), a SWAP RESERVE battery telltale with a
-ten-segment LED bar (green at 25 percent or more, yellow from 10, red below
+Information from `/proc/pressure/memory`, some avg10, amber from 70, red at
+90; ROOT DRIVE as a fuel gauge where F is 100 percent free, the amber zone
+from 20 down to 10 percent free, the red zone below 10 percent free), a SWAP
+RESERVE battery telltale with a
+ten-segment LED bar (green at 20 percent or more, yellow from 10, red below
 10, pulsing when red, no swap configured reads as the empty state), and BELOW
 the battery, centered, the STANDARD ISO coolant warning light: the
 thermometer-in-liquid telltale, tinted by the free-VRAM thresholds (floor
 500 MiB unset, the captain's defaults, sampled by this plugin's own nvidia-smi
 read; red below the floor, amber the 1000 MiB approach zone above it, so amber
 at 1500 MiB free when unset, green above that, unlit when no reading exists).
+The three percent-gauge bands start at the settings row's recommended
+defaults, the coolant light follows the VRAM floor until its sliders are
+touched, and the row moves them all live.
 Hovering the light shows VRAM used / reserved in GiB. Under the cluster, the
 codes area: ONE column under one check-engine head, DRIVE codes only, always
 most critical at the top, rows stretched across the full card so each code
@@ -170,6 +177,20 @@ refused, nothing starts and the red "not sent." toast says why: the guard is
 off, an agent is already on it, no memory headroom, or another screen owns
 the guard. Hovering any instrument gives the plain-words teaching decode, PSI
 included: it is a real kernel metric, not one we invented.
+
+The bottom of the dash carries the gauge settings row, collapsed until you
+open it: one amber/red slider pair per gauge, each with its one-sentence
+description in the row, and a reset button that writes back the recommended
+defaults. The pairs move the drawn bands live — the RAM and ROOT DRIVE dials
+redraw their zones, the SWAP RESERVE gauge gains threshold ticks under its LED
+bar, and the VRAM COOLANT light re-tints green, amber, or red as free VRAM
+crosses its thresholds — and red never crosses amber: moving one slider
+through the other pushes it.
+There is no warning message; the push is the whole rule. The RAM pressure and
+root drive pairs are the plugin's real alert ceilings (the same numbers the
+detail window edits), and the reserve ticks and coolant thresholds are display
+pairs stored beside them in `~/.local/state/memory-monitor/settings.json`, so
+everything loads back on the next shell start.
 
 ## The detail window
 
@@ -235,12 +256,12 @@ On the widget's entry in `shell.json`:
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
-| `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. |
+| `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. The light follows it until the dash's gauge settings row sets the coolant thresholds. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
 Thresholds and the guard answer are not `shell.json` settings — they live in
-`~/.local/state/memory-monitor/settings.json`, written by onboarding and the
-detail window.
+`~/.local/state/memory-monitor/settings.json`, written by onboarding, the
+detail window, and the dash's gauge settings row.
 
 ## Tests
 

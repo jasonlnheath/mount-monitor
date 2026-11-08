@@ -62,6 +62,12 @@ var DEVICE_PATH_MAX = 256;
 var DEFAULT_AMBER = 80;
 var DEFAULT_RED = 90;
 var DEFAULT_CRITICAL = null;
+// The QuattroDash threshold settings' recommended RAM amber (the captain's
+// 2026-11-07 round-1 ruling: make the defaults the recommended values). System
+// RAM is worth warning about earlier than a drive filling up, so its amber
+// default sits lower; red stays DEFAULT_RED for every kind and critical stays
+// unset until the user sets it.
+var DEFAULT_AMBER_RAM = 70;
 
 // ---------------------------------------------------------------------------
 // Polling. Nominal intervals, and the escalated interval a red or critical band
@@ -465,6 +471,10 @@ function unescapeFindmnt(value) {
 // pretending a default is his.
 // ---------------------------------------------------------------------------
 
+function defaultAmberFor(kind) {
+  return kind === "ram" ? DEFAULT_AMBER_RAM : DEFAULT_AMBER;
+}
+
 function normalizeMounts(value) {
   const list = recoverListOr(value, ["/"]);
   const out = [];
@@ -508,8 +518,14 @@ function normalizeThresholds(value) {
       if (stored === "default") return "default";
       return "user";
     };
+    // An amber the plugin itself wrote (provenance null or "default") yields
+    // to the current default, so a recommended-default change lands on installs
+    // whose file still carries the old number the plugin put there. A value the
+    // user or an outside writer set keeps its value and its provenance. Red
+    // keeps the plain rule: its default has never changed.
+    const pluginWrote = raw.amberSetBy === null || raw.amberSetBy === "default";
     out[kind] = {
-      amber: parsed.amber === null ? DEFAULT_AMBER : parsed.amber,
+      amber: parsed.amber === null || pluginWrote ? defaultAmberFor(kind) : parsed.amber,
       amberSetBy: who("amberSetBy", parsed.amber !== null),
       red: parsed.red === null ? DEFAULT_RED : parsed.red,
       redSetBy: who("redSetBy", parsed.red !== null),
@@ -1946,7 +1962,7 @@ function onboardingPrompt(reading, oomd, thresholds, logPath, resting) {
     fixed.push("Give a recommended amber, red and critical for each of Hard Drive, VRAM and System RAM, derived from that resting distribution");
   }
   fixed.push("and say what each line means on this machine. Say plainly when a chosen line sits inside the resting band.");
-  fixed.push("Then ask the user to set them. Amber and red default to " + DEFAULT_AMBER + "% and " + DEFAULT_RED + "% if he does not");
+  fixed.push("Then ask the user to set them. Amber defaults to " + DEFAULT_AMBER + "% (System RAM to " + DEFAULT_AMBER_RAM + "%) and red to " + DEFAULT_RED + "% if he does not");
   fixed.push("touch them; critical stays unset until he sets it, and until he does there is no critical band.");
   fixed.push("Never set a ceiling yourself, and never write over one the user has set.");
   fixed.push("Say out loud that swap is not a fourth threshold: crossing the kernel's swap limit raises the System RAM alert.");
@@ -2170,10 +2186,32 @@ function normalizeBands(value) {
   return out;
 }
 
+// The QuattroDash gauge threshold settings (the captain's 2026-11-07 ruling),
+// persisted beside the ceilings in the plugin state file. Sanitized to known
+// keys and finite rounded pairs only: the defaults, the slider clamps and the
+// ordering law are quattro.js decisions applied at every read, so nothing is
+// invented here and an absent key falls through to the live defaults.
+var GAUGE_SETTING_KEYS = ["batt", "vram"];
+
+function normalizeGaugeSettings(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const out = {};
+  for (const key of GAUGE_SETTING_KEYS) {
+    const pair = raw[key];
+    if (!pair || typeof pair !== "object") continue;
+    const amber = asNumber(pair.amber);
+    const red = asNumber(pair.red);
+    if (amber === null || red === null) continue;
+    out[key] = { amber: Math.round(amber), red: Math.round(red) };
+  }
+  return out;
+}
+
 function normalizeSettings(value) {
   const raw = value && typeof value === "object" ? value : {};
   return {
     thresholds: normalizeThresholds(raw.thresholds),
+    gaugeSettings: normalizeGaugeSettings(raw.gaugeSettings),
     guard: normalizeBool(raw.guard, null),
     guardAsked: normalizeBool(raw.guardAsked, false),
     ceilingsAsked: normalizeBool(raw.ceilingsAsked, false),
@@ -2218,7 +2256,7 @@ function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
   const sitting = restingPctFor(resting, type);
   const rec = recommendCeilings(type, resting);
   if (rec.provisional) {
-    lines.push("Recommended defaults until measured: amber " + DEFAULT_AMBER + "%, red " + DEFAULT_RED + "%, critical unset.");
+    lines.push("Recommended defaults until measured: amber " + defaultAmberFor(type) + "%, red " + DEFAULT_RED + "%, critical unset.");
   } else {
     lines.push("Recommended from this machine: amber " + rec.amber + "%, red " + rec.red + "%, critical " + rec.critical + "%.");
   }

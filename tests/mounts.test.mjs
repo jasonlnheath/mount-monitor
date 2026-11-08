@@ -105,7 +105,12 @@ test("the real findmnt run reports the models mount whenever it is mounted", (t)
   const out = execFileSync("findmnt", Mounts.findmntArgs(), { encoding: "utf8" });
   const list = Mounts.selectMounts(out, [MODELS], -1);
   assert.deepEqual(targets(list), [MODELS], "the live findmnt reading must yield a models ring");
-  assert.equal(list[0].readonly, true, `${MODELS} is mounted read-only on this rig`);
+  // The live mount's own options decide the expectation: this rig's models
+  // mount has been read-only and read-write at different times, and the ring
+  // must agree with whatever findmnt reports right now.
+  const liveOptions = execFileSync("findmnt", ["-rn", "-o", "OPTIONS", MODELS], { encoding: "utf8" }).trim();
+  assert.equal(list[0].readonly, liveOptions.split(",")[0] === "ro",
+    `the ring's readonly flag agrees with the live mount options (${liveOptions})`);
 
   // The form this change replaces, kept as the counterexample.
   const old = execFileSync("findmnt", ["-rn", "-t", "btrfs", "-o", "SOURCE,TARGET,USED,AVAIL,USE%"], { encoding: "utf8" });

@@ -56,6 +56,19 @@
 
 var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE", coolant: "VRAM COOLANT" };
 
+// The settings row names each gauge by its instrument name; the pair keys are
+// the gauge keys, so this is the one bridge between the two vocabularies.
+var GAUGE_TITLES = {
+  psi: INSTRUMENTS.psi,
+  hd: INSTRUMENTS.fuel,
+  batt: INSTRUMENTS.batt,
+  vram: INSTRUMENTS.coolant,
+};
+
+function gaugeTitle(key) {
+  return GAUGE_TITLES[key] || "";
+}
+
 // --- palette (the approved mockup's colors, by role) -------------------------
 
 var PAL = {
@@ -97,14 +110,6 @@ var VRAM_AMBER_MARGIN_MIB = 1000;
 // two plain modules cannot import each other, so the test pins both at 500.
 var VRAM_FLOOR_DEFAULT_MIB = 500;
 
-var psiZoneArcs = [
-  { from: 0.60, to: 0.80, kind: "amber" },
-  { from: 0.80, to: 1.0, kind: "red" },
-];
-var fuelZoneArcs = [
-  { from: 0.0, to: 0.10, kind: "red" },
-];
-
 var psiLabels = [
   { f: 0, t: "0" },
   { f: 0.25, t: "25" },
@@ -119,6 +124,193 @@ var fuelLabels = [
   { f: 0.75, t: "¾" },
   { f: 1, t: "F", color: "green" },
 ];
+
+// --- gauge threshold settings (the captain's 2026-11-07 round-1 ruling) -----
+//
+// Each gauge carries an amber/red pair the captain drags in the settings row
+// at the bottom of the dash, and the pair moves the drawn bands live. The law
+// the sliders enforce is mechanical: on the gauges where the bad end is high
+// (RAM pressure, root drive) red can never sit below amber, and on the pair
+// whose marks count what is LEFT (the swap reserve in percent, the VRAM
+// coolant lines in MiB free) amber can never sit below red. Moving one slider
+// through the other pushes the other, and no warning text exists.
+//
+// Defaults are the captain-approved recommended values: RAM pressure 70/90,
+// root drive 80/90, swap reserve 20/10, VRAM coolant 1500/500 MiB free.
+// psi and hd pairs are the plugin's own alert ceilings (memory.js thresholds);
+// batt and vram pairs are display decisions stored beside them.
+
+var GAUGE_KEYS = ["psi", "hd", "batt", "vram"];
+
+var GAUGE_DEFAULTS = {
+  psi: { amber: 70, red: 90 },
+  hd: { amber: 80, red: 90 },
+  batt: { amber: 20, red: 10 },
+  vram: { amber: 1500, red: 500 },
+};
+
+// Slider ranges. The percent gauges drag 1-99; the coolant lines drag 1-8192
+// MiB free, wide enough for the low half of any card this rig will see.
+var GAUGE_PCT_MIN = 1;
+var GAUGE_PCT_MAX = 99;
+var GAUGE_MIB_MAX = 8192;
+
+// True when the red number sits above the amber number (more used is worse).
+// The reserve and coolant marks run the other way: their red sits below amber.
+function gaugeRedAbove(key) {
+  return key === "psi" || key === "hd";
+}
+
+function gaugeRange(key) {
+  return key === "vram"
+    ? { min: GAUGE_PCT_MIN, max: GAUGE_MIB_MAX }
+    : { min: GAUGE_PCT_MIN, max: GAUGE_PCT_MAX };
+}
+
+function gaugeClamp(key, value) {
+  const n = asNumber(value);
+  if (n === null) return null;
+  const range = gaugeRange(key);
+  return Math.max(range.min, Math.min(range.max, Math.round(n)));
+}
+
+// The stored pair, sanitized. Absent or junk fields take the defaults, except
+// a coolant red the captain moved on his own: its amber then rides the same
+// fixed margin above it the card has always drawn, so a shell vramFloorMib of
+// 3400 still lands amber at 4400. A pair that arrives ordered the wrong way
+// round is brought back by the same push rule the sliders use, because a
+// stored pair and a dragged pair obey one law.
+function gaugePair(key, raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const defaults = GAUGE_DEFAULTS[key] || GAUGE_DEFAULTS.psi;
+  const range = gaugeRange(key);
+  let red = gaugeClamp(key, source.red);
+  if (red === null) red = defaults.red;
+  let amber = gaugeClamp(key, source.amber);
+  if (amber === null) {
+    amber = key === "vram" && red !== defaults.red
+      ? red + VRAM_AMBER_MARGIN_MIB
+      : defaults.amber;
+  }
+  amber = Math.max(range.min, Math.min(range.max, amber));
+  if (gaugeRedAbove(key)) return { amber: amber, red: Math.max(red, amber) };
+  return { amber: Math.max(amber, red), red: red };
+}
+
+// One slider moved: `which` is "amber" or "red", `value` the dragged number.
+// Moving one slider through the other pushes the other, so the drawn bands
+// never cross and no warning is ever needed. The RAM and root pairs are real
+// alert ceilings, whose store demands strictly amber < red, so on those gauges
+// the push keeps one percentage point of gap and drags the pushed slider off
+// the boundary rather than onto it. Returns the new pair.
+function adjustGaugePair(key, which, value, current) {
+  const moved = gaugeClamp(key, value);
+  if (moved === null) return gaugePair(key, current);
+  const now = gaugePair(key, current);
+  const range = gaugeRange(key);
+  if (gaugeRedAbove(key)) {
+    if (which === "red") {
+      let amber = Math.max(range.min, Math.min(now.amber, moved - 1));
+      let red = moved;
+      if (amber >= red) red = amber + 1;
+      return { amber: amber, red: red };
+    }
+    let amber = moved;
+    let red = Math.min(range.max, Math.max(now.red, moved + 1));
+    if (red <= amber) amber = red - 1;
+    return { amber: amber, red: red };
+  }
+  if (which === "amber") return { amber: moved, red: Math.min(now.red, moved) };
+  return { amber: Math.max(now.amber, moved), red: moved };
+}
+
+// Live dial zones from a pair. The drive gauge needle reads percent FREE, so
+// its used-percent thresholds flip ends when they land on the dial; at the
+// defaults the red zone is the locked one and the amber band extends it.
+function zoneArcsFor(key, amber, red) {
+  const p = gaugePair(key, { amber: amber, red: red });
+  const a = Math.max(0, Math.min(1, p.amber / 100));
+  const r = Math.max(0, Math.min(1, p.red / 100));
+  if (gaugeRedAbove(key)) {
+    return [
+      { from: a, to: r, kind: "amber" },
+      { from: r, to: 1, kind: "red" },
+    ];
+  }
+  return [
+    { from: 0, to: r, kind: "red" },
+    { from: r, to: a, kind: "amber" },
+  ];
+}
+
+function psiZoneArcsFor(amber, red) {
+  return zoneArcsFor("psi", amber, red);
+}
+
+function fuelZoneArcsFor(amberUsed, redUsed) {
+  const p = gaugePair("hd", { amber: amberUsed, red: redUsed });
+  const aFree = Math.max(0, Math.min(1, (100 - p.amber) / 100));
+  const rFree = Math.max(0, Math.min(1, (100 - p.red) / 100));
+  const lo = Math.min(aFree, rFree);
+  const hi = Math.max(aFree, rFree);
+  return [
+    { from: 0, to: lo, kind: "red" },
+    { from: lo, to: hi, kind: "amber" },
+  ];
+}
+
+var psiZoneArcs = psiZoneArcsFor(PSI_AMBER_AT, PSI_RED_AT);
+var fuelZoneArcs = [{ from: 0, to: FUEL_RED_BELOW / 100, kind: "red" }];
+
+// The battery band from the pair: green at amber or more, yellow between red
+// and amber, red below red. ledBand is the locked-constants form the tests pin;
+// the dash and the tips call this with the drawn pair.
+function ledBandWith(pct, amber, red) {
+  const p = gaugePair("batt", { amber: amber, red: red });
+  const v = asNumber(pct);
+  if (v === null) return "red";
+  if (v >= p.amber) return "green";
+  if (v >= p.red) return "yellow";
+  return "red";
+}
+
+// Threshold ticks for the reserve gauge, red below amber, in needle fractions.
+function battTickFracs(pair) {
+  const p = gaugePair("batt", pair);
+  return [
+    { f: p.red / 100, cls: "red" },
+    { f: p.amber / 100, cls: "amber" },
+  ];
+}
+
+// The pair behind the coolant band and its hover decode. It arrives from the
+// monitor's gaugePairFor already sanitized, so it keeps gaugePair's junk
+// fallback and amber-over-red ordering but never the slider-range clamp: a
+// vramFloorMib above GAUGE_MIB_MAX hands over the raw floor chain, whose
+// lines legitimately sit past the slider scale.
+function coolantPairUnclamped(redMib, amberMib) {
+  const defaults = GAUGE_DEFAULTS.vram;
+  let red = asNumber(redMib);
+  if (red === null) red = defaults.red;
+  let amber = asNumber(amberMib);
+  if (amber === null)
+    amber = red !== defaults.red ? red + VRAM_AMBER_MARGIN_MIB : defaults.amber;
+  return { amber: Math.max(amber, red), red: red };
+}
+
+// The coolant band from the settings pair instead of the fixed margin. A junk
+// or missing amber line falls back to the fixed margin above the red one, the
+// same shape the locked coolantBand draws. No reading is null, the dash's rule
+// that an unavailable reading never draws as healthy.
+function coolantBandWith(freeMib, totalMib, redMib, amberMib) {
+  const free = asNumber(freeMib);
+  const total = asNumber(totalMib);
+  if (free === null || total === null || total <= 0) return null;
+  const p = coolantPairUnclamped(redMib, amberMib);
+  if (free < p.red) return 2;
+  if (free < p.amber) return 1;
+  return 0;
+}
 
 // --- trust primitives (the ringkit.js copies, by hand) -----------------------
 
@@ -196,11 +388,7 @@ function dialTicks() {
 // --- readings to needles and bands -------------------------------------------
 
 function ledBand(pct) {
-  const v = asNumber(pct);
-  if (v === null) return "red";
-  if (v >= LED_GREEN_AT) return "green";
-  if (v >= LED_YELLOW_AT) return "yellow";
-  return "red";
+  return ledBandWith(pct, LED_GREEN_AT, LED_YELLOW_AT);
 }
 
 function litSegments(pct) {
@@ -222,11 +410,7 @@ function reserveReading(swapTotals) {
 }
 
 function psiZone(psi) {
-  const v = asNumber(psi);
-  if (v === null) return null;
-  if (v >= PSI_RED_AT) return "red";
-  if (v >= PSI_AMBER_AT) return "amber";
-  return "green";
+  return psiZoneWith(psi, PSI_AMBER_AT, PSI_RED_AT);
 }
 
 function psiNeedleFrac(psi) {
@@ -258,14 +442,9 @@ function fuelNeedleFrac(pctFree) {
 // The thresholds are the captain's own steer: red at the floor (500 MiB free
 // unset), amber a fixed 1000 MiB above it (1500 free unset), green above that.
 function coolantBand(freeMib, totalMib, floorMib) {
-  const free = asNumber(freeMib);
-  const total = asNumber(totalMib);
-  if (free === null || total === null || total <= 0) return null;
   const floor = asNumber(floorMib);
   const base = floor === null || floor < 0 ? 0 : floor;
-  if (free < base) return 2;
-  if (free < base + VRAM_AMBER_MARGIN_MIB) return 1;
-  return 0;
+  return coolantBandWith(freeMib, totalMib, base, base + VRAM_AMBER_MARGIN_MIB);
 }
 
 // GiB with one decimal, the rounding the fuel gauge's mib() uses at the top
@@ -278,23 +457,11 @@ function gibFromMib(mibValue) {
 }
 
 function coolantTip(reading, floorMib) {
-  const r = reading || null;
   const floor = asNumber(floorMib);
   const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
-  const used = r === null ? null : asNumber(r.usedMib);
-  const free = r === null ? null : asNumber(r.freeMib);
-  const now = used === null || free === null
-    ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved.";
-  return {
-    header: INSTRUMENTS.coolant,
-    rows: [
-      { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Coolant is the GPU memory left over after what the GPU is using. Reserved means free: the headroom for the next big model load." },
-      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
-      { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
-    ],
-  };
+  const tip = coolantTipWith(reading, floorNow, floorNow + VRAM_AMBER_MARGIN_MIB);
+  tip.rows[3].text = "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset.";
+  return tip;
 }
 
 function gbFromKb(kb) {
@@ -314,8 +481,43 @@ function psiZoneWord(psi) {
 }
 
 function psiTip(psi) {
+  return psiTipWith(psi, PSI_AMBER_AT, PSI_RED_AT);
+}
+
+function battTip(reserve) {
+  return battTipWith(reserve, LED_GREEN_AT, LED_YELLOW_AT);
+}
+
+function fuelTip(root) {
+  const tip = fuelTipWith(root, GAUGE_DEFAULTS.hd.amber, GAUGE_DEFAULTS.hd.red);
+  tip.rows[3].text = "Red below " + FUEL_RED_BELOW + " percent free. Keep the needle away from E.";
+  return tip;
+}
+
+// --- live-threshold tips ------------------------------------------------------
+//
+// The same four decodes with the drawn thresholds in the Ranges line, so hover
+// copy always matches what the gauges draw. The dash calls these, because its
+// gauges follow the settings pair; the locked decodes above are thin wrappers
+// over these at the locked constants, with the fuel and coolant tips keeping
+// their genuinely distinct locked Ranges wording.
+
+function psiZoneWith(psi, amber, red) {
+  const p = gaugePair("psi", { amber: amber, red: red });
+  const v = asNumber(psi);
+  if (v === null) return null;
+  if (v >= p.red) return "red";
+  if (v >= p.amber) return "amber";
+  return "green";
+}
+
+function psiTipWith(psi, amber, red) {
+  const p = gaugePair("psi", { amber: amber, red: red });
   const some = asNumber(psi && psi.some_avg10);
-  const word = psiZoneWord(some);
+  const zone = psiZoneWith(some, p.amber, p.red);
+  const word = zone === "red" ? "red, act now"
+    : (zone === "amber" ? "amber, getting heavy"
+    : (zone === "green" ? "green, healthy" : null));
   const now = some === null || word === null
     ? "no pressure reading yet."
     : some.toFixed(1) + " PSI, " + word + ".";
@@ -326,30 +528,32 @@ function psiTip(psi) {
       { label: "Metric:", text: "PSI is a real kernel metric. It stands for Pressure Stall Information and comes from /proc/pressure/memory in Linux. It reports the percent of time programs were stalled waiting for RAM, averaged over the last 10 seconds." },
       { label: "What:", text: "We show the kernel\u2019s \u201csome\u201d average, meaning at least one program was stuck waiting for RAM. The scale is 0 to 100 because that is exactly how the kernel reports it." },
       { label: "Why:", text: "High pressure means the machine is starved for memory. Everything slows down and crashes get more likely." },
-      { label: "Ranges:", text: "Green below 60. Amber from 60 to 80. Red at 80 and above, which needs attention now." },
+      { label: "Ranges:", text: "Green below " + p.amber + ". Amber from " + p.amber + " to " + p.red + ". Red at " + p.red + " and above, which needs attention now." },
     ],
   };
 }
 
-function battTip(reserve) {
+function battTipWith(reserve, amber, red) {
+  const p = gaugePair("batt", { amber: amber, red: red });
   const r = reserve || { present: false, pct: 0 };
   const pct = asNumber(r.pct);
   const now = r.present === true && pct !== null
     ? String(Math.round(pct)) + " percent remaining right now."
     : "no swap is configured.";
-  const word = ledBand(pct);
+  const word = ledBandWith(pct, p.amber, p.red);
   return {
     header: INSTRUMENTS.batt,
     rows: [
       { label: "Reserve:", text: now, cls: "now" },
       { label: "What:", text: "Emergency swap is spare disk space the kernel uses when RAM runs out. It is the reserve that keeps the machine alive under memory pressure." },
       { label: "Why:", text: "When this reserve drains to empty, the system stops like a car out of fuel." },
-      { label: "Ranges:", text: "Green at 25 percent or more. Yellow from 10 to 25. Red below 10. Right now: " + word + ".", cls: word === "red" ? "st-r" : (word === "yellow" ? "st-a" : "") },
+      { label: "Ranges:", text: "Green at " + p.amber + " percent or more. Yellow from " + p.red + " to " + p.amber + ". Red below " + p.red + ". Right now: " + word + ".", cls: word === "red" ? "st-r" : (word === "yellow" ? "st-a" : "") },
     ],
   };
 }
 
-function fuelTip(root) {
+function fuelTipWith(root, amberUsed, redUsed) {
+  const p = gaugePair("hd", { amber: amberUsed, red: redUsed });
   const r = root || null;
   const pctFree = r === null ? null : asNumber(r.pctFree);
   const gb = r === null ? null : gbFromKb(r.availKb);
@@ -357,16 +561,54 @@ function fuelTip(root) {
   const now = pctFree === null || gb === null || gbTotal === null
     ? "no root reading yet."
     : gb + " GB free of " + gbTotal + " GB (" + Math.round(pctFree) + " percent).";
+  const redFree = 100 - p.red;
+  const amberFree = 100 - p.amber;
   return {
     header: INSTRUMENTS.fuel,
     rows: [
       { label: "Now:", text: now, cls: "now" },
       { label: "What:", text: "Fuel shows free space on the root drive, the disk that holds the OS and your files. F means 100 percent free, E means none." },
       { label: "Why:", text: "When the root drive fills up the system can freeze or fail to write. Performance hinges on keeping it free." },
-      { label: "Ranges:", text: "Red below 10 percent free. Keep the needle away from E." },
+      { label: "Ranges:", text: "Red below " + redFree + " percent free, amber below " + amberFree + " percent free. Keep the needle away from E." },
     ],
   };
 }
+
+function coolantTipWith(reading, redMib, amberMib) {
+  const p = coolantPairUnclamped(redMib, amberMib);
+  const r = reading || null;
+  const used = r === null ? null : asNumber(r.usedMib);
+  const free = r === null ? null : asNumber(r.freeMib);
+  const now = used === null || free === null
+    ? "no VRAM reading yet."
+    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved.";
+  return {
+    header: INSTRUMENTS.coolant,
+    rows: [
+      { label: "Now:", text: now, cls: "now" },
+      { label: "What:", text: "Coolant is the GPU memory left over after what the GPU is using. Reserved means free: the headroom for the next big model load." },
+      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
+      { label: "Ranges:", text: "Red below " + String(Math.round(p.red)) + " MiB free. Amber below " + String(Math.round(p.amber)) + " MiB free. Green above that. The gauge settings sliders move the thresholds." },
+    ],
+  };
+}
+
+// --- the settings row (the captain's round-1 ruling: one sentence per
+// --- setting lives HERE, in the row, not in a popup inside the dashboard) ----
+
+var SETTINGS = {
+  header: "GAUGE SETTINGS",
+  hint: "Drag a slider to move its band. Red never crosses amber.",
+  reset: "RESET TO DEFAULTS",
+  amberLabel: "AMBER",
+  redLabel: "RED",
+  copy: {
+    psi: "Amber is where RAM pressure starts to build, red is where programs are stalling and the machine needs help.",
+    hd: "Amber is where the root drive starts to fill, red is where it is nearly full and cleanup is due.",
+    batt: "Ticks mark the emergency swap reserve, amber when it runs low and red just before empty.",
+    vram: "The light tracks your free VRAM, amber when the next big model load gets risky, red at the floor where nothing fits.",
+  },
+};
 
 // --- codes: the monitor's own live state, as the approved taxonomy -----------
 //
@@ -560,6 +802,27 @@ function dispatchRefused(code, why) {
     mark: "\u2717",
     code: code,
     text: REFUSALS[why] || "not sent.",
+  };
+}
+
+// The settings row can ask for a red a user-set critical ceiling may not sit
+// under: the ceiling store's own law (critical above red) refuses the write,
+// and the refusal is said in words, the way every other declined action here
+// is. The toast names the gauge and both numbers, so the fix (raise critical
+// first) is one sentence away. A refusal with no critical in the record (not
+// reachable through the drawn sliders, which clamp inside the store's range)
+// still says what did not happen instead of nothing at all.
+function ceilingBlockedToast(key, critical, red) {
+  const c = asNumber(critical);
+  const r = asNumber(red);
+  const label = gaugeTitle(key);
+  const tail = c !== null && c > 0
+    ? "the " + label + " critical line at " + String(Math.round(c)) + " must sit above red " + String(Math.round(r)) + ". raise critical first."
+    : "the " + label + " red line could not move to " + String(Math.round(r)) + ".";
+  return {
+    mark: "\u2717",
+    code: "THRESHOLD",
+    text: tail,
   };
 }
 

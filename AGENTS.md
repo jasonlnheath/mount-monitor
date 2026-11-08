@@ -43,8 +43,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `install.sh` copies `ringkit.js` beside the widget because the shell's plugin
   registry scans exactly one level. Its decisions live in
   `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`,
-  with the QuattroDash popup's own decisions (LED bands, dial geometry, code
-  taxonomy, cluster copy, the ISO symbol artwork) in `memory-monitor/quattro.js`,
+  with the QuattroDash popup's own decisions (LED bands, dial geometry, the
+  gauge threshold slider model and its settings-row copy, code taxonomy,
+  cluster copy, the ISO symbol artwork) in `memory-monitor/quattro.js`,
   rendered by `QuattroDash.qml` / `QuattroSymbol.qml` under the same
   plain-module law.
 - `skills/` holds the agent skills `install.sh` copies to `~/.agents/skills/`:
@@ -107,8 +108,9 @@ tests over `memory-monitor/memory.js` (parsers against fixtures, character-pinne
 toast copy per kind, thresholds and hysteresis, the guard budget gate and arm
 lifecycle, the baseline log, onboarding, the multi-instance gate, the install
 layout, the delegation guards) and over `memory-monitor/quattro.js` (the
-QuattroDash LED, PSI/fuel and coolant bands, code taxonomy and the no-em-dash
-copy rule) plus the RingKit conformance check that runs
+QuattroDash LED, PSI/fuel and coolant bands, the gauge threshold slider model
+and its live-band tests, code taxonomy and the no-em-dash copy rule) plus the
+RingKit conformance check that runs
 `ringkit.js`, `mounts.js bandFor` and `memory.js` against one set of band cases.
 
 ## Contracts worth not breaking

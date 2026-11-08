@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "memory.js" as Memory
+import "quattro.js" as Quattro
 import "ringkit.js" as RingKit
 
 // Memory Monitor — the sibling plugin of Mount Monitor, and a separate product.
@@ -935,6 +936,126 @@ BarWidget {
     next.thresholds = result.thresholds;
     writeState(next);
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The QuattroDash gauge threshold settings (the captain's 2026-11-07 ruling):
+  // one amber/red pair per gauge, editable from the dash's settings row, and
+  // persisted in the plugin state file. The RAM pressure and root drive pairs
+  // ARE the plugin's alert ceilings, so they write through Memory.setCeiling
+  // and nothing else; the swap-reserve ticks and the coolant thresholds are
+  // display pairs stored beside them under gaugeSettings. The ordering law
+  // (red never below amber, inverted for the reserve and coolant marks)
+  // lives in quattro.js's slider model and is enforced mechanically, never
+  // in words.
+  //
+  // A drag lands here per movement, so the disk write is coalesced: the state
+  // updates live in memory and one timer flushes it once the dragging stops.
+  // ---------------------------------------------------------------------------
+
+  function gaugePairFor(key): var {
+    if (key === "psi") return Quattro.gaugePair(key, {
+      amber: thresholds("ram").amber,
+      red: thresholds("ram").red,
+    });
+    if (key === "hd") return Quattro.gaugePair(key, {
+      amber: thresholds("hd").amber,
+      red: thresholds("hd").red,
+    });
+    var stored = state && state.gaugeSettings ? state.gaugeSettings[key] : null;
+    if (key === "vram" && (stored === null || stored === undefined)) {
+      // No dash pair yet: the PR-18 floor chain stays the red line, and the
+      // amber rides the same fixed margin above it quattro.js has always drawn.
+      // A pair the slider scale cannot hold returns before gaugePair(), whose
+      // clamp would pull the clipped lines onto GAUGE_MIB_MAX and recolor
+      // the bands.
+      var floor = vramFloorMib();
+      if (floor + Quattro.VRAM_AMBER_MARGIN_MIB > Quattro.GAUGE_MIB_MAX)
+        return { amber: floor + Quattro.VRAM_AMBER_MARGIN_MIB, red: floor };
+      return Quattro.gaugePair(key, { amber: null, red: floor });
+    }
+    return Quattro.gaugePair(key, stored);
+  }
+
+  function setGaugePair(key, which, value): var {
+    var next = Quattro.adjustGaugePair(key, which, value, gaugePairFor(key));
+    var merged = JSON.parse(JSON.stringify(state));
+    if (key === "psi" || key === "hd") {
+      var type = key === "psi" ? "ram" : "hd";
+      // The ceiling store demands strictly amber < red, so the pair lands in
+      // three always-valid steps: lift red above both targets, drop amber in,
+      // then set red. Every step validates on its own; none reorders silently.
+      // A step whose level already sits at its target is skipped, so a level
+      // the drag never moved keeps its provenance. A step the critical ceiling
+      // blocks is not silent either: the refused drag hands the dash
+      // quattro.js's toast naming the critical line, and returns without
+      // touching the stored state.
+      var cur = thresholds(type);
+      var steps = [
+        ["red", Math.max(cur.red, next.amber + 1, next.red)],
+        ["amber", next.amber],
+        ["red", next.red],
+      ];
+      var out = merged.thresholds;
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i][1] === Memory.thresholdsFor({ thresholds: out }, type)[steps[i][0]]) continue;
+        var step = Memory.setCeiling({ thresholds: out }, type, steps[i][0], steps[i][1]);
+        if (!step.ok) return Quattro.ceilingBlockedToast(key, cur.critical, next.red);
+        out = step.thresholds;
+      }
+      merged.thresholds = out;
+    } else {
+      var gauge = JSON.parse(JSON.stringify(merged.gaugeSettings || {}));
+      gauge[key] = next;
+      merged.gaugeSettings = gauge;
+    }
+    state = merged;
+    gaugeSaveTimer.restart();
+    return null;
+  }
+
+  function resetGaugeSettings(): var {
+    var merged = JSON.parse(JSON.stringify(state));
+    var thresholds = merged.thresholds;
+    var pairs = { psi: Quattro.GAUGE_DEFAULTS.psi, hd: Quattro.GAUGE_DEFAULTS.hd };
+    for (var key in pairs) {
+      var type = key === "psi" ? "ram" : "hd";
+      // The same three always-valid steps, so a reset works from any current
+      // pair, however far it sits above or below the recommended defaults, and
+      // a level already at its target is skipped so untouched provenance stays.
+      // A user-set critical ceiling can block the restore (critical must sit
+      // above red, and the recommended red may climb past it): the reset then
+      // says which gauge's critical line blocked it, through quattro.js's
+      // toast, and touches nothing. Critical ceilings are the user's own and
+      // reset never lowers one.
+      var cur = Memory.thresholdsFor({ thresholds: thresholds }, type);
+      var steps = [
+        ["red", Math.max(cur.red, pairs[key].amber + 1, pairs[key].red)],
+        ["amber", pairs[key].amber],
+        ["red", pairs[key].red],
+      ];
+      for (var i = 0; i < steps.length; i++) {
+        if (steps[i][1] === Memory.thresholdsFor({ thresholds: thresholds }, type)[steps[i][0]]) continue;
+        var step = Memory.setCeiling({ thresholds: thresholds }, type, steps[i][0], steps[i][1]);
+        if (!step.ok) return Quattro.ceilingBlockedToast(key, cur.critical, pairs[key].red);
+        thresholds = step.thresholds;
+      }
+    }
+    merged.thresholds = thresholds;
+    merged.gaugeSettings = {
+      batt: JSON.parse(JSON.stringify(Quattro.GAUGE_DEFAULTS.batt)),
+      vram: JSON.parse(JSON.stringify(Quattro.GAUGE_DEFAULTS.vram)),
+    };
+    state = merged;
+    gaugeSaveTimer.restart();
+    return null;
+  }
+
+  Timer {
+    id: gaugeSaveTimer
+    interval: 400
+    repeat: false
+    onTriggered: root.saveState()
   }
 
   // ---------------------------------------------------------------------------

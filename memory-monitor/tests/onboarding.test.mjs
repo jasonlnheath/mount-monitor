@@ -32,7 +32,7 @@ test("the ceiling question reports the reading before it asks anything", () => {
   const lines = text.split("\n");
   assert.match(lines[0], /^Memory Monitor - System RAM ceilings$/);
   assert.match(lines[1], /^Measured now: System RAM 98% used, .* available of .*$/);
-  assert.match(lines[2], /Your amber: 80% \(default\)\. Your red: 90% \(default\)\./);
+  assert.match(lines[2], /Your amber: 70% \(default\)\. Your red: 90% \(default\)\./);
   assert.match(lines[3], /^Your critical: not set - you have no ceiling, and no critical alert can fire\.$/);
   assert.match(lines[4], /^The kernel's ceiling: oomd at PSI 50% for 20s, or swap at 90%, watching \/user\.slice/);
   assert.match(lines[5], /^Recommended from this machine: amber 95%, red 98%, critical 99%\.$/);
@@ -79,7 +79,7 @@ test("the resting claim is measured from the log, and withheld until the log hol
 
 test("an unmeasured machine is recommended the documented defaults, never 'from this machine'", () => {
   const unmeasured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, null);
-  assert.match(unmeasured, /Recommended defaults until measured: amber 80%, red 90%, critical unset\./);
+  assert.match(unmeasured, /Recommended defaults until measured: amber 70%, red 90%, critical unset\./);
   assert.equal(unmeasured.includes("from this machine"), false, "an unmeasured machine claims no provenance");
   const rec = Memory.recommendCeilings("ram", null);
   assert.ok(rec.amber < rec.red, "the provisional pair is never amber above red");
@@ -151,7 +151,7 @@ test("settings survive the round trip, and garbage does not become a ceiling", (
   assert.equal(settings.arms[0].pid, 7);
 
   const garbage = Memory.normalizeSettings({ thresholds: { ram: { amber: "hot", red: null, critical: 500 } } });
-  assert.equal(garbage.thresholds.ram.amber, 80);
+  assert.equal(garbage.thresholds.ram.amber, 70);
   assert.equal(garbage.thresholds.ram.red, 90);
   assert.equal(garbage.thresholds.ram.critical, null, "a garbage critical stays unset rather than becoming a ceiling");
 });
