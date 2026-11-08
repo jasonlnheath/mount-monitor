@@ -285,13 +285,11 @@ test("normalizeGaugeSettings keeps well-formed pairs and drops everything else",
     junk: { amber: 1, red: 2 },
   });
   same(kept, {
-    psi: { amber: 70, red: 90 },
-    hd: { amber: 81, red: 90 },
     batt: { amber: 20, red: 10 },
     vram: { amber: 1500, red: 500 },
-  }, "known keys round, unknown keys drop");
+  }, "batt and vram round; psi and hd live only in the thresholds store; junk drops");
 
-  for (const junk of [null, "x", 5, {}, { psi: null }, { psi: "x" }, { psi: { amber: 1 } }, { psi: { red: 2 } }, { psi: { amber: "hot", red: 90 } }]) {
+  for (const junk of [null, "x", 5, {}, { batt: null }, { batt: "x" }, { batt: { amber: 1 } }, { batt: { red: 2 } }, { batt: { amber: "hot", red: 10 } }, { psi: { amber: 70, red: 90 } }]) {
     same(Memory.normalizeGaugeSettings(junk), {}, `junk gauge settings ${JSON.stringify(junk)} store nothing`);
   }
 });

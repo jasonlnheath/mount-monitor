@@ -2191,7 +2191,7 @@ function normalizeBands(value) {
 // keys and finite rounded pairs only: the defaults, the slider clamps and the
 // ordering law are quattro.js decisions applied at every read, so nothing is
 // invented here and an absent key falls through to the live defaults.
-var GAUGE_SETTING_KEYS = ["psi", "hd", "batt", "vram"];
+var GAUGE_SETTING_KEYS = ["batt", "vram"];
 
 function normalizeGaugeSettings(value) {
   const raw = value && typeof value === "object" ? value : {};
