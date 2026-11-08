@@ -701,12 +701,17 @@ Panel {
     }
 
     // ---- The dispatch toast: green-edged, bottom center, transient.
+    // The toast never grows past the card: the popup window clips at its own
+    // bounds, and a refusal sentence long enough to overflow would lose its
+    // first and last words (the gauge name and the fix) off both edges, so at
+    // the cap the copy wraps inside the toast instead. A toast that fits
+    // renders exactly as it did before the cap.
     Rectangle {
       id: toast
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.bottom: parent.bottom
       anchors.bottomMargin: 12
-      width: toastRow.implicitWidth + 28
+      width: Math.min(toastRow.implicitWidth + 28, parent.width)
       height: toastRow.implicitHeight + 16
       color: Quattro.PAL.tooltipBg
       radius: 10
@@ -723,6 +728,7 @@ Panel {
       RowLayout {
         id: toastRow
         anchors.centerIn: parent
+        width: Math.min(implicitWidth, toast.width - 28)
         spacing: 8
 
         Text {
@@ -738,6 +744,8 @@ Panel {
           color: root.fg
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+          Layout.fillWidth: true
         }
       }
 
