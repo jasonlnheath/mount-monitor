@@ -9,7 +9,8 @@
 // (green >= 25 / yellow 10-25 / red < 10), the PSI zones (amber 60-80, red at
 // 80 and above), the fuel red zone (below 10 percent free), the 240-degree
 // dial, the instrument names (RAM PRESSURE / SWAP RESERVE / ROOT DRIVE /
-// VRAM COOLANT), the two-column popup content, the code taxonomy, and the
+// VRAM - round 3 renamed the lane from VRAM COOLANT), the two-column popup
+// content, the code taxonomy, and the
 // dispatch toast copy.
 //
 // The language rule is round 4's, and it is law: NO em dashes, NO en dashes,
@@ -34,9 +35,11 @@
 //
 // Round 2 also replaced the VRAM COOLANT tank card with the STANDARD ISO
 // coolant warning light: the thermometer-in-liquid artwork this file already
-// owns (SYMBOLS.temp), centered below the battery, tinted green / amber / red
-// by coolantBand's own thresholds. The tank painter's coolantFill and COOLANT
-// geometry left with the card; the band and the tip stayed.
+// owns (SYMBOLS.temp), centered below the battery, tinted by coolantBand's
+// own thresholds (amber / red only: round 3's ruling put no green anywhere on
+// the VRAM instrument - clear is the unlit glyph). The tank painter's
+// coolantFill and COOLANT geometry left with the card; the band and the tip
+// stayed.
 //
 // The ISO 2575 / ISO 7000 telltale artwork in SYMBOLS is extracted verbatim
 // from the approved mockup (Public domain / CC0 on Wikimedia Commons, licenses
