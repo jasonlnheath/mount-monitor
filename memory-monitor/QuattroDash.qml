@@ -15,12 +15,57 @@ import "quattro.js" as Quattro
 // the battery the STANDARD ISO coolant warning light: the thermometer-in-
 // liquid telltale quattro.js owns, centered, tinted green / amber / red by
 // the free-VRAM thresholds (floor 500 MiB unset, amber 1000 MiB above it);
-// hovering it shows VRAM used / reserved. Then the codes area: ONE column
+// hovering it shows VRAM used / free of total. Then the codes area: ONE column
 // under one check-engine head, DRIVE codes only - RAM high is the pressure
 // gauge and the reserve battery, never a code, and VRAM high lights the
 // coolant light only. Clicking a code sends the plugin's agent prompt with
 // the dash's own pre-computed diagnosis appended as a fenced JSON block, so
 // Hermes explains from the dashboard's numbers.
+//
+// Round 3 (preview build): the plugin answers to "Quattro Dash". The popup
+// opens with the native hero header - the name in the native title size and
+// the ALL-CAPS tier phrase beneath it (the Bluetooth Panel.qml hero pattern
+// exactly) - and the VRAM lane joins the cluster as its own instrument.
+//
+// Round 3 iteration 2 (the captain's board pass, verbatim rulings applied):
+// the lane is called VRAM and shows the ENTIRE amount of VRAM; the bar keeps
+// the gray field, yellow and red zones, has NO green anywhere, and only the
+// red needle moves; a gas-tank scale rides along the bottom of the bar (F
+// full, E empty, 3/4 1/2 1/4 marks, F green / E red / the rest gray); the
+// coolant icon and the bar sit in a SQUARE exactly the size of the SWAP
+// RESERVE square with the bar exactly the LED bar's width; the VRAM square
+// sits BELOW the SWAP RESERVE gauge (the reserve gauge and its label moved
+// up to make room); RAM PRESSURE, VRAM and ROOT DRIVE labels share one
+// horizontal row; the twin-ring logo is GONE - the product logo is the
+// check-engine emblem and it tints with the state (monochrome when clear,
+// amber when amber, red when red), the same color the bar shows. A
+// valuesOnly mode (the captain's popup ruling) renders the
+// same card as a bare values list: numbers and units only, descriptions
+// bound for the settings section.
+//
+// Round 3 iteration 3 (the captain's pass on the v2 renders): the VRAM gas-
+// tank scale's letters and tick marks shrink to EXACTLY the scale the ROOT
+// DRIVE fuel dial draws its own E/F/fraction marks at (quattro.js
+// vramScaleSize over the dial Item's real laid-out width); and the SWAP
+// RESERVE square packs down to the row so the battery label sits one
+// laneGap above the VRAM square - the two center pieces read as one
+// instrument column centered against the dials.
+//
+// Round 3 iteration 4 (the captain's pass on the v3 renders, measured not
+// eyed): the shared RAM PRESSURE / VRAM / ROOT DRIVE label row is GONE - each
+// label sits directly under its own gauge, so nothing hangs on a row another
+// instrument owns. RAM PRESSURE and ROOT DRIVE are the primary gauges and
+// render LARGER: their lanes widen to 148 of the 419-unit card and the dial
+// Items fill those lanes (the v3 layout shrank them to a left-hugging 114,
+// ten pixels off their section's center - the measured off-centering), while
+// the SWAP RESERVE / VRAM middle lane takes the exact remainder and both
+// squares shrink (battery icon 30 to 26, square padding 17 to 14). The VRAM
+// gas-tank scale is TRUE TO FORM: one mapping (quattro.js vramTrackX) puts
+// the needle, the zones, the tick marks and the letters on the bar's real
+// track - E on the left edge, F on the right, 1/2 at the bar's exact
+// midpoint. And the RAM PRESSURE dial carries its own mark: the plain ISO
+// thermometer outline (quattro.js SYMBOLS.thermometer), no longer the
+// coolant light's in-liquid glyph - every instrument wears a distinct icon.
 //
 // This file draws. Every decision lives in quattro.js (bands, needle
 // geometry, zones, LED counts, code taxonomy, the diagnosis JSON, all copy)
@@ -94,14 +139,15 @@ Panel {
   // The coolant light's band (round 2: the tank card became the ISO light),
   // quattro.js's coolantBandWith over this plugin's own VRAM reading, fed the
   // settings pair, so the light's thresholds move live with the sliders. A
-  // missing reading is the unlit tint, never a confident green.
+  // missing reading is the unlit tint, never a confident green. Iteration 2:
+  // NO green anywhere on the VRAM instrument (the captain's ruling) - a clear
+  // reading is the unlit monochrome glyph, amber lights amber, red lights red.
   readonly property var coolantZone: Quattro.coolantBandWith(
     vram === null ? null : vram.vramFreeMib,
     vram === null ? null : vram.vramTotalMib,
     root.vramPair.red, root.vramPair.amber)
   readonly property color coolantTint: coolantZone === 2 ? Quattro.PAL.redHot
-    : (coolantZone === 1 ? Quattro.PAL.amber
-    : (coolantZone === 0 ? Quattro.PAL.green : Quattro.PAL.faceSym))
+    : (coolantZone === 1 ? Quattro.PAL.amber : Quattro.PAL.faceSym)
 
   // Round 2 doctrine: DRIVE codes only. RAM high is the pressure gauge and
   // the reserve battery, never an engine code; VRAM high lights the coolant
@@ -155,18 +201,91 @@ Panel {
   readonly property color codesHeadTint: Quattro.codesHeadToken(codes) === "red" ? Quattro.PAL.redHot
     : (Quattro.codesHeadToken(codes) === "amber" ? Quattro.PAL.amber : Quattro.PAL.faceSym)
 
+  // Round 3 hero: the machine's one tier, the worst thing the dash knows.
+  // The phrase rides under the plugin name, ALL CAPS, uncolored ink.
+  readonly property bool armLive: String(mon("liveArmKey", "")) !== ""
+  readonly property int tier: Quattro.tierFromStateWith(codes, coolantZone, psiSome < 0 ? null : psiSome, reserve.present ? reserve.pct : null, armLive, psiPair, battPair)
+  readonly property string tierPhrase: Quattro.tierPhrase(tier)
+
+  // Round 3 headroom gauge: the needle position on the horizontal tank, plus
+  // the zone markings - the coolant thresholds (the settings pair, the floor
+  // chain when no pair is stored) mapped onto the track.
+  // Zones draw even with no reading; the needle does not (an unavailable
+  // reading never draws as healthy). The needle is the ONLY moving part: the
+  // captain's iteration-2 ruling kept the gray field and the yellow/red zones
+  // and retired the band-tinted fill (and every other green) on this gauge.
+  readonly property real headFrac: Quattro.headroomFrac(
+    vram === null ? null : vram.vramFreeMib,
+    vram === null ? null : vram.vramTotalMib)
+  readonly property var headroomZones: Quattro.headroomZonesWith(
+    vram === null ? null : vram.vramTotalMib, vramPair.red, vramPair.amber)
+
+  // The hero emblem tints exactly as the bar's badge does: monochrome ink
+  // when all is good, amber at the first warning, red when severe or armed.
+  readonly property color heroEmblemTint: Quattro.heroTint(tier) === "red" ? Quattro.PAL.redHot
+    : (Quattro.heroTint(tier) === "amber" ? Quattro.PAL.amber : root.fg)
+
+  // The captain's values-only popup: actual readings, no descriptions. A
+  // dormant property in this build - the product can wire it to a setting
+  // when the settings round lands.
+  property bool valuesOnly: false
+  // The card's height tracks whichever list is showing: the full dash, or
+  // the captain's values-only popup (readings only, descriptions bound for
+  // the settings section).
+  readonly property real listHeight: (valuesOnly ? valuesContent : content).implicitHeight
+  readonly property var valueRows: Quattro.valueRows(
+    psiSome < 0 ? null : psiSome, reserve, rootDrive, vram, codes)
+
   // ---------------------------------------------------------------------------
   // Layout measures. The mockup is designed on the 443px card (the
-  // shell-standard Style.space(380) at this rig's font scale), inner width 419.
+  // shell-standard Style.space(380) at the shell's font scale), inner width 419.
   // Instruments scale with the card; fonts stay at the shell's own tokens.
-  // Three lanes share the row since round 2 (the coolant light moved below
-  // the battery), so each lane is a third of the row and both gauges draw at
-  // exactly the same size, the captain's item 3.
+  // Three lanes share the row since round 2, so each lane is a third of the
+  // row and both gauges draw at exactly the same size, the captain's item 3.
+  // Iteration 2: the SWAP RESERVE gauge and its label moved UP out of the row
+  // (his ruling) into the strip between the hero and the cluster row, and the
+  // VRAM square - the same exact size as the SWAP RESERVE square, both bound
+  // to squareH - takes the middle lane below where the reserve sat. The
+  // middle lane's VRAM label anchors to the dial lanes' own label row so
+  // RAM PRESSURE, VRAM and ROOT DRIVE share one horizontal line (ruling 6).
   readonly property real innerW: card.contentWidth - card.padding * 2
   readonly property real unit: innerW / 419
-  readonly property real laneW: (419 - 2 * 6) * unit / 3
-  readonly property real dialW: laneW
-  readonly property real dialH: 124 * unit
+  // Iteration 4 size hierarchy: the two dial lanes are the primary gauges and
+  // each takes 148 of the 419-unit card; the SWAP RESERVE / VRAM middle lane
+  // takes the EXACT remainder (the old thirds summed 0.2px over the row and
+  // the layout shaved the fuel lane a full pixel narrower than the psi lane).
+  // Round 4 (marks 1-4): the lanes come from quattro.js. The cluster is its
+  // own width, centered in the frame, instead of three lanes tiling the card
+  // edge to edge. Whole pixels throughout: a half-pixel dial lands as a soft
+  // ring, and mark 6 is about sharpness.
+  readonly property real dialLaneW: Math.round(Quattro.dialLaneWidthU() * unit)
+  readonly property real midLaneW: Math.round(Quattro.midLaneWidthU() * unit)
+  readonly property real clusterGap: Math.round(Quattro.clusterGapU() * unit)
+  readonly property real clusterW: 2 * root.dialLaneW + root.midLaneW + 2 * root.clusterGap
+  readonly property real laneGap: Math.round(4 * unit)
+  // MARK 1/2: the instrument band is as tall as its TALLEST column. The dial
+  // lanes want the viewbox aspect height (quattro.js dialItemHeightU); the
+  // two-square column wants 2 squares + 3 gaps + 2 labels. Whichever is taller
+  // sets the band and a dial Item's height is what is left over - a ring's size
+  // is driven by the lane's WIDTH (the Canvas scales the viewbox by
+  // itemWidth / viewW), so a couple of pixels of vertical slack does not touch
+  // a gauge, and the three labels still share one bottom row.
+  readonly property real instrumentLabelH: battLabel.implicitHeight
+  readonly property real squareColumnH: 2 * root.squareH + 3 * root.laneGap
+    + 2 * root.instrumentLabelH
+  readonly property real instrumentBandH: Math.max(
+    Math.round(Quattro.dialItemHeightU(Quattro.dialLaneWidthU()) * unit) + root.laneGap
+      + root.instrumentLabelH,
+    root.squareColumnH)
+  readonly property real dialH: Math.round(root.instrumentBandH - root.laneGap - root.instrumentLabelH)
+  // Iteration 4: both squares shrink with the middle lane (battery icon 30
+  // to 26 below, padding 17 to 14 here).
+  readonly property real squareH: Math.round(battContent.implicitHeight + 14 * root.unit)
+  // Iteration 3: the fuel dial's own scale, sized off the dial Item's real
+  // laid-out width (the Canvas's scale basis), not the lane - the scale's
+  // letters and ticks shrink to exactly the marks the dial draws (the
+  // captain's ruling).
+  readonly property var scaleSize: Quattro.vramScaleSize(psiDial.width)
 
   CardBar { id: cardBar; api: root.bar }
 
@@ -177,48 +296,125 @@ Panel {
     owner: root
     open: root.opened
     contentWidth: Style.space(380)
-    contentHeight: Math.min(card.availableCardHeight - card.padding * 2, content.implicitHeight + card.padding * 2)
+    contentHeight: Math.min(card.availableCardHeight - card.padding * 2, root.listHeight + card.padding * 2)
 
     Flickable {
       width: card.contentWidth - card.padding * 2
       height: card.contentHeight - card.padding * 2
-      contentHeight: content.implicitHeight
+      contentHeight: root.listHeight
       clip: true
       boundsBehavior: Flickable.StopAtBounds
 
       ColumnLayout {
         id: content
+        visible: !root.valuesOnly
         width: parent.width
         spacing: Style.space(9)
 
-        // ---- The cluster row: RAM PRESSURE - SWAP RESERVE - ROOT DRIVE.
-        //      Three lanes, one data source each; the VRAM COOLANT light sits
-        //      centered below the battery, out of the row (round 2).
-        RowLayout {
+        // ---- The hero (round 3): the plugin's own mark, the name in the
+        //      native title size, and the ALL-CAPS tier phrase beneath it -
+        //      the Bluetooth Panel.qml hero pattern exactly: title in the
+        //      bar foreground, descriptor in the caption size, bold,
+        //      letter-spaced, foreground darkened 1.4.
+        // ---- The hero (round 3, iteration 2): the twin-ring logo.svg is
+        //      GONE - the product logo is the check-engine emblem itself, and
+        //      it tints with the machine's state exactly as the bar's badge
+        //      does: monochrome ink when clear, amber when amber, red when
+        //      red. The name keeps the native title size and the ALL-CAPS
+        //      tier phrase its caption slot (the Bluetooth Panel.qml hero
+        //      pattern); in valuesOnly mode the phrase steps out so the card
+        //      is values and nothing else.
+        Item {
           Layout.fillWidth: true
-          spacing: 6
+          implicitHeight: Math.max(heroEmblem.height, heroLabels.implicitHeight)
+
+          QuattroSymbol {
+            id: heroEmblem
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            symbol: "mil"
+            width: Style.font.display
+            height: Math.round(Style.font.display * 53.03 / 79.55)
+            color: root.heroEmblemTint
+          }
+
+          Column {
+            id: heroLabels
+            anchors.left: heroEmblem.right
+            anchors.leftMargin: Style.space(14)
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(2)
+
+            Text {
+              text: "Quattro Dash"
+              textFormat: Text.PlainText
+              color: root.fg
+              font.family: Style.font.family
+              font.pixelSize: Style.font.title
+              font.bold: true
+              elide: Text.ElideRight
+              width: parent.width
+            }
+
+            Text {
+              visible: !root.valuesOnly
+              text: root.tierPhrase.toUpperCase()
+              textFormat: Text.PlainText
+              color: Qt.darker(root.fg, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1.2
+              elide: Text.ElideRight
+              width: parent.width
+            }
+          }
+        }
+
+        PanelSeparator {
+          Layout.fillWidth: true
+          foreground: root.fg
+        }
+
+        // ---- The cluster row: RAM PRESSURE | SWAP RESERVE over VRAM | ROOT
+        //      DRIVE. MARK 1/2/4: the row is the cluster's own width centered
+        //      in the frame, with one lane gap between the lanes - the round
+        //      gauges close on each other, the square column closes with them,
+        //      and quattro.js frameMarginU is how far the instruments no
+        //      longer sit on the card's edges.
+        RowLayout {
+          id: clusterRow
+          Layout.preferredWidth: root.clusterW
+          Layout.alignment: Qt.AlignHCenter
+          spacing: root.clusterGap
 
           ColumnLayout {
             id: psiWrap
-            spacing: 4 * root.unit
+            spacing: root.laneGap
             Layout.alignment: Qt.AlignTop
-            Layout.preferredWidth: root.laneW
-            Layout.maximumWidth: root.laneW
+            Layout.preferredWidth: root.dialLaneW
+            Layout.maximumWidth: root.dialLaneW
 
             function tip() {
               return Quattro.psiTipWith(psiSome < 0 ? null : { some_avg10: psiSome }, root.psiPair.amber, root.psiPair.red)
             }
 
             Item {
-              width: root.dialW
-              height: root.dialH
+              id: psiDial
+              // Iteration 4: the dial FILLS its lane (the v3 layout shrank
+              // the plain Item to a left-hugging 114 - the measured 10px
+              // off-center), so face center = lane center = label center.
+              Layout.fillWidth: true
+              Layout.preferredHeight: root.dialH
+              Layout.alignment: Qt.AlignHCenter
 
               QuattroDial {
                 anchors.fill: parent
                 zones: Quattro.psiZoneArcsFor(root.psiPair.amber, root.psiPair.red)
                 labels: Quattro.psiLabels
                 needle: root.psiNeedle
-                faceSymbol: "temp"
+                faceSymbol: "thermometer"
               }
 
               MouseArea {
@@ -233,30 +429,49 @@ Panel {
             }
 
             Text {
+              id: psiLabel
               text: Quattro.INSTRUMENTS.psi
               color: root.dim
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.bodySmall
               font.bold: true
-              font.letterSpacing: 1.5
+              font.letterSpacing: 0.8
               horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
               Layout.fillWidth: true
             }
           }
 
-          ColumnLayout {
-            id: battWrap
-            spacing: 4 * root.unit
-            Layout.alignment: Qt.AlignTop
-            Layout.preferredWidth: root.laneW
-            Layout.maximumWidth: root.laneW
+          Item {
+            id: battLane
+            // MARK 1-3: the SWAP RESERVE square, its label, the VRAM square
+            // and its label are ONE column - each gauge one laneGap above its
+            // own label, each label one laneGap under its own gauge, which is
+            // the relative spacing mark 3 said to keep - and the column centers
+            // on the instrument band the two dial lanes define. Round 3's
+            // ruling survives: both squares bind to root.squareH, so they are
+            // still exactly the same size.
+            Layout.preferredWidth: root.midLaneW
+            Layout.maximumWidth: root.midLaneW
+            Layout.preferredHeight: root.instrumentBandH
+            Layout.fillHeight: true
+            implicitWidth: root.midLaneW
+            implicitHeight: root.instrumentBandH
 
-            Rectangle {
-              id: battBox
-              Layout.alignment: Qt.AlignHCenter
-              width: root.laneW
-              height: battContent.implicitHeight + 17 * root.unit
+            // Bottom-aligned, not centred: the VRAM caption then sits on the same
+            // row as the RAM PRESSURE and ROOT DRIVE captions whatever the dial lane
+            // width is. Any slack the band has over the square column lands above the
+            // swap gauge, where the dial rings are inset anyway.
+            readonly property real columnTop: Math.round(battLane.height - root.squareColumnH)
+
+          Rectangle {
+            id: battBox
+            x: 0
+            // MARK 1/2: the square starts at its own column's top - no
+            // back-reference into another row's geometry.
+            y: battLane.columnTop
+            width: root.midLaneW
+            height: root.squareH
               color: Quattro.PAL.face
               radius: 10
               border.width: 1
@@ -272,8 +487,8 @@ Panel {
                 spacing: 4 * root.unit
 
                 Item {
-                  width: 30 * root.unit
-                  height: 30 * root.unit
+                  width: 26 * root.unit
+                  height: 26 * root.unit
                   Layout.alignment: Qt.AlignHCenter
 
                   QuattroSymbol {
@@ -357,32 +572,213 @@ Panel {
             }
 
             Text {
+              id: battLabel
+              // MARK 3: the label keeps its place - one laneGap under its own
+              // gauge, centered on it.
+              y: battBox.y + battBox.height + root.laneGap
+              anchors.horizontalCenter: battBox.horizontalCenter
               text: Quattro.INSTRUMENTS.batt
               color: root.dim
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.bodySmall
               font.bold: true
-              font.letterSpacing: 1.5
+              font.letterSpacing: 0.8
               horizontalAlignment: Text.AlignHCenter
-              Layout.alignment: Qt.AlignHCenter
-              Layout.fillWidth: true
+            }
+
+            Rectangle {
+              id: vramBox
+              // MARK 2: no back-reference to the dial Item for its y. The
+              // lane it lives in is as tall as the dial lanes and centers its
+              // gauge column on that band, which IS the cluster's axis; the
+              // square then sits in the column, one laneGap under the SWAP
+              // RESERVE label.
+              x: 0
+              width: root.midLaneW
+              y: battLabel.y + battLabel.implicitHeight + root.laneGap
+              height: root.squareH
+              color: Quattro.PAL.face
+              radius: 10
+              border.width: 1
+              border.color: Quattro.PAL.line
+
+              function tip() {
+                return Quattro.coolantTipWith(
+                  root.vram === null ? null : { present: true, usedMib: root.vram.vramUsedMib, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
+                  root.vramPair.red, root.vramPair.amber)
+              }
+
+              Column {
+                id: vramContent
+                anchors.centerIn: parent
+                spacing: 2
+
+                Item {
+                  width: 14 * root.unit
+                  height: 14 * root.unit
+                  anchors.horizontalCenter: parent.horizontalCenter
+
+                  QuattroSymbol {
+                    anchors.fill: parent
+                    symbol: "temp"
+                    color: root.coolantTint
+                  }
+                }
+
+                Item {
+                  id: vramBar
+                  width: 84 * root.unit
+                  height: 9 * root.unit
+                  anchors.horizontalCenter: parent.horizontalCenter
+
+                  readonly property real inset: 2
+
+                  Rectangle {
+                    anchors.fill: parent
+                    radius: 2.5 * root.unit
+                    color: Quattro.PAL.face
+                    border.width: 1
+                    border.color: Quattro.PAL.faceRing
+                  }
+
+                  Repeater {
+                    model: root.headroomZones
+
+                    Rectangle {
+                      required property var modelData
+                      x: Quattro.vramTrackX(modelData.from, vramBar.width)
+                      width: Quattro.vramTrackX(modelData.to, vramBar.width)
+                        - Quattro.vramTrackX(modelData.from, vramBar.width)
+                      anchors.top: parent.top
+                      anchors.bottom: parent.bottom
+                      anchors.margins: vramBar.inset
+                      radius: 1.5
+                      color: modelData.kind === "red" ? Quattro.PAL.redHot : Quattro.PAL.amber
+                      opacity: modelData.kind === "red" ? 0.9 : 0.85
+                    }
+                  }
+
+                  Rectangle {
+                    visible: root.headFrac !== null
+                    // Iteration 4: the needle, the zones, the ticks and the
+                    // letters all read Quattro.vramTrackX - one mapping, the
+                    // bar's real track, so the scale cannot disagree with the
+                    // reading.
+                    x: Quattro.vramTrackX(root.headFrac === null ? 0 : root.headFrac, vramBar.width) - 1.5
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 3
+                    height: parent.height + 4
+                    radius: 1.5
+                    color: Quattro.PAL.needle
+                  }
+                }
+
+                Item {
+                  id: vramScale
+                  width: 84 * root.unit
+                  // Round 6: integer ticks at the dial's exact device length
+                  // plus the one-point-smaller letters - the stack fits the
+                  // rectangle with the border clear.
+                  height: root.scaleSize.tickH + root.scaleSize.letterPx
+                  anchors.horizontalCenter: parent.horizontalCenter
+
+                  Repeater {
+                    // Iteration 4 bug, found by the pixel audit: the model
+                    // bound the FUNCTION (never called), so the tick marks
+                    // never rendered in any earlier iteration. The letters
+                    // rode vramScaleMarks (an array) and drew; the ticks did
+                    // not. Call it.
+                    model: Quattro.vramScaleTicks()
+
+                    Rectangle {
+                      required property int index
+                      readonly property real f: Quattro.vramScaleTicks()[index]
+                      // Iteration 4: ticks center on their mark on the bar's
+                      // real track - E on the left edge, F on the right,
+                      // 1/2 at the bar's exact midpoint.
+                      x: Math.round(Quattro.vramTrackX(f, vramScale.width) - width / 2)
+                      y: 0
+                      width: root.scaleSize.tickW
+                      height: root.scaleSize.tickH
+                      // The dial's own MAJOR tick ink (iteration 4): the
+                      // marks are the gauge's graduations, not a caption, so
+                      // they wear the same token the fuel dial's major ticks
+                      // do - dim mut vanished against the dark card.
+                      color: Quattro.PAL.tickMajor
+                    }
+                  }
+
+                  Repeater {
+                    model: Quattro.vramScaleMarks
+
+                    Text {
+                      required property var modelData
+                      readonly property real f: modelData.f
+                      width: 16
+                      // Iteration 4: centered on the same real track, NO
+                      // clamping - E and F straddle the bar's edges like a
+                      // real gas gauge, not eight pixels inside them.
+                      x: Math.round(Quattro.vramTrackX(f, vramScale.width) - width / 2)
+                      // Round 6: a hair up, so the letters sit inside the
+                      // rectangle.
+                      y: root.scaleSize.tickH - 1
+                      text: modelData.t
+                      // Round 6: E red, F green again (captain); the
+                      // fraction letters stay grey.
+                      color: modelData.color !== undefined
+                        ? Quattro.PAL[modelData.color]
+                        : Quattro.PAL[Quattro.faceLabelColor]
+                      font.family: Style.font.family
+                      font.pixelSize: root.scaleSize.letterPx
+                      horizontalAlignment: Text.AlignHCenter
+                    }
+                  }
+                }
+              }
+
+              MouseArea {
+                id: vramArea
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+                cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (!containsMouse) root.hideTip()
+                onPositionChanged: if (containsMouse) root.showTip(vramBox.tip(), vramArea, mouse.x, mouse.y)
+              }
+            }
+
+            Text {
+              id: vramLabel
+              // Iteration 4: the shared label row is gone (the captain's
+              // ruling) - the label sits directly under its own gauge.
+              y: vramBox.y + vramBox.height + root.laneGap
+              anchors.horizontalCenter: vramBox.horizontalCenter
+              text: Quattro.INSTRUMENTS.coolant
+              color: root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+              font.letterSpacing: 0.8
+              horizontalAlignment: Text.AlignHCenter
             }
           }
 
           ColumnLayout {
             id: fuelWrap
-            spacing: 4 * root.unit
+            spacing: root.laneGap
             Layout.alignment: Qt.AlignTop
-            Layout.preferredWidth: root.laneW
-            Layout.maximumWidth: root.laneW
+            Layout.preferredWidth: root.dialLaneW
+            Layout.maximumWidth: root.dialLaneW
 
             function tip() {
               return Quattro.fuelTipWith(root.rootDrive, root.hdPair.amber, root.hdPair.red)
             }
 
             Item {
-              width: root.dialW
-              height: root.dialH
+              // Iteration 4: fills its lane, exactly like psiDial above.
+              Layout.fillWidth: true
+              Layout.preferredHeight: root.dialH
+              Layout.alignment: Qt.AlignHCenter
 
               QuattroDial {
                 anchors.fill: parent
@@ -407,74 +803,15 @@ Panel {
               text: Quattro.INSTRUMENTS.fuel
               color: root.dim
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.bodySmall
               font.bold: true
-              font.letterSpacing: 1.5
+              font.letterSpacing: 0.8
               horizontalAlignment: Text.AlignHCenter
               Layout.alignment: Qt.AlignHCenter
               Layout.fillWidth: true
             }
           }
 
-        }
-
-        // ---- The VRAM COOLANT light (round 2): the STANDARD ISO coolant
-        //      warning glyph, the thermometer-in-liquid artwork quattro.js
-        //      owns, CENTERED in the dash BELOW the battery. The tank card is
-        //      gone; the light tinted by the free-VRAM thresholds is the whole
-        //      message, and high VRAM lights this light and throws no code.
-        //      Hover shows VRAM used / reserved.
-        // The wrap is a plain Item, not a ColumnLayout: in this Qt build a
-        // nested ColumnLayout caps at its implicit width and hugs left, while
-        // a plain Item honors Layout.fillWidth and stretches across the lane.
-        // Children anchor to its horizontal center.
-        Item {
-          id: coolantWrap
-          Layout.fillWidth: true
-          height: childrenRect.height
-
-          function tip() {
-            return Quattro.coolantTipWith(
-              root.vram === null ? null : { present: true, usedMib: root.vram.vramUsedMib, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
-              root.vramPair.red, root.vramPair.amber)
-          }
-
-          Item {
-            id: coolantGlyph
-            width: 40 * root.unit
-            height: 40 * root.unit
-            anchors.horizontalCenter: parent.horizontalCenter
-
-            QuattroSymbol {
-              anchors.fill: parent
-              symbol: "temp"
-              color: root.coolantTint
-            }
-
-            MouseArea {
-              id: coolantArea
-              anchors.fill: parent
-              hoverEnabled: true
-              acceptedButtons: Qt.NoButton
-              cursorShape: Qt.PointingHandCursor
-              onContainsMouseChanged: if (!containsMouse) root.hideTip()
-              onPositionChanged: if (containsMouse) root.showTip(coolantWrap.tip(), coolantArea, mouse.x, mouse.y)
-            }
-          }
-
-          Text {
-            id: coolantLabel
-            text: Quattro.INSTRUMENTS.coolant
-            anchors.top: coolantGlyph.bottom
-            anchors.topMargin: 4 * root.unit
-            anchors.horizontalCenter: parent.horizontalCenter
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 1.5
-            horizontalAlignment: Text.AlignHCenter
-          }
         }
 
         // ---- The codes area: ONE column under one check-engine head. Red and
@@ -493,14 +830,29 @@ Panel {
           }
         }
 
-        ColumnLayout {
+        // The codes area is a plain Item, not a nested ColumnLayout: in this
+        // Qt build a nested ColumnLayout caps at its implicit width and hugs
+        // left, which hung the head, the rows and the empty state on the left
+        // edge. A plain Item honors Layout.fillWidth; children anchor to its
+        // horizontal center, rows stretch the full width (round 3: ENGINE
+        // CLEAR in the gauge labels' voice, centered like them).
+        Item {
+          id: codesArea
           Layout.fillWidth: true
-          spacing: 5
+          // Explicit stack height: childrenRect does not track Repeater-inserted
+          // rows reliably on this Qt build (the card clipped the first code row),
+          // and a direct height write never reaches the layout's implicit-size
+          // pass - Layout.preferredHeight is the supported channel. emblem 17 +
+          // gap 5 + rows (44 + 5 apart); the empty state stacks the ENGINE
+          // CLEAR line under the emblem.
+          Layout.preferredHeight: root.codes.length > 0 ? 66 + (root.codes.length - 1) * 49 : 38
 
           Item {
-            Layout.alignment: Qt.AlignHCenter
+            id: codesEmblem
             width: 17
             height: 17
+            anchors.horizontalCenter: parent.horizontalCenter
+
             QuattroSymbol {
               anchors.fill: parent
               symbol: "mil"
@@ -513,18 +865,26 @@ Panel {
 
             QuattroCodeRow {
               required property var modelData
+              required property int index
               entry: modelData
-              Layout.fillWidth: true
+              anchors.left: parent.left
+              anchors.right: parent.right
+              y: 22 + index * 49
             }
           }
 
           Text {
             visible: root.codes.length === 0
             text: Quattro.codesEmptyText()
+            anchors.top: codesEmblem.bottom
+            anchors.topMargin: 5
+            anchors.horizontalCenter: parent.horizontalCenter
             color: root.dim
             font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            Layout.alignment: Qt.AlignHCenter
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            font.letterSpacing: 0.8
+            horizontalAlignment: Text.AlignHCenter
           }
         }
 
@@ -631,6 +991,51 @@ Panel {
         }
 
       }
+
+        // ---- The values-only popup (the captain's popup ruling): the same
+        //      card as a bare list of actual readings - numbers and units,
+        //      no What/Why/Ranges copy, no ENGINE CLEAR, no tier phrase.
+        //      The descriptions move to the settings section. One row per
+        //      instrument (quattro.js valueRows), codes ride as their id
+        //      plus the bare percent they are about. A SIBLING of the full
+        //      dash content inside the Flickable - not a child of it, or it
+        //      would hide whenever the full dash hides (the blank-card bug
+        //      the first values render caught).
+        ColumnLayout {
+          id: valuesContent
+          visible: root.valuesOnly
+          width: parent.width
+          spacing: Style.space(9)
+
+          Repeater {
+            model: root.valueRows
+
+            RowLayout {
+              required property var modelData
+              Layout.fillWidth: true
+              spacing: 10
+
+              Text {
+                text: modelData.label
+                color: root.dim
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+                font.letterSpacing: 0.7
+              }
+
+              Text {
+                text: modelData.value
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+              }
+            }
+          }
+        }
     }
 
     // ---- The hover decode, rendered inside the popup card (a layer-shell
@@ -809,21 +1214,36 @@ Panel {
         var ctx = getContext("2d")
         ctx.reset()
         var s = dial.width / Quattro.DIAL.viewW
-        ctx.translate(0, (dial.height - Quattro.DIAL.viewH * s) / 2)
-        ctx.scale(s, s)
+        var oy = (dial.height - Quattro.DIAL.viewH * s) / 2
         var D = Quattro.DIAL
         var P = Quattro.PAL
+        // MARK 6 ("I want the font to be legible. Sharp."). The face geometry
+        // used to be painted through ctx.scale(viewbox -> device), which put
+        // the ring center at cx*s = ..., a radius at ..., a 2.6-unit graduation
+        // at 1.45 device pixels and every numeral at a fractional pen position:
+        // a soft picture of a gauge. The numbers stay in the mockup's 260x232
+        // viewbox (quattro.js DIAL), but the face is painted in DEVICE space
+        // with the center, every radius and every pen rounded to whole pixels,
+        // and every stroke width rounded to a whole device pixel.
+        var CX = Math.round(D.cx * s)
+        var CY = Math.round(oy + D.cy * s)
+        function rd(viewR) {
+          return Math.round(viewR * s)
+        }
+        function devpx(w) {
+          return Math.max(1, Math.round(w * s))
+        }
 
         ctx.beginPath()
-        ctx.arc(D.cx, D.cy, D.faceR, 0, Math.PI * 2)
+        ctx.arc(CX, CY, rd(D.faceR), 0, Math.PI * 2)
         ctx.fillStyle = P.face
         ctx.fill()
-        ctx.lineWidth = 7
+        ctx.lineWidth = devpx(7)
         ctx.strokeStyle = P.faceRing
         ctx.stroke()
         ctx.beginPath()
-        ctx.arc(D.cx, D.cy, D.faceR, 0, Math.PI * 2)
-        ctx.lineWidth = 1.5
+        ctx.arc(CX, CY, rd(D.faceR), 0, Math.PI * 2)
+        ctx.lineWidth = devpx(1.5)
         ctx.globalAlpha = 0.7
         ctx.strokeStyle = P.line
         ctx.stroke()
@@ -834,8 +1254,8 @@ Panel {
           var fromDeg = Quattro.needleAngleDeg(zone.from)
           var toDeg = Quattro.needleAngleDeg(zone.to)
           ctx.beginPath()
-          ctx.arc(D.cx, D.cy, D.zoneR, (fromDeg - 90) * Math.PI / 180, (toDeg - 90) * Math.PI / 180)
-          ctx.lineWidth = D.zoneWidth
+          ctx.arc(CX, CY, rd(D.zoneR), (fromDeg - 90) * Math.PI / 180, (toDeg - 90) * Math.PI / 180)
+          ctx.lineWidth = devpx(D.zoneWidth)
           ctx.strokeStyle = zone.kind === "red" ? P.redHot : P.amber
           ctx.globalAlpha = zone.kind === "red" ? 0.9 : 0.85
           ctx.stroke()
@@ -846,47 +1266,57 @@ Panel {
         for (var t = 0; t < ticks.length; t++) {
           var tick = ticks[t]
           var deg = D.a0 + D.sweep * tick.f
-          var p1 = Quattro.polar(D.cx, D.cy, D.tickOuter, deg)
-          var p2 = Quattro.polar(D.cx, D.cy, tick.major ? D.tickMajor : (tick.mid ? D.tickMid : D.tickMinor), deg)
+          var p1 = Quattro.polar(CX, CY, rd(D.tickOuter), deg)
+          var p2 = Quattro.polar(CX, CY, tick.major ? rd(D.tickMajor) : (tick.mid ? rd(D.tickMid) : rd(D.tickMinor)), deg)
           ctx.beginPath()
-          ctx.moveTo(p1.x, p1.y)
-          ctx.lineTo(p2.x, p2.y)
-          ctx.lineWidth = tick.major ? 2.6 : 1.4
+          ctx.moveTo(Math.round(p1.x), Math.round(p1.y))
+          ctx.lineTo(Math.round(p2.x), Math.round(p2.y))
+          ctx.lineWidth = tick.major ? devpx(2.6) : devpx(1.4)
           ctx.strokeStyle = tick.major ? P.tickMajor : P.tickMinor
           ctx.stroke()
         }
 
-        ctx.font = "15px " + Style.font.resolvedFamily
+        // MARK 6: the face's words at an identity transform, at an integer
+        // device font size from quattro.js gaugeFaceFontPx, at rounded pen
+        // positions, in round 3's graduation grey - the control's look at
+        // 13pt, drawn sharp instead of resampled; regular weight. textBaseline is
+        // middle, so a numeral sits ON its radius instead of 5 viewbox units
+        // below it (the +5 was the scaled-era nudge).
+        var fpx = Quattro.gaugeFaceFontPx(dial.width)
+        ctx.font = fpx + "px \"" + Style.font.resolvedFamily + "\""
         ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        var faceLabelPx = rd(D.labelR)
         for (var l = 0; l < dial.labels.length; l++) {
           var label = dial.labels[l]
           var ldeg = D.a0 + D.sweep * label.f
-          var lp = Quattro.polar(D.cx, D.cy, D.labelR, ldeg)
-          ctx.fillStyle = label.color !== undefined ? P[label.color] : P.mut
-          ctx.fillText(label.t, lp.x, lp.y + 5)
+          var lp = Quattro.polar(CX, CY, faceLabelPx, ldeg)
+          ctx.fillStyle = label.color !== undefined ? P[label.color]
+            : P[Quattro.faceLabelColor]
+          ctx.fillText(label.t, Math.round(lp.x), Math.round(lp.y))
         }
 
         if (dial.needle !== null && dial.needle !== undefined) {
           var ndeg = Quattro.needleAngleDeg(dial.needle)
           ctx.save()
-          ctx.translate(D.cx, D.cy)
+          ctx.translate(CX, CY)
           ctx.rotate(ndeg * Math.PI / 180)
           ctx.shadowColor = P.needle
           ctx.shadowBlur = 3
           ctx.beginPath()
-          ctx.moveTo(0, D.needleTail)
-          ctx.lineTo(0, -D.needleTip)
-          ctx.lineWidth = 4.5
+          ctx.moveTo(0, rd(D.needleTail))
+          ctx.lineTo(0, -rd(D.needleTip))
+          ctx.lineWidth = devpx(4.5)
           ctx.lineCap = "round"
           ctx.strokeStyle = P.needle
           ctx.stroke()
           ctx.beginPath()
-          ctx.arc(0, 0, D.hubR, 0, Math.PI * 2)
+          ctx.arc(0, 0, rd(D.hubR), 0, Math.PI * 2)
           ctx.fillStyle = P.hub
           ctx.fill()
           ctx.shadowBlur = 0
           ctx.beginPath()
-          ctx.arc(0, 0, D.hubDotR, 0, Math.PI * 2)
+          ctx.arc(0, 0, rd(D.hubDotR), 0, Math.PI * 2)
           ctx.fillStyle = P.hubDot
           ctx.fill()
           ctx.restore()
