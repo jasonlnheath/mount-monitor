@@ -54,15 +54,21 @@
 // --- instrument names (round 5: brief names below each instrument; the VRAM
 // --- COOLANT lane joined them at the captain's live-look ruling) ------------
 
-var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE", coolant: "VRAM COOLANT" };
+// Round 3 iteration 2 (captain's board ruling): the lane is called VRAM, not
+// VRAM HEADROOM, and it shows the ENTIRE amount of VRAM - the whole tank from
+// E (nothing free) to F (all of it free) - not a headroom remainder.
+var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE", coolant: "VRAM" };
 
 // The settings row names each gauge by its instrument name; the pair keys are
-// the gauge keys, so this is the one bridge between the two vocabularies.
+// the gauge keys, so this is the one bridge between the two vocabularies. The
+// vram row keeps the settings vocabulary's full name (VRAM COOLANT) even though
+// round 3 renamed the dash lane itself to the brief VRAM: the row configures
+// the coolant thresholds, and its title stays the name the ruling introduced.
 var GAUGE_TITLES = {
   psi: INSTRUMENTS.psi,
   hd: INSTRUMENTS.fuel,
   batt: INSTRUMENTS.batt,
-  vram: INSTRUMENTS.coolant,
+  vram: "VRAM COOLANT",
 };
 
 function gaugeTitle(key) {
@@ -312,6 +318,161 @@ function coolantBandWith(freeMib, totalMib, redMib, amberMib) {
   return 0;
 }
 
+// --- round 3 iteration 2: the gas-tank scale on the VRAM bar -----------------
+//
+// The captain copied the gas tank method onto the VRAM gauge: F is full, E is
+// empty, with 3/4, 1/2 and 1/4 tick marks, all on a horizontal scale along
+// the bottom of the bar. The marks wear the gas gauge's own colors (same
+// ruling, third board pass): F green, E red, the rest gray. E hugs the left
+// end (almost nothing free), F the right (the entire VRAM free) - the same
+// ends the needle already travels between, so gauge and scale cannot
+// disagree.
+var vramScaleMarks = [
+  { f: 0, t: "E", color: "redHi" },
+  { f: 0.25, t: "¼" },
+  { f: 0.5, t: "½" },
+  { f: 0.75, t: "¾" },
+  { f: 1, t: "F", color: "green" },
+];
+
+function vramScaleTicks() {
+  const out = [];
+  for (let i = 0; i < vramScaleMarks.length; i += 1) out.push(vramScaleMarks[i].f);
+  return out;
+}
+
+// --- round 4 (captain's marks 1-4, 6): the cluster law lives here -----------
+//
+// Round 3 tiled the three instrument lanes edge to edge (148 + 6 + 111 + 6 +
+// 148 = the whole 419-unit inner width), so the round gauges sat against the
+// frame and the squares could not close on them. The cluster now has its OWN
+// measured width and its own lane gap, and the frame's leftover becomes
+// symmetric margin.
+//
+// The measured trade the board has to show: a dial's ring diameter IS
+// 2 * DIAL.faceR * (dialItemWidth / DIAL.viewW) = 0.8308 * its lane, so the
+// visual gap between a gauge's ink and the middle column is the lane's own
+// slack (0.0846 * lane) plus the row spacing - and shrinking the MIDDLE lane
+// moves the squares' edges inward, AWAY from the gauges. Closing the gauges on
+// each other therefore comes out of either the lane (the ring shrinks) or the
+// gap (the slack is all that is left). Both variants are rendered: A at
+// 148u/2u.
+var DIAL_LANE_U = 148;
+var MID_LANE_U = 111;      // unchanged from round 3: the squares keep their size
+var CLUSTER_GAP_U = 2;
+var INNER_U = 419;
+
+function dialLaneWidthU() { return DIAL_LANE_U; }
+function midLaneWidthU() { return MID_LANE_U; }
+function clusterGapU() { return CLUSTER_GAP_U; }
+function clusterWidthU() { return 2 * DIAL_LANE_U + MID_LANE_U + 2 * CLUSTER_GAP_U; }
+function frameMarginU() { return (INNER_U - clusterWidthU()) / 2; }
+
+// The dial Item's height tracks its lane at the viewbox's own aspect ratio, so
+// the ring sits in the lane the way it did at 148u (under 1px of slack) and the
+// gauge-to-own-label gap does not move.
+function dialItemHeightU(laneW) {
+  const w = asNumber(laneW);
+  if (w === null || w <= 0) return null;
+  return (DIAL.viewH / DIAL.viewW) * w;
+}
+
+// MARK 6 ("I want the font to be legible. Sharp."): the gauge faces' own words.
+// The dial drew them at 15 viewbox units, which at this card's scale rasterizes
+// as 8px of resampled type at fractional pen positions - and the gas-tank scale
+// matched it (round 3's ruling: the scale follows the dial). The number now
+// lives here, one rule for both, in DEVICE pixels with a floor: a graduation
+// that cannot reach 11px is bumped to 11px instead of dissolving into the dark
+// face. The faces' plain numerals wear the dial's own graduation color, the
+// token the VRAM scale's tick marks already wear (iteration 4's ruling).
+// Round 5: the captain pinned the face at 13px - "go with this with 13 pt
+// font" - so the floor is 13 and the viewbox-derived term stays under it at
+// shipped card widths; the floor is what the faces actually draw.
+var FACE_FONT_U = 19;
+var FACE_FONT_PX_MIN = 13;
+// Round 5: the captain pinned the faces' look to round 3's graduation grey -
+// "go with this with 13 pt font" on the control face crop - so the plain
+// numerals wear mut again, not bright tickMajor.
+var faceLabelColor = "mut";
+
+function gaugeFaceFontPx(dialItemW) {
+  const s = (asNumber(dialItemW) || 0) / DIAL.viewW;
+  if (!(s > 0)) return FACE_FONT_PX_MIN;
+  return Math.max(FACE_FONT_PX_MIN, Math.round(FACE_FONT_U * s));
+}
+
+// --- round 3 iteration 3: the scale draws at the fuel dial's scale -----------
+//
+// The captain's ruling: the scale's letters and tick marks shrink to EXACTLY
+// the same scale the ROOT DRIVE fuel dial draws its own E, F, 1/4, 1/2, 3/4
+// marks - the dial's 15px label face and its major tick (tickOuter to
+// tickMajor, 2.6 wide), shrunk by the dial canvas's own width-to-view factor.
+// The QML hands in the dial Item's LAID-OUT width (the Canvas's real scale
+// basis), not the lane width: the layout shrinks the dial Item a little below
+// the lane, and the scale must follow the dial, not the lane.
+function vramScaleSize(dialItemW) {
+  const s = (asNumber(dialItemW) || 0) / DIAL.viewW;
+  // Iteration 4: tickW floors at 2 device pixels. The dial-parity width
+  // (2.6 view units) shrinks to 1.45px on this card, and a sub-2px mark
+  // blends into the dark card - the captain wants the scale read as an
+  // actual gauge, so a graduation must render as one.
+  return {
+    // Round 4: the same rule the dial faces use - the gas-tank letters and
+    // the gauge numerals stay matched (the round-3 ruling). Round 5: grey.
+    // Round 6: the reservoir drops one point under the faces (captain:
+    // "reduce to next point size") with its own 12px floor.
+    letterPx: Math.max(12, gaugeFaceFontPx(dialItemW) - 1),
+    tickH: Math.round((DIAL.tickOuter - DIAL.tickMajor) * s),
+    tickW: Math.max(2, Math.round(2.6 * s)),
+  };
+}
+
+// --- round 3 iteration 4: the scale reads the bar's real track ---------------
+//
+// The captain's ruling: the gas-tank scale is an actual gauge, not a picture.
+// E sits on the bar's LEFT EDGE and F on the RIGHT EDGE, a reading at 1/2
+// lands on the bar's exact midpoint, and tick marks ride at E, 1/4, 1/2, 3/4
+// and F. One mapping serves the needle, the zones, the ticks and the letters:
+// the bar's 2px face inset is the track every fraction travels, so the scale
+// cannot disagree with the reading it sits under. (The v2/v3 letters were
+// centered on the strip width and clamped to it, which hung E and F eight
+// pixels inside the bar ends - an inset scale on an inset-less needle.)
+function vramTrackX(frac, trackW) {
+  const w = asNumber(trackW);
+  if (w === null || w <= 0) return 0;
+  const inset = 2;
+  let f = asNumber(frac);
+  if (f === null) f = 0;
+  f = Math.max(0, Math.min(1, f));
+  return inset + f * (w - inset * 2);
+}
+
+// The dial face's center inside its Item: the Canvas centers the 260x232
+// viewbox vertically ((itemH - viewH*s) / 2) and the face center sits at
+// DIAL.cy * s within it. This is the cluster row's one visual axis - the
+// center the fuel gauge draws, and the line the coolant gauge centers on.
+function dialFaceCenterY(itemW, itemH) {
+  const w = asNumber(itemW);
+  const h = asNumber(itemH);
+  if (w === null || h === null || w <= 0) return null;
+  const s = w / DIAL.viewW;
+  return (h - DIAL.viewH * s) / 2 + DIAL.cy * s;
+}
+
+// The hero emblem IS the product logo now (the twin-ring mark is retired):
+// the check-engine artwork, tinted the way the bar's badge tints - monochrome
+// ink when all is good, amber at the first warning, red when something is
+// severe or the arm is live. The tier ladder already folds every state the
+// dash knows into 1..5, so the tint rides it: 1 plain, 2 amber, 3 and above
+// red (tier 3 is a severe band, tier 4 critical, tier 5 the live arm).
+function heroTint(tier) {
+  const t = asNumber(tier);
+  if (t === null) return "plain";
+  if (t >= 3) return "red";
+  if (t === 2) return "amber";
+  return "plain";
+}
+
 // --- trust primitives (the ringkit.js copies, by hand) -----------------------
 
 var DEVICE_PATH_MAX = 256;
@@ -456,12 +617,37 @@ function gibFromMib(mibValue) {
   return (v / 1024).toFixed(1) + " GiB";
 }
 
+// MARK 5 asks for the number on its own, with the word the captain used. The
+// number is still the GiB figure the gauge already read (7.1 of 15.9); the word
+// is his. FLAG on the board, not buried here: 7.1 GiB is 7.6 decimal GB, so if
+// he means decimal the digits change too. The tip keeps the full unit truth.
+function gibDigits(mibValue) {
+  const v = asNumber(mibValue);
+  if (v === null) return null;
+  return (v / 1024).toFixed(1);
+}
+
 function coolantTip(reading, floorMib) {
+  const r = reading || null;
   const floor = asNumber(floorMib);
   const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
-  const tip = coolantTipWith(reading, floorNow, floorNow + VRAM_AMBER_MARGIN_MIB);
-  tip.rows[3].text = "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset.";
-  return tip;
+  const used = r === null ? null : asNumber(r.usedMib);
+  const free = r === null ? null : asNumber(r.freeMib);
+  // Round 3 iteration 2: the lane shows the ENTIRE amount of VRAM, so the
+  // Now line names the total tank as well as what is used and free.
+  const total = r === null ? null : asNumber(r.totalMib);
+  const now = used === null || free === null
+    ? "no VRAM reading yet."
+    : gibFromMib(used) + " used, " + gibFromMib(free) + " free of " + gibFromMib(total) + ".";
+  return {
+    header: INSTRUMENTS.coolant,
+    rows: [
+      { label: "Now:", text: now, cls: "now" },
+      { label: "What:", text: "Headroom is the GPU memory left over after what the GPU is using - free VRAM, the headroom for the next big model load." },
+      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
+      { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
+    ],
+  };
 }
 
 function gbFromKb(kb) {
@@ -610,6 +796,64 @@ var SETTINGS = {
   },
 };
 
+// --- round 3 iteration 2: the values-only popup -----------------------------
+//
+// The captain turned the descriptive popups off and asked for a simple popup
+// that shows the ACTUAL VALUES, nothing else: numbers and units, one row per
+// instrument, no What/Why/Ranges copy - the descriptions move to the settings
+// section. The rows are { label, value } pairs in the same terse voice and
+// units the tips use (PSI, percent, GB, GiB). Codes ride as their id plus the
+// bare percent a code is about - a code id and a number are values, not
+// descriptions. A missing reading says so in five words rather than drawing
+// a healthy zero.
+function valueRows(psiSome, reserve, rootDrive, vram, codes) {
+  const rows = [];
+  const psi = asNumber(psiSome);
+  rows.push({
+    label: INSTRUMENTS.psi,
+    value: psi === null ? "no reading" : psi.toFixed(1) + " PSI",
+  });
+  const r = reserve || { present: false, pct: 0 };
+  const pct = asNumber(r.pct);
+  rows.push({
+    label: INSTRUMENTS.batt,
+    value: r.present !== true || pct === null ? "none configured" : String(Math.round(pct)) + " percent",
+  });
+  const fuel = rootDrive || null;
+  const gb = fuel === null ? null : gbFromKb(fuel.availKb);
+  const gbTotal = fuel === null ? null : gbFromKb(fuel.sizeKb);
+  const fuelPct = fuel === null ? null : asNumber(fuel.pctFree);
+  rows.push({
+    label: INSTRUMENTS.fuel,
+    // MARK 5: "Root drive, just say 437GB free." The full "X of Y (Z percent)"
+    // sentence stays where a hover decode can still give it (fuelTip); the
+    // stats row says the one number the captain asked for.
+    value: gb === null || gbTotal === null
+      ? "no reading"
+      : gb + " GB free",
+  });
+  const usedMib = vram === null ? null : asNumber(vram.vramUsedMib);
+  const freeMib = vram === null ? null : asNumber(vram.vramFreeMib);
+  const totalMib = vram === null ? null : asNumber(vram.vramTotalMib);
+  rows.push({
+    label: INSTRUMENTS.coolant,
+    // MARK 5: "For VRAM just say 7.1 gigs free." The full sentence stays in the
+    // hover tip (coolantTip), which still says GiB.
+    value: gibDigits(freeMib) === null
+      ? "no reading"
+      : gibDigits(freeMib) + " GiB free",
+  });
+  const list = codes === null || codes === undefined ? [] : codes;
+  for (let i = 0; i < list.length; i += 1) {
+    const c = list[i];
+    if (!c) continue;
+    const where = c.alert && c.alert.target ? " " + sanitizePath(c.alert.target) : "";
+    const p = c.alert === undefined || c.alert === null ? null : asNumber(c.alert.pct);
+    rows.push({ label: c.code, value: where + " " + (p === null ? "unknown" : String(Math.round(p))) + " percent" });
+  }
+  return rows;
+}
+
 // --- codes: the monitor's own live state, as the approved taxonomy -----------
 //
 // Round 2 doctrine: DRIVE codes only. The hash input stays "hd|<key>", so a
@@ -689,10 +933,89 @@ function codesHeadToken(codes) {
   return token;
 }
 
-// The line the empty column shows under the unlit head, so no codes never
-// reads as a broken section.
+// The line the empty column shows under the unlit head, in the same caps
+// voice as the gauge labels (round 3).
 function codesEmptyText() {
-  return "all clear.";
+  return "ENGINE CLEAR";
+}
+
+// --- round 3: the hero tier phrase ------------------------------------------
+//
+// One overall tier for the machine, the worst thing the dashboard knows:
+// 1 CRUISING ALONG (nothing over any line), 2 WARMING THOSE TIRES (amber
+// somewhere), 3 WIDE OPEN THROTTLE (a severe band - drive band 2 or the red
+// coolant light), 4 SLOW YOUR ROLL! (a critical-band drive), 5 HARD CRASH
+// (the critical arm is live). Uncolored ink in the hero; the phrase is the
+// whole message.
+var TIERS = ["CRUISING ALONG", "WARMING THOSE TIRES", "WIDE OPEN THROTTLE", "SLOW YOUR ROLL!", "HARD CRASH"];
+
+function tierFromState(codes, coolant, psiSome, reservePct, armLive) {
+  if (armLive === true) return 5;
+  let worst = 0;
+  const list = codes === null || codes === undefined ? [] : codes;
+  for (let i = 0; i < list.length; i += 1) {
+    const b = asNumber(list[i] && list[i].band) || 0;
+    if (b > worst) worst = b;
+  }
+  const cb = asNumber(coolant);
+  if (cb !== null && cb > worst) worst = cb;
+  const psi = asNumber(psiSome);
+  if (psi !== null) {
+    if (psi >= PSI_RED_AT) { if (worst < 2) worst = 2; }
+    else if (psi >= PSI_AMBER_AT && worst < 1) worst = 1;
+  }
+  const r = asNumber(reservePct);
+  if (r !== null && (r || 0) > 0) {
+    if (r < LED_YELLOW_AT) { if (worst < 2) worst = 2; }
+    else if (r < LED_GREEN_AT && worst < 1) worst = 1;
+  }
+  return 1 + Math.min(3, worst);
+}
+
+function tierPhrase(tier) {
+  const t = asNumber(tier);
+  const i = t === null ? 0 : Math.max(0, Math.min(4, t - 1));
+  return TIERS[i];
+}
+
+// --- round 3: the VRAM HEADROOM bar gauge -----------------------------------
+//
+// A horizontal reservoir that drains RIGHT-TO-LEFT: the FULL mark is the
+// right end, and as headroom is lost the needle and the fill edge move LEFT.
+// The needle position from the left is the headroom fraction (free / total);
+// the red zone hugs the far left - almost nothing free - then amber, then
+// open field. Zone edges are the coolant thresholds themselves (the settings
+// pair's red and amber over total; the floor chain when no pair is stored), so
+// the gauge and the light can never disagree.
+function headroomFrac(freeMib, totalMib) {
+  const free = asNumber(freeMib);
+  const total = asNumber(totalMib);
+  if (free === null || total === null || total <= 0) return null;
+  return Math.max(0, Math.min(1, free / total));
+}
+
+// The pair-parameterized form (the gauge-threshold settings law): the dash
+// draws the bar's zones from the monitor's settings pair, so a dragged slider
+// moves the bar and the light in the same frame and the two can never
+// disagree. The pair arrives already sanitized (coolantPairUnclamped keeps the
+// junk fallback and the margin fallback, and never clamps a floor-chain pair
+// onto the slider scale).
+function headroomZonesWith(totalMib, redMib, amberMib) {
+  const total = asNumber(totalMib);
+  if (total === null || total <= 0) return [];
+  const p = coolantPairUnclamped(redMib, amberMib);
+  const redEnd = Math.min(1, p.red / total);
+  const amberEnd = Math.min(1, p.amber / total);
+  const zones = [];
+  if (redEnd > 0) zones.push({ from: 0, to: redEnd, kind: "red" });
+  if (amberEnd > redEnd) zones.push({ from: redEnd, to: amberEnd, kind: "amber" });
+  return zones;
+}
+
+function headroomZones(totalMib, floorMib) {
+  const floor = asNumber(floorMib);
+  const base = floor === null || floor < 0 ? 0 : floor;
+  return headroomZonesWith(totalMib, base, base + VRAM_AMBER_MARGIN_MIB);
 }
 
 function codeTip(code) {
@@ -866,6 +1189,22 @@ var SYMBOLS = {
       {"stroke":true,"width":10,"d":"M20.763 61.377h158.47v88.983h-158.47z"},
       {"fill":true,"d":"M41.525 44.64h25.636v16.737h-25.636z"},
       {"fill":true,"d":"M132.84 44.64h25.636v16.737h-25.636z"},
+    ],
+  },
+  // Round 3 iteration 4: the RAM PRESSURE dial wore the same thermometer-in-
+  // liquid artwork as the VRAM light. The captain split them: RAM PRESSURE
+  // carries the PLAIN ISO thermometer outline (stem, bulb, mercury column,
+  // graduation ticks - a proper instrument-panel temperature mark), VRAM
+  // keeps the in-liquid coolant telltale, and no two instruments share a
+  // glyph. Original artwork, same fill/stroke conventions as the symbols
+  // above, drawn in this file so the glyphs keep exactly one home.
+  thermometer: {
+    viewBox: [0, 0, 200, 200],
+    items: [
+      {"stroke":true,"width":10,"d":"M86 132 V60 C86 52.27 92.27 46 100 46 C107.73 46 114 52.27 114 60 V132"},
+      {"stroke":true,"width":10,"d":"M126 152 C126 166.36 114.36 178 100 178 C85.64 178 74 166.36 74 152 C74 137.64 85.64 126 100 126 C114.36 126 126 137.64 126 152 Z"},
+      {"fill":true,"d":"M95 64 H105 V152 H95 Z"},
+      {"stroke":true,"width":6,"d":"M84 80 H116 M84 100 H116 M84 120 H116"},
     ],
   },
   mil: {
