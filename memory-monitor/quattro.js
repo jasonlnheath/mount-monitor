@@ -756,7 +756,7 @@ function coolantTipWith(reading, redMib, amberMib) {
     header: INSTRUMENTS.coolant,
     rows: [
       { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Coolant is the GPU memory left over after what the GPU is using. Reserved means free: the headroom for the next big model load." },
+      { label: "What:", text: "Headroom is the GPU memory left over after what the GPU is using - free VRAM, the headroom for the next big model load." },
       { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
       { label: "Ranges:", text: "Red below " + String(Math.round(p.red)) + " MiB free. Amber below " + String(Math.round(p.amber)) + " MiB free. Green above that. The gauge settings sliders move the thresholds." },
     ],
@@ -805,13 +805,12 @@ function valueRows(psiSome, reserve, rootDrive, vram, codes) {
   });
   const fuel = rootDrive || null;
   const gb = fuel === null ? null : gbFromKb(fuel.availKb);
-  const gbTotal = fuel === null ? null : gbFromKb(fuel.sizeKb);
   rows.push({
     label: INSTRUMENTS.fuel,
     // MARK 5: "Root drive, just say 437GB free." The full "X of Y (Z percent)"
     // sentence stays where a hover decode can still give it (fuelTip); the
     // stats row says the one number the captain asked for.
-    value: gb === null || gbTotal === null
+    value: gb === null
       ? "no reading"
       : gb + " GB free",
   });

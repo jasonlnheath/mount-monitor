@@ -237,6 +237,9 @@ test("the coolant band and hover keep a floor-chain pair past the slider scale",
   const tip = Q.coolantTipWith({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288, 13288);
   assert.equal(tip.rows[0].text, "3.6 GiB used, 12.3 GiB free of 15.9 GiB.",
     "the Now row reports free OF TOTAL, the round-3 doctrine the lane and stat rows carry");
+  assert.equal(tip.rows[1].text,
+    Q.coolantTip({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288).rows[1].text,
+    "the What row carries the locked tip's headroom sentence, not the retired reserved vocabulary");
   assert.ok(tip.rows[3].text.includes("Red below 12288 MiB free. Amber below 13288 MiB free."), tip.rows[3].text);
 });
 
