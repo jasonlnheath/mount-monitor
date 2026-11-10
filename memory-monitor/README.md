@@ -155,7 +155,7 @@ at 1500 MiB free when unset, green above that, unlit when no reading exists).
 The three percent-gauge bands start at the settings row's recommended
 defaults, the coolant light follows the VRAM floor until its sliders are
 touched, and the row moves them all live.
-Hovering the light shows VRAM used / reserved in GiB. Under the cluster, the
+Hovering the light shows VRAM used / free of total in GiB. Under the cluster, the
 codes area: ONE column under one check-engine head, DRIVE codes only, always
 most critical at the top, rows stretched across the full card so each code
 carries its reading and its status. The doctrine is round 2's: RAM monitoring

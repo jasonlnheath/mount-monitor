@@ -235,8 +235,8 @@ test("the coolant band and hover keep a floor-chain pair past the slider scale",
   assert.equal(Q.coolantBandWith(12287, 16310, 12288, 13288), 2, "one MiB below the floor is red");
   assert.equal(Q.coolantBandWith(400, 16310, null, null), 2, "a junk pair falls back to the recommended 500/1500");
   const tip = Q.coolantTipWith({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288, 13288);
-  assert.equal(tip.rows[0].text, "3.6 GiB used, 12.3 GiB reserved.",
-    "the Now row reports usage alone; the Ranges row is the thresholds' single home");
+  assert.equal(tip.rows[0].text, "3.6 GiB used, 12.3 GiB free of 15.9 GiB.",
+    "the Now row reports free OF TOTAL, the round-3 doctrine the lane and stat rows carry");
   assert.ok(tip.rows[3].text.includes("Red below 12288 MiB free. Amber below 13288 MiB free."), tip.rows[3].text);
 });
 

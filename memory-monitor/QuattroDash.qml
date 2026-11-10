@@ -15,7 +15,7 @@ import "quattro.js" as Quattro
 // the battery the STANDARD ISO coolant warning light: the thermometer-in-
 // liquid telltale quattro.js owns, centered, tinted green / amber / red by
 // the free-VRAM thresholds (floor 500 MiB unset, amber 1000 MiB above it);
-// hovering it shows VRAM used / reserved. Then the codes area: ONE column
+// hovering it shows VRAM used / free of total. Then the codes area: ONE column
 // under one check-engine head, DRIVE codes only - RAM high is the pressure
 // gauge and the reserve battery, never a code, and VRAM high lights the
 // coolant light only. Clicking a code sends the plugin's agent prompt with
@@ -46,12 +46,10 @@ import "quattro.js" as Quattro
 // Round 3 iteration 3 (the captain's pass on the v2 renders): the VRAM gas-
 // tank scale's letters and tick marks shrink to EXACTLY the scale the ROOT
 // DRIVE fuel dial draws its own E/F/fraction marks at (quattro.js
-// vramScaleSize over the dial Item's real laid-out width); the VRAM square
-// centers on the cluster row's one visual axis, the face center the fuel
-// gauge's Canvas draws (quattro.js dialFaceCenterY); and the SWAP RESERVE
-// square packs down to the row so the battery label sits one laneGap above
-// the VRAM square - the two center pieces read as one instrument column
-// centered against the dials.
+// vramScaleSize over the dial Item's real laid-out width); and the SWAP
+// RESERVE square packs down to the row so the battery label sits one
+// laneGap above the VRAM square - the two center pieces read as one
+// instrument column centered against the dials.
 //
 // Round 3 iteration 4 (the captain's pass on the v3 renders, measured not
 // eyed): the shared RAM PRESSURE / VRAM / ROOT DRIVE label row is GONE - each
@@ -206,7 +204,7 @@ Panel {
   // Round 3 hero: the machine's one tier, the worst thing the dash knows.
   // The phrase rides under the plugin name, ALL CAPS, uncolored ink.
   readonly property bool armLive: String(mon("liveArmKey", "")) !== ""
-  readonly property int tier: Quattro.tierFromState(codes, coolantZone, psiSome < 0 ? null : psiSome, reserve.pct, armLive)
+  readonly property int tier: Quattro.tierFromStateWith(codes, coolantZone, psiSome < 0 ? null : psiSome, reserve.present ? reserve.pct : null, armLive, psiPair, battPair)
   readonly property string tierPhrase: Quattro.tierPhrase(tier)
 
   // Round 3 headroom gauge: the needle position on the horizontal tank, plus

@@ -112,9 +112,6 @@ var FUEL_RED_BELOW = 10;
 // 2026-11-06 defaults steer set the light's lines at amber=1500 MiB free,
 // red=500 MiB free, so the margin is 1000 over the 500 default floor.
 var VRAM_AMBER_MARGIN_MIB = 1000;
-// The unset-floor fallback, mirroring memory.js VRAM_FLOOR_DEFAULT_MIB. The
-// two plain modules cannot import each other, so the test pins both at 500.
-var VRAM_FLOOR_DEFAULT_MIB = 500;
 
 var psiLabels = [
   { f: 0, t: "0" },
@@ -447,18 +444,6 @@ function vramTrackX(frac, trackW) {
   return inset + f * (w - inset * 2);
 }
 
-// The dial face's center inside its Item: the Canvas centers the 260x232
-// viewbox vertically ((itemH - viewH*s) / 2) and the face center sits at
-// DIAL.cy * s within it. This is the cluster row's one visual axis - the
-// center the fuel gauge draws, and the line the coolant gauge centers on.
-function dialFaceCenterY(itemW, itemH) {
-  const w = asNumber(itemW);
-  const h = asNumber(itemH);
-  if (w === null || h === null || w <= 0) return null;
-  const s = w / DIAL.viewW;
-  return (h - DIAL.viewH * s) / 2 + DIAL.cy * s;
-}
-
 // The hero emblem IS the product logo now (the twin-ring mark is retired):
 // the check-engine artwork, tinted the way the bar's badge tints - monochrome
 // ink when all is good, amber at the first warning, red when something is
@@ -609,8 +594,8 @@ function coolantBand(freeMib, totalMib, floorMib) {
 }
 
 // GiB with one decimal, the rounding the fuel gauge's mib() uses at the top
-// of its range. The coolant light's hover says used and reserved in these
-// units (round 2: the hover shows VRAM used / reserved).
+// of its range. The coolant light's hover says used and free of total in
+// these units.
 function gibFromMib(mibValue) {
   const v = asNumber(mibValue);
   if (v === null) return "unknown";
@@ -629,8 +614,6 @@ function gibDigits(mibValue) {
 
 function coolantTip(reading, floorMib) {
   const r = reading || null;
-  const floor = asNumber(floorMib);
-  const floorNow = floor === null || floor < 0 ? VRAM_FLOOR_DEFAULT_MIB : floor;
   const used = r === null ? null : asNumber(r.usedMib);
   const free = r === null ? null : asNumber(r.freeMib);
   // Round 3 iteration 2: the lane shows the ENTIRE amount of VRAM, so the
@@ -765,9 +748,10 @@ function coolantTipWith(reading, redMib, amberMib) {
   const r = reading || null;
   const used = r === null ? null : asNumber(r.usedMib);
   const free = r === null ? null : asNumber(r.freeMib);
+  const total = r === null ? null : asNumber(r.totalMib);
   const now = used === null || free === null
     ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " reserved.";
+    : gibFromMib(used) + " used, " + gibFromMib(free) + " free of " + gibFromMib(total) + ".";
   return {
     header: INSTRUMENTS.coolant,
     rows: [
@@ -822,7 +806,6 @@ function valueRows(psiSome, reserve, rootDrive, vram, codes) {
   const fuel = rootDrive || null;
   const gb = fuel === null ? null : gbFromKb(fuel.availKb);
   const gbTotal = fuel === null ? null : gbFromKb(fuel.sizeKb);
-  const fuelPct = fuel === null ? null : asNumber(fuel.pctFree);
   rows.push({
     label: INSTRUMENTS.fuel,
     // MARK 5: "Root drive, just say 437GB free." The full "X of Y (Z percent)"
@@ -832,9 +815,7 @@ function valueRows(psiSome, reserve, rootDrive, vram, codes) {
       ? "no reading"
       : gb + " GB free",
   });
-  const usedMib = vram === null ? null : asNumber(vram.vramUsedMib);
   const freeMib = vram === null ? null : asNumber(vram.vramFreeMib);
-  const totalMib = vram === null ? null : asNumber(vram.vramTotalMib);
   rows.push({
     label: INSTRUMENTS.coolant,
     // MARK 5: "For VRAM just say 7.1 gigs free." The full sentence stays in the
@@ -949,7 +930,13 @@ function codesEmptyText() {
 // whole message.
 var TIERS = ["CRUISING ALONG", "WARMING THOSE TIRES", "WIDE OPEN THROTTLE", "SLOW YOUR ROLL!", "HARD CRASH"];
 
-function tierFromState(codes, coolant, psiSome, reservePct, armLive) {
+// Settings-driven, the form the dash calls: PSI is judged against the drawn
+// psi pair and the reserve against the drawn batt pair, so the hero phrase,
+// the emblem tint and the gauges beside them agree at every settings
+// combination - a slider moves the bar, the light and the hero in one frame.
+// A reservePct of 0 is a fully used swap (the battery blinks red); null means
+// no swap is configured, which never drives the tier.
+function tierFromStateWith(codes, coolant, psiSome, reservePct, armLive, psiPair, battPair) {
   if (armLive === true) return 5;
   let worst = 0;
   const list = codes === null || codes === undefined ? [] : codes;
@@ -959,17 +946,24 @@ function tierFromState(codes, coolant, psiSome, reservePct, armLive) {
   }
   const cb = asNumber(coolant);
   if (cb !== null && cb > worst) worst = cb;
+  const p = gaugePair("psi", psiPair);
   const psi = asNumber(psiSome);
   if (psi !== null) {
-    if (psi >= PSI_RED_AT) { if (worst < 2) worst = 2; }
-    else if (psi >= PSI_AMBER_AT && worst < 1) worst = 1;
+    if (psi >= p.red) { if (worst < 2) worst = 2; }
+    else if (psi >= p.amber && worst < 1) worst = 1;
   }
+  const b = gaugePair("batt", battPair);
   const r = asNumber(reservePct);
-  if (r !== null && (r || 0) > 0) {
-    if (r < LED_YELLOW_AT) { if (worst < 2) worst = 2; }
-    else if (r < LED_GREEN_AT && worst < 1) worst = 1;
+  if (r !== null) {
+    if (r < b.red) { if (worst < 2) worst = 2; }
+    else if (r < b.amber && worst < 1) worst = 1;
   }
   return 1 + Math.min(3, worst);
+}
+
+function tierFromState(codes, coolant, psiSome, reservePct, armLive) {
+  return tierFromStateWith(codes, coolant, psiSome, reservePct, armLive,
+    { amber: PSI_AMBER_AT, red: PSI_RED_AT }, { amber: LED_GREEN_AT, red: LED_YELLOW_AT });
 }
 
 function tierPhrase(tier) {
@@ -1010,12 +1004,6 @@ function headroomZonesWith(totalMib, redMib, amberMib) {
   if (redEnd > 0) zones.push({ from: 0, to: redEnd, kind: "red" });
   if (amberEnd > redEnd) zones.push({ from: redEnd, to: amberEnd, kind: "amber" });
   return zones;
-}
-
-function headroomZones(totalMib, floorMib) {
-  const floor = asNumber(floorMib);
-  const base = floor === null || floor < 0 ? 0 : floor;
-  return headroomZonesWith(totalMib, base, base + VRAM_AMBER_MARGIN_MIB);
 }
 
 function codeTip(code) {

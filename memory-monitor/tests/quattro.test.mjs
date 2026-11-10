@@ -98,7 +98,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "gaugeClamp", "zoneArcsFor", "psiZoneArcsFor", "fuelZoneArcsFor", "ledBandWith",
     "battTickFracs", "coolantBandWith", "gaugeTitle",
     "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
-    "ceilingBlockedToast",
+    "ceilingBlockedToast", "tierFromState", "tierFromStateWith",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -446,12 +446,78 @@ test("codesEmptyText: the empty column says the machine is clear, in the terse r
 });
 
 // ---------------------------------------------------------------------------
+// The hero tier (round 3): one tier for the machine, the worst thing the dash
+// knows - judged against the SAME pairs the gauges draw, so the hero phrase
+// and the emblem tint can never disagree with the dials beside them.
+// ---------------------------------------------------------------------------
+
+test("tierFromStateWith: the hero judges PSI and the reserve against the drawn pairs", () => {
+  // The stock-settings contradiction the locked ladder shipped: the dial drew
+  // the settings pair while the tier judged the locked 60/80 and 25/10 lines.
+  const psiPair = { amber: 70, red: 90 };
+  const battPair = { amber: 20, red: 10 };
+  assert.equal(Quattro.tierFromStateWith([], null, 85, null, false, psiPair, battPair), 2,
+    "psi 85 at the stock pair is the drawn amber, not red");
+  assert.equal(Quattro.psiZoneWith(85, psiPair.amber, psiPair.red), "amber",
+    "the dial beside the hero draws amber at the same reading");
+  assert.equal(Quattro.tierFromStateWith([], null, 65, null, false, psiPair, battPair), 1,
+    "psi 65 under the stock amber line leaves the hero cruising");
+  assert.equal(Quattro.tierFromStateWith([], null, 90, null, false, psiPair, battPair), 3,
+    "psi at the stock red line is the severe tier");
+  assert.equal(Quattro.tierFromStateWith([], null, 85, null, false, { amber: 60, red: 80 }, battPair), 3,
+    "a pair dragged to 60/80 moves the hero over its own red line in the same frame");
+  assert.equal(Quattro.tierFromStateWith([], null, null, 22, false, psiPair, battPair), 1,
+    "reserve 22 over the stock amber tick is green on the battery and clear in the hero");
+  assert.equal(Quattro.ledBandWith(22, battPair.amber, battPair.red), "green",
+    "the battery beside the hero agrees");
+  assert.equal(Quattro.tierFromStateWith([], null, null, 15, false, psiPair, battPair), 2,
+    "reserve inside the yellow band is the amber tier");
+  assert.equal(Quattro.tierFromStateWith([], null, null, 0, false, psiPair, battPair), 3,
+    "a fully used swap drives the hero the way the blinking battery reads");
+  assert.equal(Quattro.tierFromStateWith([], null, null, null, false, psiPair, battPair), 1,
+    "no swap configured never drives the tier");
+});
+
+test("tierFromState: the locked ladder keeps judging the locked lines", () => {
+  assert.equal(Quattro.tierFromState([], null, 85, null, false), 3,
+    "the locked form keeps the PSI 60/80 law the round-7 defaults froze");
+  assert.equal(Quattro.tierFromState([], null, 50, null, false), 1);
+  assert.equal(Quattro.tierFromState([], null, null, 0, false), 3,
+    "the locked form counts a fully used reserve too");
+});
+
+test("the tier ladder still folds codes, the coolant light and the arm into the worst", () => {
+  const psiPair = { amber: 70, red: 90 };
+  const battPair = { amber: 20, red: 10 };
+  const critical = Quattro.codesFromReadings([
+    { type: "hd", key: "partuuid:cc", id: "mem-9f", band: 3, pct: 97, target: "/", ro: false }]);
+  assert.equal(Quattro.tierFromStateWith(critical, null, null, null, false, psiPair, battPair), 4,
+    "a critical-band drive is SLOW YOUR ROLL");
+  assert.equal(Quattro.tierFromStateWith([], 2, null, null, false, psiPair, battPair), 3,
+    "the red coolant light is the severe tier");
+  assert.equal(Quattro.tierFromStateWith([], 1, null, null, false, psiPair, battPair), 2);
+  assert.equal(Quattro.tierFromStateWith([], null, null, null, true, psiPair, battPair), 5,
+    "the live arm is HARD CRASH over everything");
+});
+
+test("tierPhrase and heroTint ride the tier", () => {
+  same(Quattro.TIERS, ["CRUISING ALONG", "WARMING THOSE TIRES", "WIDE OPEN THROTTLE", "SLOW YOUR ROLL!", "HARD CRASH"]);
+  assert.equal(Quattro.tierPhrase(1), "CRUISING ALONG");
+  assert.equal(Quattro.tierPhrase(5), "HARD CRASH");
+  assert.equal(Quattro.tierPhrase(null), "CRUISING ALONG");
+  assert.equal(Quattro.heroTint(1), "plain");
+  assert.equal(Quattro.heroTint(2), "amber");
+  assert.equal(Quattro.heroTint(3), "red");
+  assert.equal(Quattro.heroTint(5), "red");
+});
+
+// ---------------------------------------------------------------------------
 // VRAM COOLANT (round 2): the tank card is gone; the STANDARD ISO coolant
 // warning light (the thermometer-in-liquid artwork SYMBOLS.temp owns) is
 // tinted by coolantBand's own thresholds. The captain's steer: red at 500 MiB
 // free unset, amber at 1500 (the fixed 1000 MiB approach margin above the
 // floor). The threshold logic and its tests are untouched; the hover now
-// shows VRAM used / reserved in GiB.
+// shows VRAM used / free of total in GiB.
 // ---------------------------------------------------------------------------
 
 test("coolantBand: the captain's lines, red below the floor, amber 1000 MiB above it, green above that, no reading is null", () => {
@@ -845,6 +911,7 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     "Quattro.psiZoneArcsFor(", "Quattro.fuelZoneArcsFor(", "Quattro.dialTicks(",
     "Quattro.needleAngleDeg(", "Quattro.psiNeedleFrac(", "Quattro.fuelNeedleFrac(",
     "Quattro.reserveReading(", "Quattro.coolantBandWith(", "Quattro.diagnosisJson(",
+    "Quattro.tierFromStateWith(",
     "Memory.promptWithDiagnosis(",
     "Quattro.codesHeadToken(", "Quattro.codesEmptyText(",
     // The gauge threshold settings row (the captain's 2026-11-07 ruling): the
@@ -866,9 +933,14 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
   // The drawn gauges never hardcode a threshold: every zone list, LED band,
   // tick row and coolant band comes from the monitor's pair through the With
   // variants above, so a slider drag moves the gauge in the same frame.
-  for (const banned of ["Quattro.psiZoneArcs(", "Quattro.fuelZoneArcs(", "Quattro.ledBand(", "Quattro.coolantBand(", "Quattro.psiTip(", "Quattro.battTip(", "Quattro.fuelTip(", "Quattro.coolantTip("]) {
+  for (const banned of ["Quattro.psiZoneArcs(", "Quattro.fuelZoneArcs(", "Quattro.ledBand(", "Quattro.coolantBand(", "Quattro.psiTip(", "Quattro.battTip(", "Quattro.fuelTip(", "Quattro.coolantTip(", "Quattro.tierFromState("]) {
     assert.equal(PANEL.includes(banned), false, `the locked-constant call ${banned} must not survive in the panel`);
   }
+  // The hero tier judges the drawn pairs and sees a fully used swap: a
+  // reserve handed over as a bare pct cannot tell "no swap" from "all used",
+  // so the panel passes the reserve's presence itself.
+  assert.equal(PANEL.includes("reserve.present ? reserve.pct : null"), true,
+    "the hero tier sees a fully used swap, and no swap as absent");
   // The codes column is ONE column, most critical at the top: the panel renders
   // the codesFromReadings list directly and keeps no per-severity models of its
   // own (the captain's live-look ruling; the old amber and red columns are gone).
