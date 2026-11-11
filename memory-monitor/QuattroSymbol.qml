@@ -50,8 +50,14 @@ Item {
         anchors.fill: parent
 
         ShapePath {
-          strokeColor: modelData.stroke === true ? root.color : "transparent"
-          strokeWidth: modelData.stroke === true ? modelData.width : 0
+          strokeColor: modelData.stroke === true || modelData.fill === true ? root.color : "transparent"
+          // Round 7 item 13: a fill-only path whose colored regions are thin
+          // (the emblem's bottom bar is ~1 unit tall) renders empty at small
+          // sizes on some raster backends - the 17px bar emblem lost its
+          // bottom line. Stroke every fill with a hairline of the same color
+          // (1 device px after the fit Scale), so a thin filled region can
+          // never drop out; declared stroke widths are untouched.
+          strokeWidth: modelData.stroke === true ? modelData.width : (modelData.fill === true ? 1 / Math.max(root.fit, 0.0001) : 0)
           fillColor: modelData.fill === true ? root.color : "transparent"
 
           PathSvg {

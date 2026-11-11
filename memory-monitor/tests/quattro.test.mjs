@@ -96,7 +96,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "diagnosisConsumers", "diagnosisJson",
     "gaugePair", "adjustGaugePair", "gaugeRedAbove", "gaugeRange",
     "gaugeClamp", "zoneArcsFor", "psiZoneArcsFor", "fuelZoneArcsFor", "ledBandWith",
-    "battTickFracs", "coolantBandWith", "gaugeTitle",
+    "battSegmentZone", "coolantBandWith", "gaugeTitle",
     "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
     "ceilingBlockedToast", "tierFromState", "tierFromStateWith",
   ]) {
@@ -891,9 +891,9 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     // The gauge threshold settings row (the captain's 2026-11-07 ruling): the
     // pairs, the ranges, the push model's law and the row's sentences are all
     // quattro.js data the panel renders and the monitor owns on disk.
-    "Quattro.SETTINGS", "Quattro.GAUGE_KEYS",
+    "Quattro.SETTINGS", "Quattro.GAUGE_KEYS", "Quattro.valueRows(",
     "Quattro.gaugePair(", "Quattro.gaugeRange(", "Quattro.gaugeTitle(",
-    "Quattro.battTickFracs(",
+    "Quattro.battSegmentZone(", "Quattro.swapLine(",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
   }

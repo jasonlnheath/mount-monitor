@@ -441,7 +441,15 @@ BarWidget {
 
   function applyBand(key, type, pct, ceiling, latchedTarget, entry): void {
     var previous = bandOf(key);
-    var result = Memory.resolveBand(pct, ceiling, previous, type);
+    var result;
+    if (type === "ram") {
+      // Round 7 item 8: the ram store watches PRESSURE (PSI) and the swap
+      // reserve. The held band is the more severe of the two signals' bands,
+      // each hysteresized against the same previous band in its own unit.
+      result = Memory.resolveRamBand(ramReading, ceiling, previous, gaugePairFor("batt"));
+    } else {
+      result = Memory.resolveBand(pct, ceiling, previous, type);
+    }
     latchedTarget[key] = result.latched;
     var held = result.band;
     var next = JSON.parse(JSON.stringify(bands));
@@ -468,7 +476,7 @@ BarWidget {
     if (isWriter && (held !== previous || firstSample)) saveState();
     if (!fire) return;
     if (entry) entry.band = held;
-    queueAlert(entry, held, type, key, result.latched);
+    queueAlert(entry, held, type, key, result.latched, result.signal);
   }
 
   // ---------------------------------------------------------------------------
@@ -476,7 +484,7 @@ BarWidget {
   // daemon drops a silenced amber without keeping a record of dropping it.
   // ---------------------------------------------------------------------------
 
-  function alertEvent(entry, band, type, key, latched): var {
+  function alertEvent(entry, band, type, key, latched, signal): var {
     var base = entry === null || entry === undefined ? {} : entry;
     return {
       kind: "band",
@@ -486,6 +494,9 @@ BarWidget {
       band: band,
       pct: base.pct,
       latched: latched,
+      // Round 7 item 8: which ram signal produced the band, so the toast can
+      // say pressure or swap. Absent for hd and vram.
+      signal: signal === undefined ? undefined : signal,
       target: base.target,
       device: base.device,
       fstype: base.fstype,
@@ -500,10 +511,10 @@ BarWidget {
     };
   }
 
-  function queueAlert(entry, band, type, key, latched): void {
+  function queueAlert(entry, band, type, key, latched, signal): void {
     if (!isWriter) return;
     if (band === 0) return;
-    var alert = alertEvent(entry, band, type, key, latched);
+    var alert = alertEvent(entry, band, type, key, latched, signal);
 
     // Mount Monitor already toasts the drives it watches, with its own words,
     // its own thresholds and its own click target. One toast per crossing.
@@ -554,6 +565,7 @@ BarWidget {
     var alert = alertQueue[0];
     activeAlert = alert;
     notifyProcArgs = Memory.notifyArgs(alert, agentCommandArgv(), {
+      iconDir: root.iconDir,
       clickArgv: Memory.clickArgvFor(alert, agentCommandArgv(), {
         inline: Memory.normalizeBool(setting("agentInline", false), false),
         reading: readingFor(alert.type, alert),
@@ -605,6 +617,7 @@ BarWidget {
       resting: alert.resting === undefined ? null : alert.resting,
     });
     var args = Memory.notifyArgs(alert, agentCommandArgv(), {
+      iconDir: root.iconDir,
       clickArgv: clickArgv,
       printId: true,
       replaceId: alert.replaceId === undefined ? "" : alert.replaceId,
@@ -613,9 +626,17 @@ BarWidget {
     noticePrintedId = "";
     noticeProc.command = args;
     noticeProc.running = true;
+    noticeWatchdog.restart();
     // A question is not an emergency: the ceiling question and the guard ask ride
-    // the critical lane so they stay clickable, and neither one arms an agent.
+    // the notice lane so they stay on screen, and neither one arms an agent.
     if (Memory.isArmNotice(alert) && guardState === "armed") startArm(alert);
+  }
+
+  function releaseActiveNotice(reason): void {
+    if (!noticeProc.running) return;
+    console.warn("memory-monitor: released a notice:", reason);
+    noticeWatchdogFired = true;
+    noticeProc.running = false;
   }
 
   // A severity rise over the notice on the screen displaces it: the incoming
@@ -752,7 +773,7 @@ BarWidget {
 
   // A sentence claiming an agent is guarding may not outlive the arm it names.
   function retractClaim(record): void {
-    var plan = Memory.retractClaimFor(record);
+    var plan = Memory.retractClaimFor(record, { iconDir: root.iconDir });
     if (plan === null || plan.args === null || plan.args === undefined) return;
     if (!plan.replaceable) console.warn("memory-monitor:", Memory.degradationText("claim-unretractable"));
     // Both shapes come from memory.js: a replace by captured id, or a fresh
@@ -1124,6 +1145,18 @@ BarWidget {
   property var activeAlert: null
   property var activeNotice: null
   property bool noticePreempting: false
+  // Round 7 item 12: every toast is temporary, so the notice lane can no longer
+  // promise to hold a popup forever - it carries the same 120s watchdog release
+  // the alert lane has. A question the watchdog releases was interrupted, not
+  // answered: it stays unrecorded and is asked again when the lane is free.
+  property bool noticeWatchdogFired: false
+  // The toast logo lives beside this file; Qt.resolvedUrl anchors it to the
+  // plugin directory wherever the shell installed it.
+  readonly property string iconDir: {
+    var url = Qt.resolvedUrl("icons").toString();
+    if (url.indexOf("file://") === 0) url = url.substring(7);
+    return decodeURIComponent(url);
+  }
   property var notifyProcArgs: []
   property var noticeProcArgs: []
   property string noticePrintedId: ""
@@ -1293,8 +1326,10 @@ BarWidget {
   property string oomdActiveText: ""
 
   // ---------------------------------------------------------------------------
-  // Notification lanes. `notifyProc` is the watchdog-released amber lane;
-  // `noticeProc` is the never-expiring red/critical lane that no timer releases.
+  // Notification lanes. Both lanes build their argv in memory.js and both are
+  // watchdog-released now that every toast is temporary: `notifyProc` carries
+  // the band alerts, `noticeProc` the notices and questions. A notice the
+  // watchdog releases stays unrecorded, so the question is asked again.
   // ---------------------------------------------------------------------------
 
   Process {
@@ -1312,6 +1347,13 @@ BarWidget {
       root.alertQueue = root.alertQueue.slice(1);
       root.fireNextAlert();
     }
+  }
+
+  Timer {
+    id: noticeWatchdog
+    interval: 120000
+    repeat: false
+    onTriggered: root.releaseActiveNotice("watchdog")
   }
 
   Process {
@@ -1346,10 +1388,13 @@ BarWidget {
       onStreamFinished: if (this.text.trim() !== "") console.warn("memory-monitor: notify-send:", this.text.trim())
     }
     onExited: function(exitCode, exitStatus) {
+      noticeWatchdog.stop();
       var notice = root.activeNotice;
+      var interrupted = root.noticeWatchdogFired;
       root.activeNotice = null;
       root.noticePreempting = false;
-      if (notice !== null) {
+      root.noticeWatchdogFired = false;
+      if (notice !== null && !interrupted) {
         root.recordNoticeDelivered(notice, exitCode);
         var at = root.noticeQueue.indexOf(notice);
         if (at >= 0) root.noticeQueue = root.noticeQueue.slice(at + 1);

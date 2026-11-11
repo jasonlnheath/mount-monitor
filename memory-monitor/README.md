@@ -1,4 +1,4 @@
-# Memory Monitor
+# Quattro Dash
 
 An [Omarchy](https://omarchy.org) bar plugin that watches **System RAM, VRAM,
 and your drives**, and tells you when one of them crosses a line **you** set.
@@ -7,9 +7,9 @@ It is a monitor first. It measures, shows, alerts, logs, and hands the reading
 to your agent. It never kills, throttles, unloads, or reconfigures anything —
 what happens when a line is crossed is your decision, made with your agent.
 
-Memory Monitor is the sibling plugin of [Mount Monitor](../README.md) in this
+Quattro Dash is the sibling plugin of [Mount Monitor](../README.md) in this
 repository. Mount Monitor owns which drives are watched (its `mounts` setting
-and its partition onboarding); Memory Monitor reads that same list, shows the
+and its partition onboarding); Quattro Dash reads that same list, shows the
 severity of those drives, and alerts only for drives Mount Monitor is not
 already alerting on — so one drive produces one toast, not two.
 
@@ -47,7 +47,7 @@ already alerting on — so one drive produces one toast, not two.
   dragged live from the QuattroDash's gauge settings row.
 - Validation is `0 < amber < red < critical < 100`, with critical allowed to be
   unset. Thresholds live in `~/.local/state/memory-monitor/settings.json`.
-- Memory Monitor never writes a system limit. Your ceiling and the kernel's
+- Quattro Dash never writes a system limit. Your ceiling and the kernel's
   ceiling (systemd-oomd's PSI and swap limits) are shown side by side, because
   they are different numbers and only one of them is yours.
 
@@ -80,21 +80,21 @@ already alerting on — so one drive produces one toast, not two.
 A toast on every amber, red and critical alert event, in the spec's own words:
 
 ```
-Memory Monitor
+Quattro Dash
 Caution: Amber Alert
 Device (System Ram) has reached 82% usage.
 Click to address with agent, otherwise ignore.
 ```
 
 ```
-Memory Monitor
+Quattro Dash
 WARNING: RED ALERT
 Device (System RAM) has reached 91% usage.
 Click to open an agent to actively monitor/guard against OOM, otherwise ignore.
 ```
 
 ```
-Memory Monitor
+Quattro Dash
 CRITICAL ALERT!
 Device has reached 98% usage.
 Agent has been notified and is guarding against OOM.
@@ -104,11 +104,12 @@ The percentage is the **live reading, rounded up**, not the threshold: a mount a
 97% is not told "reached 95%".
 
 - **Amber** is normal urgency. If Do Not Disturb is on, the notification service
-  silences it — and Memory Monitor records it, in the log and in the detail
+  silences it — and Quattro Dash records it, in the log and in the detail
   window's **"Alerts you did not see"** section. Silenced, never lost.
-- **Red** rides critical urgency so it bypasses DND, and never expires.
-- **Critical** rides critical urgency, never expires, and preempts an unanswered
-  lower-band toast rather than queueing behind it.
+- **Red and critical ride normal urgency too** (round 7: every toast is
+  temporary — normal urgency with a finite timeout, the tinted emblem logo
+  carrying the severity). Critical preempts an unanswered lower-band toast
+  rather than queueing behind it.
 - **Clicking** an amber or red toast opens your agent (Omarchy's default agent,
   `omarchy agent prompt`, overridable with `agentCommand`) with the reading.
   Clicking a critical toast opens the detail window — never a second agent on
@@ -124,9 +125,9 @@ per machine, and only when the machine has headroom for it — the agent and the
 terminal it opens are themselves memory consumers, inside the cgroup oomd is
 watching. When the claim does not hold, the toast says so:
 
-- `The standing guard is off. Click to open Memory Monitor, otherwise ignore.`
-- `The guard could not start. Click to open Memory Monitor, otherwise ignore.`
-- `The guard did not survive. Click to open Memory Monitor, otherwise ignore.`
+- `The standing guard is off. Click to open Quattro Dash, otherwise ignore.`
+- `The guard could not start. Click to open Quattro Dash, otherwise ignore.`
+- `The guard did not survive. Click to open Quattro Dash, otherwise ignore.`
 
 The last one replaces the claim toast it retracts, by the notification id captured
 when the claim was sent, so a guarantee cannot outlive the thing it names.
@@ -187,13 +188,15 @@ the guard. Hovering any instrument gives the plain-words teaching decode, PSI
 included: it is a real kernel metric, not one we invented.
 
 The bottom of the dash carries the gauge settings row, collapsed until you
-open it: one amber/red slider pair per gauge, each with its one-sentence
-description in the row, and a reset button that writes back the recommended
-defaults. The pairs move the drawn bands live — the RAM and ROOT DRIVE dials
-redraw their zones, the SWAP RESERVE gauge gains threshold ticks under its LED
-bar, and the VRAM COOLANT gauge re-tints amber or red as free VRAM
-crosses its thresholds — and red never crosses amber: moving one slider
-through the other pushes it.
+open it: one amber/red slider pair per gauge, each with its two-line
+description in the row (what the metric is, why we measure it), and a reset
+button that writes back the recommended defaults. The pairs move the drawn
+bands live — the RAM and ROOT DRIVE dials redraw their zones, and the battery
+under SWAP RESERVE recolors its bars: each bar takes its color from its own
+center percentage against the drawn pair, two red bars at 20, three at 30,
+duplicates allowed, no hidden reorder. The VRAM battery re-tints amber or red
+as free VRAM crosses its thresholds — and red never crosses amber on the RAM
+and root drive pairs: moving one slider through the other pushes it.
 There is no warning message; the push is the whole rule. The RAM pressure and
 root drive pairs are the plugin's real alert ceilings (the same numbers the
 detail window edits), and the reserve ticks and coolant thresholds are display
@@ -225,7 +228,7 @@ monitoring continues.
 
 Nominal: drives 60 s, RAM 30 s, VRAM 60 s. Escalated for any resource at red or
 critical, and further while PSI memory is stalling. Restored when a descent
-holds. Memory Monitor runs no `udevadm monitor` of its own — Mount Monitor's is
+holds. Quattro Dash runs no `udevadm monitor` of its own — Mount Monitor's is
 this machine's event-driven block watcher.
 
 ## Install

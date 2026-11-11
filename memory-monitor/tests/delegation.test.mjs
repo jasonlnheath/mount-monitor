@@ -77,7 +77,7 @@ test("the widget builds every notification through Memory.notifyArgs and never w
   assert.equal(plan.replaceable, false);
   assert.equal(plan.args[0], "notify-send");
   assert.equal(plan.args.includes("-u"), true);
-  assert.equal(plan.args.includes("critical"), true, "a dead guard is still a critical toast");
+  assert.equal(plan.args[plan.args.indexOf("-u") + 1], "normal", "round 7 item 12: even the dead-guard toast is temporary");
   const replaceable = Memory.retractClaimFor({ outcome: "died", type: "ram", key: "ram", id: Memory.memId("ram"), pct: 97, claimId: "42" });
   assert.equal(replaceable.replaceable, true);
   assert.equal(replaceable.args[0], "notify-send");
@@ -129,8 +129,8 @@ test("the click path is typed argv, and the critical click opens the detail wind
   const argv = Memory.notifyArgs({ kind: "alert", band: 2, type: "ram", key: "ram", id: Memory.memId("ram"), pct: 91.2 }, null);
   const joined = argv.join(" ");
   assert.equal(joined.includes("-h STRING:omarchy-exec-argv:["), true);
-  assert.equal(joined.includes("-A default:"), true);
-  assert.equal(joined.includes("-u critical"), true);
+  assert.equal(joined.includes("-A default="), true, "round 7 item 12: the action label rides an equals, no colon form");
+  assert.equal(joined.includes("-u normal"), true, "round 7 item 12: no toast is critical urgency any more");
 });
 
 test("the widget reads every setting through a normalize* helper, because a Qt list is not a JavaScript Array", () => {

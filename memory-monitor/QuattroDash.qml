@@ -118,7 +118,8 @@ Panel {
       ? monitor.vramFloorMib() : Memory.vramFloorMib(null)
   }
 
-  readonly property var reserve: Quattro.reserveReading(Memory.swapTotals(swaps))
+  readonly property var swapTotals: Memory.swapTotals(swaps)
+  readonly property var reserve: Quattro.reserveReading(swapTotals)
   readonly property real psiSome: psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : -1
   readonly property var psiNeedle: Quattro.psiNeedleFrac(psiSome < 0 ? null : psiSome)
   readonly property var fuelNeedle: Quattro.fuelNeedleFrac(rootDrive === null ? null : rootDrive.pctFree)
@@ -234,7 +235,7 @@ Panel {
   // the settings section).
   readonly property real listHeight: (valuesOnly ? valuesContent : content).implicitHeight
   readonly property var valueRows: Quattro.valueRows(
-    psiSome < 0 ? null : psiSome, reserve, rootDrive, vram, codes)
+    psiSome < 0 ? null : psiSome, reserve, swapTotals, rootDrive, vram, codes)
 
   // ---------------------------------------------------------------------------
   // Layout measures. The mockup is designed on the 443px card (the
@@ -511,6 +512,11 @@ Panel {
                   spacing: 2
                   Layout.alignment: Qt.AlignHCenter
 
+                  // Round 7 item 1: the battery threshold display is a row of
+                  // colored bars. Each bar's color comes from its CENTER
+                  // percentage against the drawn pair - red first, duplicates
+                  // allowed, no hidden reorder - and the moving tick lines are
+                  // gone. Two red bars at 20, three at 30, exactly as drawn.
                   Repeater {
                     model: Quattro.LED_COUNT
 
@@ -519,42 +525,15 @@ Panel {
                       width: (84 * root.unit - (Quattro.LED_COUNT - 1) * 2) / Quattro.LED_COUNT
                       height: 9
                       radius: 2
+                      readonly property real center: (index + 0.5) * (100 / Quattro.LED_COUNT)
+                      readonly property string zone: Quattro.battSegmentZone(center, root.battPair)
                       readonly property bool lit: index < Quattro.litSegments(root.reserve.pct)
-                      readonly property string ledWord: Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red)
-                      readonly property color bandColor: ledWord === "green" ? Quattro.PAL.green
-                        : (ledWord === "yellow" ? Quattro.PAL.amber : Quattro.PAL.redHot)
-                      color: lit ? bandColor : Quattro.PAL.ledOff
+                      readonly property color zoneColor: zone === "green" ? Quattro.PAL.green
+                        : (zone === "amber" ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                      color: lit ? zoneColor : Quattro.PAL.ledOff
                       border.width: 1
-                      border.color: lit ? bandColor : Quattro.PAL.line
-                    }
-                  }
-                }
-
-                // The reserve's threshold ticks (the captain's 2026-11-07
-                // ruling): where the drawn amber and red lines sit, red below
-                // amber, because this gauge's bad end is empty.
-                Item {
-                  width: 84 * root.unit
-                  height: 5
-                  Layout.alignment: Qt.AlignHCenter
-
-                  Rectangle {
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                    height: 1
-                    color: Quattro.PAL.line
-                  }
-
-                  Repeater {
-                    model: Quattro.battTickFracs(root.battPair)
-
-                    Rectangle {
-                      required property var modelData
-                      x: Math.max(0, Math.min(parent.width - 1.5, parent.width * modelData.f - 0.75))
-                      y: 0
-                      width: 1.5
-                      height: parent.height
-                      color: modelData.cls === "red" ? Quattro.PAL.redHot : Quattro.PAL.amber
+                      border.color: lit ? zoneColor : Quattro.PAL.line
+                      opacity: lit ? 1.0 : 0.45
                     }
                   }
                 }
@@ -828,6 +807,17 @@ Panel {
             anchors.fill: parent
             color: Quattro.PAL.line
           }
+        }
+
+        // Round 7 item 9: the dash says swap on its own line, centered under
+        // the cluster row, the same honest string the stat rows carry - or
+        // that there is none configured.
+        Text {
+          Layout.alignment: Qt.AlignHCenter
+          text: Quattro.swapLine(root.swapTotals)
+          color: root.dim
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
         }
 
         // The codes area is a plain Item, not a nested ColumnLayout: in this

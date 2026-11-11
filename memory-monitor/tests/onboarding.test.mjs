@@ -28,20 +28,20 @@ test("the state lives in its own directory, and deleting it is the reset hook", 
 });
 
 test("the ceiling question reports the reading before it asks anything", () => {
-  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 12 });
+  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 75 });
   const lines = text.split("\n");
   assert.match(lines[0], /^Quattro Dash - System RAM ceilings$/);
   assert.match(lines[1], /^Measured now: RAM PRESSURE 0\.2 PSI, swap 15% used, .* free of .*$/);
   assert.match(lines[2], /Your amber: 70 PSI \(default\)\. Your red: 90 PSI \(default\)\./);
   assert.match(lines[3], /^Your critical: not set - you have no ceiling, and no critical alert can fire\.$/);
   assert.match(lines[4], /^The kernel's ceiling: oomd at PSI 50% for 20s, or swap at 90%, watching \/user\.slice/);
-  assert.match(lines[5], /^Recommended from this machine: amber 14 PSI, red 19 PSI, critical 22 PSI\.$/);
-  assert.match(lines[6], /^This machine rests at 12 PSI, which is inside your amber line\.$/);
+  assert.match(lines[5], /^Recommended from this machine: amber 77 PSI, red 82 PSI, critical 85 PSI\.$/);
+  assert.match(lines[6], /^This machine rests at 75 PSI, which is inside your amber line\.$/);
 });
 
 test("a ceiling the user set is reported as his, with its number", () => {
   const settings = Memory.setCeiling(Memory.setCeiling({}, "ram", "critical", 96), "ram", "amber", 70);
-  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, settings.thresholds, { ram: 12 });
+  const text = Memory.ceilingsQuestion("ram", RAM, OOMD, settings.thresholds, { ram: 75 });
   assert.match(text, /Your amber: 70 PSI \(you set it\)/);
   assert.match(text, /Your critical: 96 PSI \(you set it\)\./);
   assert.equal(text.includes("not set - you have no ceiling"), false);
@@ -55,15 +55,15 @@ test("no oomd is stated as no kernel ceiling, not as a zero", () => {
 test("the resting claim is measured from the log, and withheld until the log holds 48 samples", () => {
   assert.equal(Memory.RESTING_MIN_SAMPLES, 48);
   const sample = psi => Memory.logLine(Memory.logRecord({ at: "2026-11-04T00:00:00.000Z", ram: { pct: 40, psiSomeAvg10: psi } }));
-  const short = Array.from({ length: Memory.RESTING_MIN_SAMPLES - 1 }, () => sample(12)).join("\n");
-  const full = Array.from({ length: Memory.RESTING_MIN_SAMPLES }, () => sample(12)).join("\n");
+  const short = Array.from({ length: Memory.RESTING_MIN_SAMPLES - 1 }, () => sample(75)).join("\n");
+  const full = Array.from({ length: Memory.RESTING_MIN_SAMPLES }, () => sample(75)).join("\n");
 
   const withheld = Memory.restingFromLog(short);
   assert.equal(withheld.ram, null, "47 samples say nothing about where this machine rests");
   assert.equal(withheld.vram, null);
   assert.equal(withheld.hd, null);
   const measured = Memory.restingFromLog(full);
-  assert.equal(measured.ram, 12, "the median of the log's own PSI distribution, never the live reading");
+  assert.equal(measured.ram, 75, "the median of the log's own PSI distribution, never the live reading");
 
   const question = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, withheld);
   assert.match(
@@ -73,7 +73,7 @@ test("the resting claim is measured from the log, and withheld until the log hol
   assert.equal(question.includes("rests at"), false, "the live reading never becomes a resting claim");
 
   const answered = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, measured);
-  assert.match(answered, /^This machine rests at 12 PSI, which is inside your amber line\.$/m);
+  assert.match(answered, /^This machine rests at 75 PSI, which is inside your amber line\.$/m);
   assert.equal(answered.includes("No resting claim yet"), false);
 });
 
@@ -84,14 +84,14 @@ test("an unmeasured machine is recommended the documented defaults, never 'from 
   const rec = Memory.recommendCeilings("ram", null);
   assert.ok(rec.amber < rec.red, "the provisional pair is never amber above red");
 
-  const measured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 12 });
-  assert.match(measured, /^Recommended from this machine: amber 14 PSI, red 19 PSI, critical 22 PSI\.$/m);
+  const measured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 75 });
+  assert.match(measured, /^Recommended from this machine: amber 77 PSI, red 82 PSI, critical 85 PSI\.$/m);
   assert.equal(measured.includes("Recommended defaults until measured"), false);
 });
 
 test("a recommendation is a recommendation: derived from the resting reading, capped, and marked provisional without one", () => {
-  const rec = Memory.recommendCeilings("ram", { ram: 12 });
-  assert.equal(rec.restingPct, 12);
+  const rec = Memory.recommendCeilings("ram", { ram: 75 });
+  assert.equal(rec.restingPct, 75);
   assert.equal(rec.provisional, false);
   assert.ok(rec.amber > rec.restingPct, "a recommendation that sits under the resting reading would alert forever");
   assert.ok(rec.critical <= 99);
@@ -101,7 +101,7 @@ test("a recommendation is a recommendation: derived from the resting reading, ca
 });
 
 test("the onboarding prompt carries the readings as data and never a device name in an instruction", () => {
-  const prompt = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", { ram: 12 });
+  const prompt = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", { ram: 75 });
   assert.match(prompt, /Quattro Dash first run\. Report what this machine is resting at, then ask for the ceilings\./);
   assert.match(prompt, /critical stays unset until he sets it/);
   assert.match(prompt, /Never set a ceiling yourself, and never write over one the user has set\./);
@@ -125,9 +125,9 @@ test("the ceilings click-through prompt is honest about what the log can say", (
   assert.match(withheld, /no ceiling recommendation derived from a single reading/);
   assert.match(withheld, /recommend the defaults and say plainly they are defaults/);
 
-  const measured = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", { ram: 12 });
+  const measured = Memory.onboardingPrompt(RAM, OOMD, {}, "/log", { ram: 75 });
   assert.match(measured, /Read the baseline log at \/log/);
-  assert.match(measured, /This machine rests at 12 PSI\./);
+  assert.match(measured, /This machine rests at 75 PSI\./);
   assert.match(measured, /derived from that resting distribution/);
   assert.equal(measured.includes("no resting claim yet"), false);
 });
@@ -186,7 +186,7 @@ test("a question already queued or already on the screen is not asked again", ()
 
 test("the health-check prompt is fixed copy that reports before it asks", () => {
   const prompt = Memory.healthCheckPrompt("/log", { ram: { amber: 80, red: 90 } }, OOMD);
-  assert.match(prompt, /Memory Monitor health check\./);
+  assert.match(prompt, /Quattro Dash health check\./);
   assert.match(prompt, /Read the baseline log at \/log/);
   assert.match(prompt, /Do not change any setting, limit, or file yourself\./);
   assert.match(prompt, /Report first, then ask\./);
@@ -225,16 +225,17 @@ test("the guard ask's click is the answer, delivered to the widget that owns the
 
 test("an onboarding notice says its own piece instead of reading like a band toast", () => {
   const args = Memory.notifyArgs(
-    { kind: "ceilings", band: 3, title: "Memory Monitor - your ceilings", body: "Measured now: ..." },
+    { kind: "ceilings", band: 3, title: "Quattro Dash - your ceilings", body: "Measured now: ..." },
     null,
     { clickArgv: Memory.answerGuardAskArgv(), printId: true },
   );
   assert.equal(args[args.length - 2], "Quattro Dash - your ceilings");
   assert.equal(args[args.length - 1], "Measured now: ...");
   assert.equal(args.join(" ").includes("has reached"), false, "a question never claims a usage percent");
-  assert.equal(args[args.indexOf("-u") + 1], "critical", "a notice that must be answered never expires and bypasses DND");
-  assert.equal(args.includes("-t"), false);
+  assert.equal(args[args.indexOf("-u") + 1], "normal", "round 7 item 12: every toast is normal urgency, a question included");
+  const tIdx = args.indexOf("-t");
+  assert.ok(tIdx >= 0 && Number(args[tIdx + 1]) > 0, "the notice expires on a finite timeout");
   assert.equal(args.includes("-p"), true);
   assert.equal(Memory.notifyLaneFor({ kind: "ceilings", band: 1 }), "notice");
-  assert.equal(Memory.bypassesDnd({ kind: "ceilings", band: 1 }), true);
+  assert.equal(Memory.bypassesDnd({ kind: "ceilings", band: 1 }), false, "no toast bypasses DND now");
 });

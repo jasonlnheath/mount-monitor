@@ -105,9 +105,13 @@ var PSI_STALL_FLOOR = 1.0;
 // silenced-but-recorded rather than shouted.
 // ---------------------------------------------------------------------------
 
-var URGENCE = { 0: "low", 1: "normal", 2: "critical", 3: "critical" };
-var TIMEOUT_MS = { 0: 5000, 1: 20000, 2: 0, 3: 0 };
-var NOTIFIER_APP = "Memory Monitor";
+var URGENCE = { 1: "normal", 2: "normal", 3: "normal" };
+// Round 7 (the captain): no permanent toasts - the tinted logo carries the
+// state, so every toast expires. This shell's service forces critical urgency
+// to never expire and clamps everything else to 30s, so temporary REQUIRES
+// normal urgency across the board and a finite timeout everywhere.
+var TIMEOUT_MS = { 0: 5000, 1: 20000, 2: 30000, 3: 30000 };
+var NOTIFIER_APP = "Quattro Dash";
 var EXEC_HINT_KEY = "omarchy-exec-argv";
 var IPC_TARGET = "memory-monitor";
 var IPC_OPEN_DETAIL = "openDetail";
@@ -1290,6 +1294,54 @@ function bandForPct(pct, thresholds) {
   return 0;
 }
 
+// Round 7 (the captain): the RAM band is PRESSURE, judged on PSI memory some
+// avg10 (the same 0-100 scale the kernel reports and the RAM PRESSURE dial
+// draws) against the same threshold store the psi gauge pair edits. The
+// percent-used reading stays a reading; it never resolves a band again.
+function psiBandFor(psi, thresholds) {
+  return bandForPct(psi, thresholds);
+}
+
+// The swap RESERVE battery is a real signal too: free percent below the pair's
+// red line is band 2, below amber band 1. No swap configured is no band.
+// Red is checked first, so a crossed pair (the picker now allows duplicates)
+// still reads one way: red dominates the overlap.
+function reserveBandFor(reservePct, battPair) {
+  const pct = asNumber(reservePct);
+  if (pct === null) return 0;
+  const pair = battPair || {};
+  const amber = asNumber(pair.amber);
+  const red = asNumber(pair.red);
+  if (red === null || amber === null) return 0;
+  if (pct < red) return 2;
+  if (pct < amber) return 1;
+  return 0;
+}
+
+// The reserve pair (free percent, red below amber) inverted into the generic
+// resolveBand machinery, whose bad end is high: used-equivalent = 100 - free.
+function reserveUsedPct(reservePct) {
+  const pct = asNumber(reservePct);
+  if (pct === null) return null;
+  return 100 - pct;
+}
+
+function reserveThresholds(battPair) {
+  const pair = battPair || {};
+  const amber = asNumber(pair.amber);
+  const red = asNumber(pair.red);
+  return {
+    amber: amber === null ? 100 - 20 : 100 - amber,
+    red: red === null ? 100 - 10 : 100 - red,
+    critical: null,
+  };
+}
+
+// The badge band of the ram resource: the worse of pressure and reserve.
+function ramCombinedBand(psiBand, reserveBand) {
+  return Math.max(asNumber(psiBand) || 0, asNumber(reserveBand) || 0);
+}
+
 // The line a band is entered at, in the same numbers for every consumer: a
 // release point must not be invented per plugin.
 function bandLine(band, thresholds) {
@@ -1310,6 +1362,26 @@ function hysteresisPp(type) {
 // releases only below (threshold - margin), so a reading that dithers on a
 // threshold cannot fire the same alert twice, and cannot clear itself on the
 // way out.
+// The ram store's held band (round 7 item 8): the more severe of the pressure
+// band and the swap-reserve band, each resolved with its own hysteresis in its
+// own unit against the same previous band. The returned `signal` names which
+// signal produced the band, so the toast says pressure or swap.
+function resolveRamBand(reading, thresholds, previousBand, battPair) {
+  const r = reading || {};
+  const psiResult = resolveBand(r.psiSomeAvg10, thresholds, previousBand, "ram");
+  const swapUsed = reserveUsedPct(r.swapPct);
+  // No swap configured contributes no band: it never reads as a healthy zero.
+  const swapResult = swapUsed === null
+    ? { band: 0, latched: false }
+    : resolveBand(swapUsed, reserveThresholds(battPair), previousBand, "swap");
+  return {
+    band: ramCombinedBand(psiResult.band, swapResult.band),
+    latched: psiResult.latched === true || swapResult.latched === true,
+    changed: psiResult.band !== asNumber(previousBand) || swapResult.band !== asNumber(previousBand),
+    signal: psiResult.band >= swapResult.band ? "psi" : "swap",
+  };
+}
+
 function resolveBand(pct, thresholds, previousBand, type) {
   const value = asNumber(pct);
   if (value === null) return { band: 0, latched: false, changed: false };
@@ -1332,9 +1404,9 @@ function resolveBand(pct, thresholds, previousBand, type) {
 
 // A latched band is visible as latched; a stuck band must never read as healthy.
 // The release point of a held band, and what reaching it costs on this machine.
-// For System RAM the answer is an absolute MemAvailable the machine may never
-// reach, and saying so is the product: a latched band must never read as healthy
-// and a stuck band must never be a silent latch.
+// Round 7: the ram band is PSI, and pressure falls on its own - the old
+// MemAvailable gate answered a percent-used metric and has no honest meaning
+// here, so every band's release is reachable.
 function descentRule(band, thresholds, type) {
   const held = bandLine(band, thresholds);
   if (held === null) return { releasePct: null, marginPp: null };
@@ -1344,29 +1416,14 @@ function descentRule(band, thresholds, type) {
 function descentReachable(band, thresholds, type, memAvailableKb, memTotalKb) {
   const rule = descentRule(band, thresholds, type);
   if (rule.releasePct === null) return { reachable: true, releasePct: null, needKb: null, totalKb: null };
-  const total = asNumber(memTotalKb);
-  const available = asNumber(memAvailableKb);
-  if (type !== "ram" || total === null || total <= 0 || available === null) {
-    return { reachable: true, releasePct: rule.releasePct, needKb: null, totalKb: total };
-  }
-  const needKb = Math.round(total * (1 - rule.releasePct / 100));
-  return {
-    reachable: available >= needKb,
-    releasePct: rule.releasePct,
-    needKb,
-    availableKb: available,
-    totalKb: total,
-  };
+  return { reachable: true, releasePct: rule.releasePct, needKb: null, totalKb: asNumber(memTotalKb) };
 }
 
 function unreachableBandNote(band, thresholds, type, memAvailableKb, memTotalKb) {
   const rule = descentReachable(band, thresholds, type, memAvailableKb, memTotalKb);
   if (rule.releasePct === null) return "";
-  if (rule.needKb === null || rule.reachable) return "This band releases below " + rule.releasePct + "%.";
-  return (
-    "this band cannot clear at its current margin - it releases only below " +
-    rule.releasePct + "%, which needs " + gib(rule.needKb) + " free and this machine has " + gib(rule.availableKb) + "."
-  );
+  const unit = type === "ram" ? " PSI" : "%";
+  return "This band releases below " + rule.releasePct + unit + ".";
 }
 // ---------------------------------------------------------------------------
 // Most severe, and the absent-mount rule. An unmounted target is not severe, its
@@ -1488,9 +1545,9 @@ var TYPE_WORDS_RED = { hd: "Hard drive", vram: "VRAM", ram: "System RAM" };
 
 var GUARD_VARIANTS = {
   armed: "Agent has been notified and is guarding against OOM.",
-  off: "The standing guard is off. Click to open Memory Monitor, otherwise ignore.",
-  refused: "The guard could not start. Click to open Memory Monitor, otherwise ignore.",
-  died: "The guard did not survive. Click to open Memory Monitor, otherwise ignore.",
+  off: "The standing guard is off. Click to open Quattro Dash, otherwise ignore.",
+  refused: "The guard could not start. Click to open Quattro Dash, otherwise ignore.",
+  died: "The guard did not survive. Click to open Quattro Dash, otherwise ignore.",
 };
 
 function readingPct(pct) {
@@ -1509,8 +1566,26 @@ function typeWord(type, band) {
   return table[key] || "Device";
 }
 
+// The RAM toast names its SIGNAL (round 7: RAM never warns on percent-used).
+// Pressure reads in PSI on the kernel's own 0-100 scale; the reserve reads in
+// percent free. Every other type keeps the spec's own usage sentence.
+function ramSignalLine(opts) {
+  const o = opts || {};
+  const signal = sanitizeText(o.signal, 8) === "swap" ? "swap" : "psi";
+  const pct = readingPct(o.pct);
+  if (signal === "swap") return "Swap reserve is down to " + pct + " percent.";
+  return "System RAM pressure has reached " + pct + " PSI.";
+}
+
 function amberBody(opts) {
   const o = opts || {};
+  if (sanitizeText(o.type, 16) === "ram") {
+    return [
+      "Caution: Amber Alert",
+      ramSignalLine(o),
+      "Click to address with agent, otherwise ignore.",
+    ].join("\n");
+  }
   const pct = readingPct(o.pct);
   return [
     "Caution: Amber Alert",
@@ -1521,6 +1596,13 @@ function amberBody(opts) {
 
 function redBody(opts) {
   const o = opts || {};
+  if (sanitizeText(o.type, 16) === "ram") {
+    return [
+      "WARNING: RED ALERT",
+      ramSignalLine(o),
+      "Click to open an agent to actively monitor/guard against OOM, otherwise ignore.",
+    ].join("\n");
+  }
   const pct = readingPct(o.pct);
   return [
     "WARNING: RED ALERT",
@@ -1543,10 +1625,11 @@ function criticalGuardStates() {
 
 function criticalBody(opts) {
   const o = opts || {};
-  const pct = readingPct(o.pct);
   const lines = [
     "CRITICAL ALERT!",
-    "Device has reached " + pct + "% usage.",
+    sanitizeText(o.type, 16) === "ram" || o.signal !== undefined
+      ? ramSignalLine(o)
+      : "Device has reached " + readingPct(o.pct) + "% usage.",
   ];
   // An arm already live is not a fresh claim: the guard this toast would name
   // belongs to an earlier arm, so the claim sentence is suppressed rather than
@@ -1586,21 +1669,19 @@ function actionFor(alert) {
   const band = asNumber((alert || {}).band) || 0;
   if (band === 1) return "Address with agent";
   if (band === 2) return "Open guarding agent";
-  if (band === 3) return "Open Memory Monitor";
+  if (band === 3) return "Open Quattro Dash";
   return "";
 }
 
 function urgencyFor(alert) {
-  // A notice that has to be answered is critical: the shell's own notification
-  // service clamps every other urgency to at most 30 seconds whatever the sender
-  // asks for, and critical is the one urgency that bypasses Do Not Disturb.
-  if (isOnboardingNotice(alert)) return "critical";
-  const band = asNumber((alert || {}).band) || 0;
-  return URGENCE[band] || "normal";
+  // Round 7: every toast rides normal urgency. This shell's notification
+  // service returns 0 (never expires) for critical only, so a critical-urgency
+  // toast could not be temporary; the tinted bar logo carries the state.
+  return URGENCE[asNumber((alert || {}).band) || 0] || "normal";
 }
 
 function timeoutFor(alert) {
-  if (isOnboardingNotice(alert)) return 0;
+  if (isOnboardingNotice(alert)) return 30000;
   const band = asNumber((alert || {}).band) || 0;
   const value = TIMEOUT_MS[band];
   return value === undefined ? 20000 : value;
@@ -1793,6 +1874,29 @@ function execHintValue(argv) {
   return JSON.stringify(clean);
 }
 
+// The toast logo is the check-engine emblem (round 7 item 11): amber at the
+// first warning, red from the severe bands on, plain ink otherwise. The files
+// ship in the plugin's icons/ directory; without a directory no -i is sent and
+// the daemon keeps its fallback, so a caller that cannot resolve the path
+// never invents one.
+var TOAST_ICONS = { plain: "mil-plain.png", amber: "mil-amber.png", red: "mil-red.png" };
+
+function toastIconFor(alert) {
+  if (isOnboardingNotice(alert)) return TOAST_ICONS.plain;
+  const band = typeof alert === "number"
+    ? alert
+    : asNumber((alert || {}).band) || 0;
+  if (band === 1) return TOAST_ICONS.amber;
+  if (band >= 2) return TOAST_ICONS.red;
+  return TOAST_ICONS.plain;
+}
+
+function toastIconPath(iconDir, alert) {
+  const dir = sanitizePath(iconDir);
+  if (dir.length === 0) return null;
+  return dir + "/" + toastIconFor(alert);
+}
+
 function notifyArgs(alert, agentCommand, opts) {
   const o = opts || {};
   const band = asNumber(alert && alert.band) || 0;
@@ -1802,7 +1906,9 @@ function notifyArgs(alert, agentCommand, opts) {
   const action = actionFor(alert);
   args.push("-u", urgency);
   if (timeout > 0) args.push("-t", String(timeout));
-  if (action.length > 0) args.push("-A", "default:" + action);
+  if (action.length > 0) args.push("-A", "default=" + action);
+  const icon = toastIconPath(o.iconDir, alert);
+  if (icon !== null) args.push("-i", icon);
   // Every notification carries the omarchy-native exec hint, so a toast that
   // outlived a shell restart is still clickable. The widget may pass the argv it
   // already built; if it does not, this file builds the one this alert's kind
@@ -1836,11 +1942,16 @@ function notifyReplaceArgs(id, title, body, opts) {
   const o = opts || {};
   const claimId = sanitizeText(id, 64);
   if (claimId.length === 0) return null;
-  const args = ["notify-send", "-a", NOTIFIER_APP, "-e", "-r", claimId, "-u", "critical"];
+  // Round 7: the claim is a toast like every other - normal urgency, finite
+  // timeout - so a retraction can never race a toast the service would have
+  // held forever.
+  const args = ["notify-send", "-a", NOTIFIER_APP, "-e", "-r", claimId, "-u", "normal", "-t", "30000"];
   const action = sanitizeText(o.action, 64);
-  if (action.length > 0) args.push("-A", "default:" + action);
+  if (action.length > 0) args.push("-A", "default=" + action);
   const hint = execHintValue(o.clickArgv);
   if (hint.length > 0) args.push("-h", "STRING:" + EXEC_HINT_KEY + ":" + hint);
+  const icon = toastIconPath(o.iconDir, o.alert);
+  if (icon !== null) args.push("-i", icon);
   args.push(asString(title), asString(body));
   return args;
 }
@@ -1882,7 +1993,7 @@ function agentPrompt(alert, reading, oomd, logPath) {
   const kind = sanitizeText(a.type, 16);
   const pct = readingPct(a.pct);
   const fixed = [];
-  fixed.push("Memory Monitor reports that " + kindLabel(kind) + " has crossed a ceiling you set.");
+  fixed.push("Quattro Dash reports that " + kindLabel(kind) + " has crossed a ceiling you set.");
   fixed.push("Resource id: " + id + ". Band: " + (BAND_NAMES[band] || "none") + ". Reading: " + pct + "%.");
   if (band >= 3) {
     fixed.push("This is the critical band. Report what is consuming it, ranked, with sizes.");
@@ -1931,7 +2042,7 @@ function kindLabel(kind) {
 
 function healthCheckPrompt(logPath, thresholds, oomd) {
   const fixed = [];
-  fixed.push("Memory Monitor health check. Report the current state of this machine's memory, VRAM, and watched drives.");
+  fixed.push("Quattro Dash health check. Report the current state of this machine's memory, VRAM, and watched drives.");
   fixed.push("Read the baseline log at " + sanitizePath(logPath) + " and report the resting distribution of each resource,");
   fixed.push("the ceilings currently set, and the kernel's own limits side by side, saying which ceiling is closer.");
   fixed.push("Recommend ceilings from the measured distribution. Do not change any setting, limit, or file yourself.");
@@ -1945,24 +2056,24 @@ function healthCheckPrompt(logPath, thresholds, oomd) {
 
 function onboardingPrompt(reading, oomd, thresholds, logPath, resting) {
   const fixed = [];
-  fixed.push("Memory Monitor first run. Report what this machine is resting at, then ask for the ceilings.");
+  fixed.push("Quattro Dash first run. Report what this machine is resting at, then ask for the ceilings.");
   fixed.push("Read the baseline log at " + sanitizePath(logPath) + " - the resting level is measured from it, never from one reading.");
   const sitting = restingPctFor(resting, "ram");
   if (sitting === null) {
     fixed.push("The log holds fewer than " + RESTING_MIN_SAMPLES + " samples, so there is no resting claim yet: say so plainly.");
   } else {
-    fixed.push("This machine rests at " + readingPct(sitting) + "%. Report that measured resting band, and each resource's resting band from the log,");
+    fixed.push("This machine rests at " + readingPct(sitting) + (restingUnit("ram")) + ". Report that measured resting band, and each resource's resting band from the log,");
   }
-  fixed.push("Report the current readings as data: System RAM percent and MemAvailable in GiB, PSI memory,");
+  fixed.push("Report the current readings as data: RAM PRESSURE in PSI (the RAM band's metric), System RAM percent and MemAvailable in GiB,");
   fixed.push("swap and zram fill, VRAM used and free in MiB, and each watched drive's percent and size.");
   fixed.push("State oomd's live limits and watched cgroup as the kernel's ceiling, beside the ceilings this plugin uses.");
   if (sitting === null) {
     fixed.push("Give no ceiling recommendation derived from a single reading: recommend the defaults and say plainly they are defaults");
   } else {
-    fixed.push("Give a recommended amber, red and critical for each of Hard Drive, VRAM and System RAM, derived from that resting distribution");
+    fixed.push("Give a recommended amber, red and critical for each of Hard Drive, VRAM and System RAM (PSI for System RAM), derived from that resting distribution");
   }
   fixed.push("and say what each line means on this machine. Say plainly when a chosen line sits inside the resting band.");
-  fixed.push("Then ask the user to set them. Amber defaults to " + DEFAULT_AMBER + "% (System RAM to " + DEFAULT_AMBER_RAM + "%) and red to " + DEFAULT_RED + "% if he does not");
+  fixed.push("Then ask the user to set them. Amber defaults to " + DEFAULT_AMBER + "% (System RAM to " + DEFAULT_AMBER_RAM + " PSI) and red to " + DEFAULT_RED + "% if he does not");
   fixed.push("touch them; critical stays unset until he sets it, and until he does there is no critical band.");
   fixed.push("Never set a ceiling yourself, and never write over one the user has set.");
   fixed.push("Say out loud that swap is not a fourth threshold: crossing the kernel's swap limit raises the System RAM alert.");
@@ -1977,13 +2088,13 @@ function onboardingPrompt(reading, oomd, thresholds, logPath, resting) {
 // The insist-guard ask. The captain's own wording, pinned: the ask is not a
 // suggestion, and the critical toast later says what the answer was.
 function guardAskTitle() {
-  return "Memory Monitor - the guard";
+  return "Quattro Dash - the guard";
 }
 
 function guardAskBody(settings) {
   const armed = normalizeBool((settings || {}).guard, true);
   return [
-    "Memory Monitor watches System RAM, VRAM and your drives.",
+    "Quattro Dash watches System RAM, VRAM and your drives.",
     "The guard is the agent that steps in when a critical line is crossed.",
     armed ? "It does guard: it runs when your critical threshold is reached." : "It is currently off.",
     "Turn it on?",
@@ -2064,13 +2175,14 @@ function armRecord(opts) {
 // retracts the standing claim by the persisted id. When no id was captured the
 // claim cannot be replaced, and the log says so rather than leaving the
 // guarantee unmet in silence.
-function retractClaimFor(arm) {
+function retractClaimFor(arm, opts) {
+  const o = opts || {};
   const record = arm || {};
   if (record.outcome !== "died") return null;
   const id = sanitizeText(record.claimId, 64);
   if (id.length === 0) {
     // No captured id means the claim cannot be retracted, so it is replaced by a
-    // fresh critical toast that says the guard did not survive. The argv is still
+    // fresh honest toast that says the guard did not survive. The argv is still
     // this file's: a widget that hand-builds a notify-send argv is a widget that
     // can drift from the urgency and the click path every other toast uses.
     return {
@@ -2082,15 +2194,17 @@ function retractClaimFor(arm) {
         key: record.key,
         id: record.id,
         pct: record.pct,
+        signal: record.signal,
         guardState: "died",
-      }, null),
+      }, null, { iconDir: o.iconDir }),
     };
   }
   return {
     replaceable: true,
-    args: notifyReplaceArgs(id, criticalTitle(), criticalBody({ pct: record.pct, guardState: "died" }), {
+    args: notifyReplaceArgs(id, criticalTitle(), criticalBody({ pct: record.pct, type: record.type, signal: record.signal, guardState: "died" }), {
       clickArgv: ipcOpenDetailArgv(),
       action: actionFor({ kind: "alert", band: 3 }),
+      iconDir: o.iconDir,
     }),
   };
 }
@@ -2239,31 +2353,34 @@ function stateDir(home) {
 function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
   const t = thresholdsFor({ thresholds }, type);
   const kind = kindLabel(type);
+  // Round 7: the ram store is PSI now, so its question reads in PSI. Every
+  // other type keeps its percent wording.
+  const unit = type === "ram" ? " PSI" : "%";
   const lines = [];
-  lines.push("Memory Monitor - " + kind + " ceilings");
+  lines.push("Quattro Dash - " + kind + " ceilings");
   lines.push("Measured now: " + restingText(type, reading));
   const provenance = level => (level === "user" ? " (you set it)" : " (default)");
   lines.push(
-    "Your amber: " + t.amber + "%" + provenance(t.amberSetBy) +
-    ". Your red: " + t.red + "%" + provenance(t.redSetBy) + "."
+    "Your amber: " + t.amber + unit + provenance(t.amberSetBy) +
+    ". Your red: " + t.red + unit + provenance(t.redSetBy) + "."
   );
   lines.push(
     t.critical === null
       ? "Your critical: not set - you have no ceiling, and no critical alert can fire."
-      : "Your critical: " + t.critical + "%" + provenance(t.criticalSetBy) + "."
+      : "Your critical: " + t.critical + unit + provenance(t.criticalSetBy) + "."
   );
   lines.push("The kernel's ceiling: " + kernelCeilingText(oomd));
   const sitting = restingPctFor(resting, type);
   const rec = recommendCeilings(type, resting);
   if (rec.provisional) {
-    lines.push("Recommended defaults until measured: amber " + defaultAmberFor(type) + "%, red " + DEFAULT_RED + "%, critical unset.");
+    lines.push("Recommended defaults until measured: amber " + defaultAmberFor(type) + unit + ", red " + DEFAULT_RED + unit + ", critical unset.");
   } else {
-    lines.push("Recommended from this machine: amber " + rec.amber + "%, red " + rec.red + "%, critical " + rec.critical + "%.");
+    lines.push("Recommended from this machine: amber " + rec.amber + unit + ", red " + rec.red + unit + ", critical " + rec.critical + unit + ".");
   }
   if (sitting === null) {
     lines.push(restingUnmeasuredText());
   } else if (sitting >= t.amber) {
-    lines.push("This machine rests at " + readingPct(sitting) + "%, which is inside your amber line.");
+    lines.push("This machine rests at " + readingPct(sitting) + unit + ", which is inside your amber line.");
   }
   return lines.join("\n");
 }
@@ -2271,13 +2388,12 @@ function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
 function restingText(type, reading) {
   const r = reading || {};
   if (type === "ram") {
-    const pct = asNumber(r.pct);
-    if (pct === null) return "System RAM unknown";
+    const psi = asNumber(r.psiSomeAvg10);
+    if (psi === null) return "RAM PRESSURE unknown";
     return (
-      "System RAM " + readingPct(pct) + "% used, " + gib(r.memAvailableKb) + " available of " + gib(r.memTotalKb) +
-      ", PSI some avg10 " + (asNumber(r.psiSomeAvg10) === null ? "unknown" : asNumber(r.psiSomeAvg10).toFixed(2)) +
-      ", swap " + (asNumber(r.swapPct) === null ? "none" : readingPct(r.swapPct) + "%") +
-      ", zram " + (asNumber(r.zramPct) === null ? "none" : readingPct(r.zramPct) + "%")
+      "RAM PRESSURE " + psi.toFixed(1) + " PSI" +
+      ", swap " + (asNumber(r.swapPct) === null ? "none" : readingPct(r.swapPct) + "% used") +
+      ", " + gib(r.memAvailableKb) + " free of " + gib(r.memTotalKb)
     );
   }
   if (type === "vram") {
@@ -2324,18 +2440,18 @@ function noWatchedDrivesText() {
 }
 
 function twoCeilingsNote() {
-  return "Your ceiling is when Memory Monitor alerts. The kernel's is when oomd kills. "
+  return "Your ceiling is when Quattro Dash alerts. The kernel's is when oomd kills. "
     + "They are different numbers, and only one of them is yours.";
 }
 
 function guardNoteText() {
-  return "The guard is the agent Memory Monitor asks to run when your critical line is crossed. "
+  return "The guard is the agent Quattro Dash asks to run when your critical line is crossed. "
     + "It monitors and reports; it does not kill anything. "
     + "Arming it is refused when this machine has no headroom for it.";
 }
 
 function guardArmTooltip() {
-  return "Let Memory Monitor arm the guard at your critical line";
+  return "Let Quattro Dash arm the guard at your critical line";
 }
 
 function guardDeclineTooltip() {
@@ -2382,6 +2498,12 @@ function recommendCeilings(type, resting) {
 function restingPctFor(resting, type) {
   if (resting === null || resting === undefined) return null;
   return asNumber(resting[type]);
+}
+
+// The unit a resting claim reads in: the ram store is PSI (round 7), every
+// other store is percent.
+function restingUnit(type) {
+  return type === "ram" ? " PSI" : "%";
 }
 
 function restingUnmeasuredText() {
@@ -2522,7 +2644,12 @@ function distribution(records, type) {
   const values = [];
   for (const record of asList(records) || []) {
     let pct = null;
-    if (type === "ram") pct = asNumber(record.ram && record.ram.pct);
+    if (type === "ram") {
+      // Round 7: the ram resting level is the measured PSI median. Rows from
+      // before PSI was logged carry no pressure sample and say nothing about
+      // where this machine rests.
+      pct = asNumber(record.ram && record.ram.psiSomeAvg10);
+    }
     else if (type === "vram") pct = asNumber(record.vram && record.vram.pct);
     else {
       const rows = asList(record.hd) || [];
@@ -2671,6 +2798,43 @@ function latchedText(latched) {
   return normalizeBool(latched, false) ? "held: this band has not released yet" : "";
 }
 
+// The detail window's one-line readings (round 7 item 2: the panel shows the
+// simple current reading, one line per metric). The RAM line names pressure
+// and swap - the two signals the plugin watches now - with the absolute
+// available number beside them. A held band is said in the same line.
+function ramReadingLine(reading) {
+  const r = reading || {};
+  const psi = asNumber(r.psiSomeAvg10);
+  const swapPct = asNumber(r.swapPct);
+  const held = latchedText(r.latched);
+  let line =
+    "RAM PRESSURE " + (psi === null ? "unknown" : psi.toFixed(1) + " PSI") +
+    " - swap " + (swapPct === null ? "none" : readingPct(swapPct) + "% used") +
+    " (" + mib(r.swapUsedKb) + " of " + mib(r.swapTotalKb) + ")" +
+    " - " + gib(r.memAvailableKb) + " free of " + gib(r.memTotalKb);
+  if (held.length > 0) line += " - " + held;
+  return line;
+}
+
+function vramReadingLine(reading) {
+  const r = reading || {};
+  const pct = readingPct(r.pct);
+  const held = latchedText(r.latched);
+  let line =
+    "VRAM " + (pct === null ? "unknown" : pct + "% used") +
+    " - " + (asNumber(r.vramFreeMib) === null ? "unknown" : gibFromMib0(r.vramFreeMib)) + " free of " +
+    (asNumber(r.vramTotalMib) === null ? "unknown" : gibFromMib0(r.vramTotalMib));
+  if (held.length > 0) line += " - " + held;
+  return line;
+}
+
+// GiB with one decimal, local so this file keeps one units vocabulary.
+function gibFromMib0(mibValue) {
+  const v = asNumber(mibValue);
+  if (v === null) return "unknown";
+  return (v / 1024).toFixed(1) + " GiB";
+}
+
 function tooltipText(entry) {
   const e = entry || {};
   const type = sanitizeText(e.type, 16);
@@ -2684,9 +2848,10 @@ function tooltipText(entry) {
     if (normalizeBool(e.ro, false)) lines.push("read-only - nothing can be pruned here, only moved off");
     if (held.length > 0) lines.push(held);
   } else if (type === "ram") {
-    lines.push("System RAM - " + pct + "%");
+    const psi = asNumber(e.psiSomeAvg10);
+    lines.push("RAM PRESSURE - " + (psi === null ? "unknown" : psi.toFixed(1) + " PSI"));
     lines.push(gib(e.memAvailableKb) + " available of " + gib(e.memTotalKb));
-    lines.push("swap " + (asNumber(e.swapPct) === null ? "none" : readingPct(e.swapPct) + "%"));
+    lines.push("swap " + (asNumber(e.swapPct) === null ? "none" : readingPct(e.swapPct) + "% used"));
     if (held.length > 0) lines.push(held);
   } else if (type === "vram") {
     lines.push("VRAM - " + pct + "%");
@@ -2705,6 +2870,39 @@ function badgeLabel(type) {
   if (key === "vram") return "VRAM";
   return "";
 }
+
+// Round 7 item 10: the captain's screenshot shows the dot column ragged. The
+// tooltip pads names by CHARACTER COUNT, and a proportional font renders equal
+// counts at unequal widths - "RAM" plus two spaces is narrower than "Drive".
+// The pad is therefore computed in estimated glyph widths, so every row's
+// rendered prefix matches and the dots sit on one vertical line.
+function textWidthUnits(text) {
+  const t = String(text === undefined || text === null ? "" : text);
+  let total = 0;
+  for (const ch of t) {
+    if (" iljtfr.,:;'".indexOf(ch) >= 0) total += 320;
+    else if (ch === " ") total += 300;
+    else if ("mwMW".indexOf(ch) >= 0) total += 900;
+    else if (ch >= "A" && ch <= "Z") total += 720;
+    else if (ch >= "0" && ch <= "9") total += 640;
+    else if (ch >= "a" && ch <= "z") total += 560;
+    else total += 640;
+  }
+  return total;
+}
+
+function padToWidth(name, widthUnits) {
+  let padded = String(name === undefined || name === null ? "" : name);
+  let width = textWidthUnits(padded);
+  while (width < widthUnits) {
+    padded += " ";
+    width += 300;
+  }
+  return padded;
+}
+
+// One color-emoji circle, estimated in the same units textWidthUnits speaks.
+const EMOJI_WIDTH = 1400;
 
 // The bar popup's status column is a color dot and nothing else (the
 // captain's round-2 edits on the preview board): white when nothing is over
@@ -2741,22 +2939,24 @@ function barTooltip(entries) {
     rows.push({ name: label, dot: bandDot(entry.band) });
   }
   if (rows.length === 0) return "Quattro Dash";
-  // The bar's tooltip is one centered Text sized to its widest line: the
-  // title line stays short and centers, every row pads to one shared width,
-  // and that is what keeps the name column and the dot column aligned.
+  // The bar's tooltip is one centered Text sized to its widest line. The dot
+  // column holds because every row's estimated glyph width matches: pad in
+  // width units, never in character counts.
   let longestName = 0;
   for (const row of rows) {
-    if (row.name.length > longestName) longestName = row.name.length;
+    longestName = Math.max(longestName, textWidthUnits(row.name));
   }
-  const pad = longestName + 2;
   let width = 0;
   for (const row of rows) {
-    const len = pad + row.dot.length;
-    if (len > width) width = len;
+    // The status dots are color emoji circles of essentially equal rendered
+    // width, whatever their JS string length says, so the dot counts as one
+    // fixed emoji width on every row.
+    const w = longestName + 600 + EMOJI_WIDTH;
+    if (w > width) width = w;
   }
   const lines = ["Quattro Dash"];
   for (const row of rows) {
-    lines.push((row.name + " ".repeat(pad - row.name.length) + row.dot).padEnd(width));
+    lines.push(padToWidth(row.name + "  ", longestName + 600) + row.dot);
   }
   return lines.join("\n");
 }

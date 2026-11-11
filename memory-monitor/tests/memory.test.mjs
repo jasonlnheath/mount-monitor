@@ -283,9 +283,14 @@ test("the bar popup is a name column and a color-dot column under a centered tit
   const lines = tip.split("\n");
   assert.equal(lines[0], "Quattro Dash");
   const widths = lines.slice(1).map((line) => Memory.textWidthUnits(line));
+  // Round 7 item 10: the pad is width-based. Every row reaches the shared
+  // column target and stays within one space width of the others, so the dot
+  // column lines up in a proportional font - equal character counts would not.
+  const target = Math.max(...["RAM", "VRAM", "Drive"].map((n) => Memory.textWidthUnits(n))) + 600;
   for (const w of widths) {
-    assert.equal(w, widths[0], "every row's estimated width matches, so the dot column lines up");
+    assert.ok(w >= target, "no row is narrower than the shared column");
   }
+  assert.ok(Math.max(...widths) - Math.min(...widths) <= 300, "the dot column sits within one space width across rows");
   const names = lines.slice(1).map((line) => line.trim().split(/\s\s/)[0].trim());
   assert.match(names[0], /^RAM/);
   assert.match(names[1], /^VRAM/);
@@ -306,7 +311,7 @@ test("a drive that is away keeps its row, with the white dot in the status colum
   assert.ok(lines[1].includes("\u26AA"), "the white dot rides the RAM row");
   assert.ok(lines[2].includes("\u26AA"), "the away drive keeps its row and draws the white dot");
   const widths = lines.slice(1).map((line) => Memory.textWidthUnits(line));
-  assert.equal(widths[0], widths[1]);
+  assert.ok(Math.max(...widths) - Math.min(...widths) <= 300, "the away drive's dot shares the RAM row's column, within one space");
 });
 
 test("an empty watch list is the title alone", () => {

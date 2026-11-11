@@ -85,16 +85,25 @@ Captain: "pop ups are so verbose. remember i just wanted the simple reading? one
   occurrence; `INSTRUMENTS.coolant` is already "VRAM"). Ceiling-blocked toast and the
   settings row inherit the rename. Repo grep is the guard; README wording updated.
 
-### 5. TOASTS: 'Memory Monitor' → 'Quattro Dash'
+### 5. RENAME + TOASTS: the product is 'Quattro Dash' (round 7 item 5, widened by ruling 14)
+- RULING 14 (mid-build, from the captain via firstmate): the plugin RENAME - it is
+  'Quattro Dash' now, not 'Memory Monitor'. Sweep every user-visible 'Memory
+  Monitor' string (manifest name, settings title, UI copy) into the rename
+  alongside item 5; the technical plugin id and directory stay unchanged this
+  round.
 - `memory.js`: `NOTIFIER_APP` = "Quattro Dash" (the -a app name and toast title);
   `guardAskTitle`/`guardAskBody`; GUARD_VARIANTS off/refused/died lines ("Click to
   open Quattro Dash"); `actionFor` band 3 ("Open Quattro Dash"); `ceilingsQuestion`
   header; agent prompt openers ("Quattro Dash reports that...", health check,
-  onboarding first run) — the click payload rides the toast, so the toast's words
-  rename with it. `MemoryPanel.qml` header → "Quattro Dash". The trust fence
-  ("MEMORY MONITOR DEVICE DATA") and skills stay as-is (not toast copy; the
-  label-injection contract is pinned). manifest.json untouched (registry naming +
-  version are separate captain calls). README toast examples updated.
+  onboarding first run); panel copy (`guardNoteText`, `twoCeilingsNote`,
+  `guardStateText`, degradations, tooltips) - the round7 sweep test pins that no
+  user-visible copy string still says Memory Monitor.
+- `manifest.json`: name + displayName "Quattro Dash", description swept; the id
+  `io.github.jasonlnheath.memory-monitor`, the directory, entryPoints, IPC target
+  and the trust fence ("MEMORY MONITOR DEVICE DATA") stay technical and unchanged.
+- `MemoryPanel.qml` header → "Quattro Dash"; `memory-monitor/README.md` swept;
+  `skills/memory-health/SKILL.md` copy swept (directory name stays).
+- README toast examples updated.
 
 ### 6. KILL the RAM-percentage warning toast; watch swap and PSI now
 - The RAM band is no longer resolved from used-percent, so a percent crossing can

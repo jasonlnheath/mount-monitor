@@ -163,7 +163,7 @@ test("an arm record carries what a retraction needs, so a restart can act on the
   assert.equal(plan.args[0], "notify-send");
   const body = plan.args[plan.args.length - 1];
   assert.match(body, /The guard did not survive/);
-  assert.match(body, /has reached 98% usage/, "the fresh toast carries the record's own reading, rounded up");
+  assert.match(body, /has reached 98 PSI/, "the fresh toast carries the record's own reading, rounded up");
 });
 
 test("a restart reconciles an orphaned arm from the file alone, once, and never the arm it is running", () => {

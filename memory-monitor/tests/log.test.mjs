@@ -69,7 +69,9 @@ test("a torn final line is skipped, not guessed at", () => {
 
 test("the distribution is the re-anchoring input, and it is a recommendation source only", () => {
   const records = [];
-  for (let i = 1; i <= 100; i++) records.push({ ram: { pct: i / 2 } });
+  // Round 7: the ram resting level is the measured PSI median, so the ram
+  // distribution reads the PSI samples; the pct rides along as data.
+  for (let i = 1; i <= 100; i++) records.push({ ram: { pct: i / 2, psiSomeAvg10: i / 2 } });
   const dist = Memory.distribution(records, "ram");
   assert.equal(dist.n, 100);
   assert.equal(dist.min, 0.5);
@@ -79,6 +81,7 @@ test("the distribution is the re-anchoring input, and it is a recommendation sou
   assert.equal(dist.p99, 49.5);
   assert.equal(Memory.distribution([], "ram"), null, "no readings is not a distribution of zero");
   assert.equal(Memory.distribution([{ ram: {} }], "ram"), null);
+  assert.equal(Memory.distribution([{ ram: { pct: 40 } }], "ram"), null, "a row with no PSI sample says nothing about where RAM rests");
 });
 
 test("the hd distribution folds every watched mount of the sample into one picture", () => {

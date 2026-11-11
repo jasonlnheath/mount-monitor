@@ -30,13 +30,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the band step function, the hysteresis and descent-reachability rules, the
   most-severe tie-break, the adaptive-poll step, the badge shape/glyph decision,
   the trust primitives, and the cursor-marker rule (kept, labelled unconsumed, for
-  the next plugin). Memory Monitor's widget imports it; Mount Monitor does not yet —
+  the next plugin). Quattro Dash's widget imports it; Mount Monitor does not yet —
   `mounts.js bandFor` mirrors the band rule by hand instead. It carries no cursor
   state and no mount-specific rule, and it is a plain module like `mounts.js` for
   the same reason. `tests/ringkit.test.mjs` is its contract;
   `memory-monitor/tests/ringkit-conformance.test.mjs` proves `mounts.js bandFor`
   and `memory.js bandForPct` cannot disagree with it.
-- `memory-monitor/` is the sibling plugin (System RAM / VRAM / drive severity,
+- `memory-monitor/` is the sibling plugin — product name **Quattro Dash**
+  (the captain's round-7 renaming; the directory and the technical plugin id
+  keep their `memory-monitor` spelling, and user-visible copy says Quattro Dash)
+  (System RAM / VRAM / drive severity,
   user-set ceilings, the QuattroDash instrument cluster, the detail window, the
   baseline log, the guard ask). It has
   its own `manifest.json`, `install.sh`, `README.md`, `skills/` and `tests/`; its
@@ -60,7 +63,7 @@ setting, its guarded crossings, `VramSymbol.qml`, `VramPanel.qml`,
 shell exports no CardBar type, the same local facade memory-monitor ships; all
 decisions in `mounts.js`, pinned by `tests/vram.test.mjs`). The telltale is
 silent: it draws and opens a popup, and never sends a notification — VRAM
-alerts remain Memory Monitor's job, and it samples its own `nvidia-smi` rather
+alerts remain Quattro Dash's job, and it samples its own `nvidia-smi` rather
 than reading the sibling, so the two plugins stay independent installs. A
 wallpaper service briefly
 lived here (PRs 11–12) and was reverted 2026-10-28 on the captain's ruling that the
@@ -103,7 +106,7 @@ popup command through `Mounts.notifyArgs`, and its agent command through
 `Mounts.agentArgv`, and it carries `m.id` / `c.id` rather than inventing names).
 The rest of the wiring is verified by reading it and by the captain on the rig.
 
-Memory Monitor's suite is `bash memory-monitor/tests/run.sh`: the same shape of
+Quattro Dash's suite is `bash memory-monitor/tests/run.sh`: the same shape of
 tests over `memory-monitor/memory.js` (parsers against fixtures, character-pinned
 toast copy per kind, thresholds and hysteresis, the guard budget gate and arm
 lifecycle, the baseline log, onboarding, the multi-instance gate, the install
@@ -280,18 +283,18 @@ RingKit conformance check that runs
 - **The two plugins share `ringkit.js`, so band numbers are one contract.**
   `mounts.js bandFor`, `memory.js bandForPct` and `ringkit.js bandFor` must agree
   on what a percentage means; `memory-monitor/tests/ringkit-conformance.test.mjs`
-  is the guard. Memory Monitor reads the live Mount Monitor widget's `mounts`
+  is the guard. Quattro Dash reads the live Mount Monitor widget's `mounts`
   setting through `bar.moduleWidgets()` — the sibling instance's own `setting()`,
   and `mounts` is the only setting it may read — with its own `mounts` setting as
   the named fallback when the sibling is not live. It suppresses its own HD toast
   for any target Mount Monitor already alerts on, and
   runs no `udevadm monitor` of its own — Mount Monitor's is the machine's one
   block-event watcher. Changing Mount Monitor's `mounts` handling, its alert
-  targets, or its notification lane changes Memory Monitor's behaviour.
-- **Every Memory Monitor threshold is a ceiling the user set, and critical ships
+  targets, or its notification lane changes Quattro Dash's behaviour.
+- **Every Quattro Dash threshold is a ceiling the user set, and critical ships
   unset.** No default, no recommendation, and no measured distribution may seed
   one: a critical band, a critical toast, and the bar glow cannot exist for a
-  ceiling nobody chose. Memory Monitor never writes a system limit (`MemoryHigh`,
+  ceiling nobody chose. Quattro Dash never writes a system limit (`MemoryHigh`,
   `MemoryMax`, a unit drop-in, a sysctl) — the kernel's oomd ceilings are read and
   displayed as a second, different number.
 

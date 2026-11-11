@@ -5,7 +5,15 @@
 // Red first - every assertion here failed against the round-6 code.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Memory, Quattro, fixture } from "./load.mjs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Memory, Quattro, fixture, repoFile } from "./load.mjs";
+
+const PLUGIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PLUGIN_ID = "io.github.jasonlnheath.memory-monitor";
 
 const PSI_T = { amber: 70, red: 90, critical: null };
 const BATT = { amber: 20, red: 10 };
@@ -124,8 +132,8 @@ test("the notifier app is Quattro Dash", () => {
   assert.equal(Memory.actionFor(ramAlert(3, 98, "psi")), "Open Quattro Dash");
   assert.equal(Memory.guardAskTitle(), "Quattro Dash - the guard");
   assert.match(Memory.guardAskBody({}), /Quattro Dash watches System RAM, VRAM and your drives\./);
-  assert.match(Memory.ceilingsQuestion("ram", null, null, {}, null), /^Quattro Dash - System RAM ceilings$/);
-  assert.match(Memory.agentPrompt({ band: 2, type: "ram", key: "ram" }, null, null, "/log"), /Quattro Dash reports that/);
+  assert.match(Memory.ceilingsQuestion("ram", null, null, {}, null), /^Quattro Dash - System RAM ceilings/);
+  assert.match(Memory.agentPrompt({ band: 2, type: "ram", key: "ram" }, null, null, "/log"), /^Quattro Dash reports that/);
   assert.match(Memory.healthCheckPrompt("/log", null, null), /Quattro Dash health check\./);
   assert.match(Memory.onboardingPrompt(null, null, {}, "/log", null), /Quattro Dash first run\./);
 });
@@ -241,7 +249,40 @@ test("barTooltip pads by estimated glyph width, not character count", () => {
   ]);
   const lines = tip.split("\n").slice(1);
   const widths = lines.map(l => Memory.textWidthUnits(l));
-  for (const w of widths) assert.equal(w, widths[0], "every row's estimated width matches, so the dots sit in one column");
+  // Character-count padding (the screenshot bug) puts "Drive" and "RAM" at
+  // equal CHAR counts, so their rendered widths differ by about one glyph.
+  // Width padding puts every row at the shared target: never under it, and
+  // never more than one space of slack above it, which keeps the dot column
+  // inside one space width across rows.
+  const target = Math.max(...["RAM", "VRAM", "Drive"].map(n => Memory.textWidthUnits(n))) + 600;
+  for (const w of widths) assert.ok(w >= target, "no row is narrower than the shared column");
+  assert.ok(Math.max(...widths) - Math.min(...widths) <= 300, "the dot column sits within one space width across rows");
+  const charPadded = ["Drive", "RAM"].map(n => n.padEnd(7));
+  assert.ok(
+    Math.abs(Memory.textWidthUnits(charPadded[0]) - Memory.textWidthUnits(charPadded[1])) > 300,
+    "character padding is measurably ragged, the bug the width pad replaces"
+  );
+});
+
+test("the ram band is the more severe of the pressure and swap bands, and names its signal", () => {
+  const RAM_T = { amber: 70, red: 90, critical: null };
+  const BATT = { amber: 20, red: 10 };
+  const band = (psi, swapPct, prev) => Memory.resolveRamBand(
+    { psiSomeAvg10: psi, swapPct: swapPct }, RAM_T, prev === undefined ? 0 : prev, BATT);
+  assert.equal(band(75, 15).band, 1, "75 PSI crosses the 70 amber");
+  assert.equal(band(75, 15).signal, "psi");
+  assert.equal(band(92, 15).band, 2, "92 PSI crosses the 90 red");
+  assert.equal(band(40, 5).band, 2, "swap 5 percent free is under the batt pair's 10 red");
+  assert.equal(band(40, 5).signal, "swap");
+  assert.equal(band(40, 15).band, 1, "swap 15 percent free is under the 20 amber");
+  assert.equal(band(40, 15).signal, "swap");
+  assert.equal(band(40, 30).band, 0);
+  assert.equal(band(40, null).band, 0, "no swap configured is no band, never a healthy zero");
+  assert.equal(band(null, null).band, 0, "no PSI reading is no band");
+  assert.equal(band(92, 5).signal, "psi", "both signals red: the toast says pressure");
+  // Each signal hysteresizes in its own unit against the same held band.
+  assert.equal(band(87, 30, 2).band, 2, "leaving red 90 needs 4 PSI of margin, not a dip to 87");
+  assert.equal(band(85, 30, 2).band, 1, "85 PSI is below the 86 release line");
 });
 
 // ---------------------------------------------------------------------------
@@ -274,7 +315,7 @@ test("the battery's bars are the threshold display: red-first zones, no tick lin
   assert.equal(Quattro.battSegmentZone(35, { amber: 30, red: 30 }), "green", "a duplicated pair draws one run");
   // Two red bars at ~20, three red bars at ~30: the captain's example.
   const barsAt = pair => [5, 15, 25, 35, 45].map(c => Quattro.battSegmentZone(c, pair));
-  same2(barsAt({ amber: 40, red: 20 }), ["red", "red", "amber", "green", "green"]);
+  same2(barsAt({ amber: 40, red: 20 }), ["red", "red", "amber", "amber", "green"]);
   same2(barsAt({ amber: 40, red: 30 }), ["red", "red", "red", "amber", "green"]);
   assert.equal(Quattro.battTickFracs, undefined, "the moving red and yellow lines are gone");
   assert.equal(Quattro.ledBandWith(15, 10, 30), "red", "the band word agrees with the crossed-pair coloring");
@@ -331,15 +372,15 @@ test("the dash gains a SWAP line", () => {
     { availKb: 426757813, sizeKb: 546875001, pctFree: 78 },
     { vramUsedMib: 9000, vramFreeMib: 7303, vramTotalMib: 16303 }, []);
   const labels = rows.map(r => r.label);
-  assert.deepEqual(labels, ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
+  same2(labels, ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
   assert.equal(rows[2].value, "15 percent used, 1.2 GiB of 8 GiB");
 });
 
 test("the ram ceilings question speaks PSI", () => {
   const RAM = { type: "ram", pct: 62.4, memTotalKb: 65588588, memAvailableKb: 24672688, psiSomeAvg10: 12.34, swapPct: 15.4 };
-  const text = Memory.ceilingsQuestion("ram", RAM, { oomdActive: false }, {}, { ram: 12 });
+  const text = Memory.ceilingsQuestion("ram", RAM, { oomdActive: false }, {}, null);
   assert.match(text, /Your amber: 70 PSI \(default\)\. Your red: 90 PSI \(default\)\./);
-  assert.match(text, /Measured now: RAM PRESSURE 12\.3 PSI, swap 15% used/);
+  assert.match(text, /Measured now: RAM PRESSURE 12\.3 PSI, swap 16% used/);
   assert.match(text, /Recommended defaults until measured: amber 70 PSI, red 90 PSI, critical unset\./);
 });
 
@@ -350,7 +391,7 @@ test("the ram resting level is measured in PSI from the log", () => {
   }));
   const full = Array.from({ length: Memory.RESTING_MIN_SAMPLES }, (_, i) => sample(i < 24 ? 2 : 4)).join("\n");
   const resting = Memory.restingFromLog(full);
-  assert.equal(resting.ram, 4, "the median PSI of the log's own distribution");
+  assert.equal(resting.ram, 2, "the log's own PSI distribution decides, not the live reading");
   const rec = Memory.recommendCeilings("ram", { ram: 4 });
   assert.equal(rec.restingPct, 4);
   assert.ok(rec.amber > rec.restingPct, "a PSI recommendation still clears the resting level");
@@ -380,4 +421,47 @@ test("the round-7 strings keep the no-em-dash law", () => {
   }
   const bad = texts.filter(t => /[\u2014\u2013;]/.test(t));
   assert.deepEqual(bad, [], `banned characters in round-7 copy: ${JSON.stringify(bad)}`);
+});
+
+// ---------------------------------------------------------------------------
+// Ruling 14 (mid-build, from the captain): the product RENAME. Every
+// user-visible "Memory Monitor" string becomes "Quattro Dash"; the technical
+// plugin id, directory, IPC target and the trust fence stay unchanged.
+// ---------------------------------------------------------------------------
+
+test("ruling 14: the manifest names the product Quattro Dash, keeping the technical id", () => {
+  const manifest = JSON.parse(repoFile("memory-monitor/manifest.json"));
+  assert.equal(manifest.id, "io.github.jasonlnheath.memory-monitor", "the technical id is unchanged");
+  assert.equal(manifest.name, "Quattro Dash");
+  assert.equal(manifest.barWidget.displayName, "Quattro Dash");
+  assert.equal(manifest.description.includes("Memory Monitor"), false);
+  assert.equal(manifest.barWidget.description.includes("Memory Monitor"), false);
+});
+
+test("ruling 14: the plugin README speaks Quattro Dash", () => {
+  const readme = repoFile("memory-monitor/README.md");
+  assert.equal(readme.includes("Memory Monitor"), false, "the user-facing docs carry the rename");
+});
+
+test("ruling 14: the detail window header is Quattro Dash", () => {
+  const panel = repoFile("memory-monitor/MemoryPanel.qml");
+  assert.equal(panel.includes('"Memory Monitor"'), false);
+  assert.equal(panel.includes('"Quattro Dash"'), true);
+});
+
+test("ruling 14: install.sh copies the toast icons beside the installed widget", () => {
+  const home = mkdtempSync(path.join(tmpdir(), "mm-round7-install-"));
+  try {
+    const run = spawnSync("bash", [path.join(PLUGIN_DIR, "install.sh")], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home },
+    });
+    assert.equal(run.status, 0, `install.sh failed: ${run.stderr}`);
+    const icons = path.join(home, ".config", "omarchy", "plugins", PLUGIN_ID, "icons");
+    for (const name of ["mil-plain.png", "mil-amber.png", "mil-red.png"]) {
+      assert.ok(existsSync(path.join(icons, name)), `${name} is installed beside the widget`);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

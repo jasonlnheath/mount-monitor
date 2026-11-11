@@ -109,7 +109,7 @@ Panel {
         RowLayout {
           Layout.fillWidth: true
           Text {
-            text: "Memory Monitor"
+            text: "Quattro Dash"
             color: root.fg
             font.family: Style.font.family
             font.pixelSize: Style.font.title
