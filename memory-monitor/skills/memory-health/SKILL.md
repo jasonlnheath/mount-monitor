@@ -1,6 +1,6 @@
 ---
 name: memory-health
-description: Memory Monitor health pass - analyse the largest consumers of System RAM, VRAM and the watched drives, report ranked findings with sizes, and name throttle/prune options. Use when Memory Monitor alerts that System RAM, VRAM or a drive crossed a ceiling the user set, when the critical guard arms, when asked what is eating RAM/VRAM/disk or why a machine is thrashing, or before arming the standing guard. Read-only analysis - never kill, throttle, delete, compress, or change any limit without the captain's explicit word.
+description: Quattro Dash health pass - analyse the largest consumers of System RAM, VRAM and the watched drives, report ranked findings with sizes, and name throttle/prune options. Use when Quattro Dash alerts that System RAM, VRAM or a drive crossed a ceiling the user set, when the critical guard arms, when asked what is eating RAM/VRAM/disk or why a machine is thrashing, or before arming the standing guard. Read-only analysis - never kill, throttle, delete, compress, or change any limit without the captain's explicit word.
 ---
 
 # Memory health pass
