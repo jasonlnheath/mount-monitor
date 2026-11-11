@@ -1882,7 +1882,9 @@ function execHintValue(argv) {
 // first warning, red from the severe bands on, plain ink otherwise. The files
 // ship in the plugin's icons/ directory; without a directory no -i is sent and
 // the daemon keeps its fallback, so a caller that cannot resolve the path
-// never invents one.
+// never invents one. The PNGs are 128 px renders of quattro.js's own mil
+// artwork in plain ink, PAL.amber and PAL.redHot: regenerate them from that
+// path, never edit them by hand.
 var TOAST_ICONS = { plain: "mil-plain.png", amber: "mil-amber.png", red: "mil-red.png" };
 
 function toastIconFor(alert) {

@@ -156,7 +156,7 @@ Information from `/proc/pressure/memory`, some avg10, amber from 70, red at
 90; ROOT DRIVE as a fuel gauge where F is 100 percent free, the amber zone
 from 20 down to 10 percent free, the red zone below 10 percent free), a SWAP
 RESERVE battery telltale with a
-ten-segment LED bar (green at 20 percent or more, yellow from 10, red below
+ten-segment LED bar (green at 20 percent or more, amber from 10, red below
 10, pulsing when red, no swap configured reads as the empty state), and BELOW
 the battery, centered, the VRAM instrument: a square the size of the SWAP
 RESERVE square carrying the STANDARD ISO coolant warning light (the

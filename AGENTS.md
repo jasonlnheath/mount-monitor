@@ -110,7 +110,9 @@ Quattro Dash's suite is `bash memory-monitor/tests/run.sh`: the same shape of
 tests over `memory-monitor/memory.js` (parsers against fixtures, character-pinned
 toast copy per kind, thresholds and hysteresis, the guard budget gate and arm
 lifecycle, the baseline log, onboarding, the multi-instance gate, the install
-layout, the delegation guards) and over `memory-monitor/quattro.js` (the
+layout, the delegation guards, the round-7 and 7.5 pins, and an offscreen
+`qml6` pixel probe that loads `QuattroSymbol.qml` in a real Qt runtime and
+skips where `qml6` is absent) and over `memory-monitor/quattro.js` (the
 QuattroDash LED, PSI/fuel and coolant bands, the gauge threshold slider model
 and its live-band tests, code taxonomy and the no-em-dash copy rule) plus the
 RingKit conformance check that runs
