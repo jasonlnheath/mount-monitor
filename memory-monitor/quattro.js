@@ -60,18 +60,16 @@
 // Round 3 iteration 2 (captain's board ruling): the lane is called VRAM, not
 // VRAM HEADROOM, and it shows the ENTIRE amount of VRAM - the whole tank from
 // E (nothing free) to F (all of it free) - not a headroom remainder.
-var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE", coolant: "VRAM" };
+var INSTRUMENTS = { psi: "RAM PRESSURE", batt: "SWAP RESERVE", fuel: "ROOT DRIVE", coolant: "VRAM", swap: "SWAP" };
 
 // The settings row names each gauge by its instrument name; the pair keys are
-// the gauge keys, so this is the one bridge between the two vocabularies. The
-// vram row keeps the settings vocabulary's full name (VRAM COOLANT) even though
-// round 3 renamed the dash lane itself to the brief VRAM: the row configures
-// the coolant thresholds, and its title stays the name the ruling introduced.
+// the gauge keys, so this is the one bridge between the two vocabularies.
+// Round 7 item 4: the lane is VRAM everywhere - dash, settings row, tooltip.
 var GAUGE_TITLES = {
   psi: INSTRUMENTS.psi,
   hd: INSTRUMENTS.fuel,
   batt: INSTRUMENTS.batt,
-  vram: "VRAM COOLANT",
+  vram: "VRAM",
 };
 
 function gaugeTitle(key) {
@@ -136,15 +134,17 @@ var fuelLabels = [
 // Each gauge carries an amber/red pair the captain drags in the settings row
 // at the bottom of the dash, and the pair moves the drawn bands live. The law
 // the sliders enforce is mechanical: on the gauges where the bad end is high
-// (RAM pressure, root drive) red can never sit below amber, and on the pair
-// whose marks count what is LEFT (the swap reserve in percent, the VRAM
-// coolant lines in MiB free) amber can never sit below red. Moving one slider
-// through the other pushes the other, and no warning text exists.
+// (RAM pressure, root drive) red can never sit below amber, and on the VRAM
+// coolant lines (MiB free) amber can never sit below red. Moving one slider
+// through the other pushes the other, and no warning text exists. The battery
+// pair is round 7's exception: the captain's own drawing, duplicates allowed,
+// no reorder and no push - the dragged side moves, the other keeps its count.
 //
 // Defaults are the captain-approved recommended values: RAM pressure 70/90,
 // root drive 80/90, swap reserve 20/10, VRAM coolant 1500/500 MiB free.
 // psi and hd pairs are the plugin's own alert ceilings (memory.js thresholds);
-// batt and vram pairs are display decisions stored beside them.
+// the batt pair resolves the RAM band's swap-reserve signal (round 7), and the
+// vram pair is a display decision stored beside them.
 
 var GAUGE_KEYS = ["psi", "hd", "batt", "vram"];
 
@@ -199,6 +199,10 @@ function gaugePair(key, raw) {
       : defaults.amber;
   }
   amber = Math.max(range.min, Math.min(range.max, amber));
+  // Round 7 item 1: the battery pair is the captain's own drawing, not an
+  // alert ladder - two colors may start on the same bar and red may sit above
+  // amber to color MORE bars red. No reorder, no push.
+  if (key === "batt") return { amber: amber, red: red };
   if (gaugeRedAbove(key)) return { amber: amber, red: Math.max(red, amber) };
   return { amber: Math.max(amber, red), red: red };
 }
@@ -226,9 +230,21 @@ function adjustGaugePair(key, which, value, current) {
     if (red <= amber) amber = red - 1;
     return { amber: amber, red: red };
   }
+  if (key === "batt") {
+    // The dragged side moves, the other side keeps its count.
+    return which === "amber" ? { amber: moved, red: now.red } : { amber: now.amber, red: moved };
+  }
   if (which === "amber") return { amber: moved, red: Math.min(now.red, moved) };
   return { amber: Math.max(now.amber, moved), red: moved };
 }
+
+// The color of one battery bar segment at a center percentage (round 7 item
+// 1: the battery threshold display is a row of colored bars, not a dial with
+// tick lines). Green at the amber line or above, amber between the lines,
+// red below the red line. A crossed pair extends red upward, and a duplicated
+// pair draws one run: the color jump happens exactly where the captain drew
+// it, with no hidden reorder. The crossed-pair law itself is ledBandWith's,
+// the one owner - this is the segment word for its band word.
 
 // Live dial zones from a pair. The drive gauge needle reads percent FREE, so
 // its used-percent thresholds flip ends when they land on the dial; at the
@@ -268,25 +284,24 @@ function fuelZoneArcsFor(amberUsed, redUsed) {
 var psiZoneArcs = psiZoneArcsFor(PSI_AMBER_AT, PSI_RED_AT);
 var fuelZoneArcs = [{ from: 0, to: FUEL_RED_BELOW / 100, kind: "red" }];
 
-// The battery band from the pair: green at amber or more, yellow between red
-// and amber, red below red. ledBand is the locked-constants form the tests pin;
-// the dash and the tips call this with the drawn pair.
+function battSegmentZone(center, pair) {
+  const p = gaugePair("batt", pair);
+  const band = ledBandWith(center, p.amber, p.red);
+  return band === "yellow" ? "amber" : band;
+}
+
+// The battery band from the pair: green at the amber line or above, yellow
+// between the lines, red below the red line - red first, so a crossed pair
+// colors the same bars the segment coloring does. ledBand is the
+// locked-constants form the tests pin; the dash and the tips call this with
+// the drawn pair.
 function ledBandWith(pct, amber, red) {
   const p = gaugePair("batt", { amber: amber, red: red });
   const v = asNumber(pct);
   if (v === null) return "red";
-  if (v >= p.amber) return "green";
-  if (v >= p.red) return "yellow";
+  if (v >= Math.max(p.amber, p.red)) return "green";
+  if (v >= p.red && p.red <= p.amber) return "yellow";
   return "red";
-}
-
-// Threshold ticks for the reserve gauge, red below amber, in needle fractions.
-function battTickFracs(pair) {
-  const p = gaugePair("batt", pair);
-  return [
-    { f: p.red / 100, cls: "red" },
-    { f: p.amber / 100, cls: "amber" },
-  ];
 }
 
 // The pair behind the coolant band and its hover decode. It arrives from the
@@ -616,24 +631,12 @@ function gibDigits(mibValue) {
 }
 
 function coolantTip(reading, floorMib) {
-  const r = reading || null;
-  const used = r === null ? null : asNumber(r.usedMib);
-  const free = r === null ? null : asNumber(r.freeMib);
-  // Round 3 iteration 2: the lane shows the ENTIRE amount of VRAM, so the
-  // Now line names the total tank as well as what is used and free.
-  const total = r === null ? null : asNumber(r.totalMib);
-  const now = used === null || free === null
-    ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " free of " + gibFromMib(total) + ".";
-  return {
-    header: INSTRUMENTS.coolant,
-    rows: [
-      { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Headroom is the GPU memory left over after what the GPU is using - free VRAM, the headroom for the next big model load." },
-      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
-      { label: "Ranges:", text: "Red below the floor. Amber within 1000 MiB of the floor above it. Green above that. The floor is the vramFloorMib setting, 500 MiB unset." },
-    ],
-  };
+  // The locked wrapper: the drawn floor and its fixed amber margin. Round 7
+  // item 2 makes it the same one-line reading the drawn pair shows.
+  const floor = asNumber(floorMib);
+  const red = floor === null ? null : floor;
+  const amber = red === null ? null : red + VRAM_AMBER_MARGIN_MIB;
+  return coolantTipWith(reading, red, amber);
 }
 
 function gbFromKb(kb) {
@@ -661,9 +664,7 @@ function battTip(reserve) {
 }
 
 function fuelTip(root) {
-  const tip = fuelTipWith(root, GAUGE_DEFAULTS.hd.amber, GAUGE_DEFAULTS.hd.red);
-  tip.rows[3].text = "Red below " + FUEL_RED_BELOW + " percent free. Keep the needle away from E.";
-  return tip;
+  return fuelTipWith(root, GAUGE_DEFAULTS.hd.amber, GAUGE_DEFAULTS.hd.red);
 }
 
 // --- live-threshold tips ------------------------------------------------------
@@ -693,33 +694,26 @@ function psiTipWith(psi, amber, red) {
   const now = some === null || word === null
     ? "no pressure reading yet."
     : some.toFixed(1) + " PSI, " + word + ".";
+  // Round 7 item 2: the hover is the simple reading, one line. The metric
+  // explanation lives in the settings copy, not above the needle.
   return {
     header: INSTRUMENTS.psi,
     rows: [
       { label: "Now:", text: now, cls: "now" },
-      { label: "Metric:", text: "PSI is a real kernel metric. It stands for Pressure Stall Information and comes from /proc/pressure/memory in Linux. It reports the percent of time programs were stalled waiting for RAM, averaged over the last 10 seconds." },
-      { label: "What:", text: "We show the kernel\u2019s \u201csome\u201d average, meaning at least one program was stuck waiting for RAM. The scale is 0 to 100 because that is exactly how the kernel reports it." },
-      { label: "Why:", text: "High pressure means the machine is starved for memory. Everything slows down and crashes get more likely." },
-      { label: "Ranges:", text: "Green below " + p.amber + ". Amber from " + p.amber + " to " + p.red + ". Red at " + p.red + " and above, which needs attention now." },
     ],
   };
 }
 
 function battTipWith(reserve, amber, red) {
-  const p = gaugePair("batt", { amber: amber, red: red });
   const r = reserve || { present: false, pct: 0 };
   const pct = asNumber(r.pct);
   const now = r.present === true && pct !== null
     ? String(Math.round(pct)) + " percent remaining right now."
     : "no swap is configured.";
-  const word = ledBandWith(pct, p.amber, p.red);
   return {
     header: INSTRUMENTS.batt,
     rows: [
       { label: "Reserve:", text: now, cls: "now" },
-      { label: "What:", text: "Emergency swap is spare disk space the kernel uses when RAM runs out. It is the reserve that keeps the machine alive under memory pressure." },
-      { label: "Why:", text: "When this reserve drains to empty, the system stops like a car out of fuel." },
-      { label: "Ranges:", text: "Green at " + p.amber + " percent or more. Yellow from " + p.red + " to " + p.amber + ". Red below " + p.red + ". Right now: " + word + ".", cls: word === "red" ? "st-r" : (word === "yellow" ? "st-a" : "") },
     ],
   };
 }
@@ -730,18 +724,12 @@ function fuelTipWith(root, amberUsed, redUsed) {
   const pctFree = r === null ? null : asNumber(r.pctFree);
   const gb = r === null ? null : gbFromKb(r.availKb);
   const gbTotal = r === null ? null : gbFromKb(r.sizeKb);
-  const now = pctFree === null || gb === null || gbTotal === null
-    ? "no root reading yet."
-    : gb + " GB free of " + gbTotal + " GB (" + Math.round(pctFree) + " percent).";
-  const redFree = 100 - p.red;
-  const amberFree = 100 - p.amber;
+  const line = freeLine(pctFree, gb, gbTotal, "GB");
+  const now = line === null ? "no root reading yet." : line + ".";
   return {
     header: INSTRUMENTS.fuel,
     rows: [
       { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Fuel shows free space on the root drive, the disk that holds the OS and your files. F means 100 percent free, E means none." },
-      { label: "Why:", text: "When the root drive fills up the system can freeze or fail to write. Performance hinges on keeping it free." },
-      { label: "Ranges:", text: "Red below " + redFree + " percent free, amber below " + amberFree + " percent free. Keep the needle away from E." },
     ],
   };
 }
@@ -752,16 +740,17 @@ function coolantTipWith(reading, redMib, amberMib) {
   const used = r === null ? null : asNumber(r.usedMib);
   const free = r === null ? null : asNumber(r.freeMib);
   const total = r === null ? null : asNumber(r.totalMib);
-  const now = used === null || free === null
-    ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " free of " + gibFromMib(total) + ".";
+  const line = freeLine(
+    used === null || total === null || total <= 0 ? null : (free / total) * 100,
+    gibDigits(free),
+    gibDigits(total),
+    "GiB",
+  );
+  const now = line === null ? "no VRAM reading yet." : line + ".";
   return {
     header: INSTRUMENTS.coolant,
     rows: [
       { label: "Now:", text: now, cls: "now" },
-      { label: "What:", text: "Headroom is the GPU memory left over after what the GPU is using - free VRAM, the headroom for the next big model load." },
-      { label: "Why:", text: "When the coolant light goes red the GPU has no room for the next model load." },
-      { label: "Ranges:", text: "Red below " + String(Math.round(p.red)) + " MiB free. Amber below " + String(Math.round(p.amber)) + " MiB free. Green above that. The gauge settings sliders move the thresholds." },
     ],
   };
 }
@@ -771,17 +760,62 @@ function coolantTipWith(reading, redMib, amberMib) {
 
 var SETTINGS = {
   header: "GAUGE SETTINGS",
-  hint: "Drag a slider to move its band. Red never crosses amber.",
+  hint: "Drag a slider to set where each color starts.",
   reset: "RESET TO DEFAULTS",
   amberLabel: "AMBER",
   redLabel: "RED",
+  // Round 7 item 3, reshaped by round 7.5 item 18: one what-and-why
+  // paragraph per metric, no band colors in the copy. Two sentences, one
+  // flowing string - the settings Text wraps it itself.
   copy: {
-    psi: "Amber is where RAM pressure starts to build, red is where programs are stalling and the machine needs help.",
-    hd: "Amber is where the root drive starts to fill, red is where it is nearly full and cleanup is due.",
-    batt: "Ticks mark the emergency swap reserve, amber when it runs low and red just before empty.",
-    vram: "The light tracks your free VRAM, amber when the next big model load gets risky, red at the floor where nothing fits.",
+    psi: "Pressure Stall Information is the kernel\u2019s own measure of how long programs waited for RAM. We watch it because high pressure means every program is slowing down.",
+    hd: "The root drive is the disk that holds the OS and your files. We watch it because a full root drive freezes the machine.",
+    batt: "Swap is spare disk space the kernel uses when RAM runs out. We watch it because an empty swap reserve takes the machine down with it.",
+    vram: "VRAM is the memory your graphics card loads programs and models into. We watch it because the next big model load needs free VRAM to fit.",
   },
 };
+
+// Round 7.5 item 21: the VRAM gauge sliders move in 50 MiB steps. The MiB
+// scale is huge (the pair rides under GAUGE_MIB_MAX), so a one-MiB drag is
+// invisible noise; 50 MiB is the smallest move the captain can feel. The PSI
+// and drive sliders stay at 1 - their whole range is 99.
+function sliderStep(key) {
+  return key === "vram" ? 50 : 1;
+}
+
+// Round 7.5 item 17: the one standard free format for swap, VRAM and disk.
+// "z% Free (x/y GiB or GB)" - the percent free up front, the absolute pair in
+// parentheses, the unit named once. Everything that reports how much of a
+// resource is left reads through here, so the three resources say it the
+// same way.
+function freeLine(pctFree, freeAmount, totalAmount, unit) {
+  const pct = asNumber(pctFree);
+  const free = freeAmount === null || freeAmount === undefined ? null : String(freeAmount);
+  const total = totalAmount === null || totalAmount === undefined ? null : String(totalAmount);
+  if (pct === null || free === null || total === null || free === "" || total === "") return null;
+  return Math.round(pct) + "% Free (" + free + "/" + total + " " + unit + ")";
+}
+
+// GiB for the swap stat line, trailing .0 trimmed: the captain reads "8 GiB",
+// not "8.0 GiB", while a real fraction keeps its decimal ("1.2 GiB").
+function gibTrim(mib) {
+  const v = asNumber(mib);
+  if (v === null) return null;
+  return (v / 1024).toFixed(1).replace(/\.0$/, "");
+}
+
+// Round 7.5 item 17: swap's stat line is the one standard free format -
+// "80% Free (6.4/8 GiB)" - and a machine with no swap says so. It never draws
+// a healthy zero.
+function swapLine(swap) {
+  const s = swap || {};
+  const totalKb = asNumber(s.swapTotalKb);
+  const usedKb = asNumber(s.swapUsedKb);
+  if (totalKb === null || totalKb <= 0 || usedKb === null) return "none configured";
+  const usedPct = (usedKb / totalKb) * 100;
+  const line = freeLine(100 - usedPct, gibTrim((totalKb - usedKb) / 1024), gibTrim(totalKb / 1024), "GiB");
+  return line === null ? "none configured" : line;
+}
 
 // --- round 3 iteration 2: the values-only popup -----------------------------
 //
@@ -793,7 +827,7 @@ var SETTINGS = {
 // bare percent a code is about - a code id and a number are values, not
 // descriptions. A missing reading says so in five words rather than drawing
 // a healthy zero.
-function valueRows(psiSome, reserve, rootDrive, vram, codes) {
+function valueRows(psiSome, reserve, swap, rootDrive, vram, codes) {
   const rows = [];
   const psi = asNumber(psiSome);
   rows.push({
@@ -806,25 +840,40 @@ function valueRows(psiSome, reserve, rootDrive, vram, codes) {
     label: INSTRUMENTS.batt,
     value: r.present !== true || pct === null ? "none configured" : String(Math.round(pct)) + " percent",
   });
+  // Round 7 item 9: the SWAP line rides between the reserve and the drive.
+  rows.push({
+    label: INSTRUMENTS.swap,
+    value: swapLine(swap),
+  });
   const fuel = rootDrive || null;
+  const pctFree = fuel === null ? null : asNumber(fuel.pctFree);
   const gb = fuel === null ? null : gbFromKb(fuel.availKb);
+  const gbTotal = fuel === null ? null : gbFromKb(fuel.sizeKb);
   rows.push({
     label: INSTRUMENTS.fuel,
-    // MARK 5: "Root drive, just say 437GB free." The full "X of Y (Z percent)"
-    // sentence stays where a hover decode can still give it (fuelTip); the
-    // stats row says the one number the captain asked for.
-    value: gb === null
+    // Round 7.5 item 17: the standard free format on the row itself.
+    value: freeLine(pctFree, gb, gbTotal, "GB") === null
       ? "no reading"
-      : gb + " GB free",
+      : freeLine(pctFree, gb, gbTotal, "GB"),
   });
   const freeMib = vram === null ? null : asNumber(vram.vramFreeMib);
+  const totalMib = vram === null ? null : asNumber(vram.vramTotalMib);
   rows.push({
     label: INSTRUMENTS.coolant,
-    // MARK 5: "For VRAM just say 7.1 gigs free." The full sentence stays in the
-    // hover tip (coolantTip), which still says GiB.
-    value: gibDigits(freeMib) === null
+    // Round 7.5 item 17: the standard free format on the row itself.
+    value: freeLine(
+      totalMib === null || totalMib <= 0 ? null : (freeMib / totalMib) * 100,
+      gibDigits(freeMib),
+      gibDigits(totalMib),
+      "GiB",
+    ) === null
       ? "no reading"
-      : gibDigits(freeMib) + " GiB free",
+      : freeLine(
+        totalMib === null || totalMib <= 0 ? null : (freeMib / totalMib) * 100,
+        gibDigits(freeMib),
+        gibDigits(totalMib),
+        "GiB",
+      ),
   });
   const list = codes === null || codes === undefined ? [] : codes;
   for (let i = 0; i < list.length; i += 1) {
@@ -1010,13 +1059,12 @@ function headroomZonesWith(totalMib, redMib, amberMib) {
 
 function codeTip(code) {
   const c = code || {};
+  // Round 7 item 2: the code row's hover is one line too - the status line.
   return {
     header: c.code,
     sev: c.sev,
     rows: [
-      { label: "Issue:", text: c.issue },
       { label: "Status:", text: c.status, cls: c.sev === "r" ? "st-r" : "st-a" },
-      { label: "Fix:", text: c.fix },
     ],
   };
 }

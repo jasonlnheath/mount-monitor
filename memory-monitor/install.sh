@@ -48,6 +48,14 @@ for name in manifest.json MemoryMonitor.qml MemoryPanel.qml QuattroDash.qml Quat
   fi
 done
 
+# The toast logo (round 7 item 11): the check-engine emblem in its three
+# tints, resolved by the widget relative to its own directory. Copied whole
+# like the rest, so a tint renamed in the repo stays renamed on disk.
+if [[ -d "$here/icons" ]]; then
+  rm -rf "${plugin_dir:?}/icons"
+  cp -a "$here/icons" "$plugin_dir/icons"
+fi
+
 # The widget imports ringkit.js, and a QML-imported JS module cannot import
 # another JS module, so the one RingKit source is copied beside its one consumer.
 cp -a "$ringkit" "$plugin_dir/ringkit.js"
@@ -73,9 +81,9 @@ else
 fi
 
 command -v notify-send > /dev/null \
-  || echo "notify-send is not installed; Memory Monitor can draw its badge but cannot alert." >&2
+  || echo "notify-send is not installed; Quattro Dash can draw its badge but cannot alert." >&2
 command -v findmnt > /dev/null \
-  || echo "findmnt is not installed; Memory Monitor cannot read your drives." >&2
+  || echo "findmnt is not installed; Quattro Dash cannot read your drives." >&2
 command -v nvidia-smi > /dev/null \
   || echo "nvidia-smi is not installed; the VRAM ring is off. RAM and drives still monitor." >&2
 command -v zramctl > /dev/null \

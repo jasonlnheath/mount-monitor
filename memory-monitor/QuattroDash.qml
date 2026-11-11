@@ -118,7 +118,8 @@ Panel {
       ? monitor.vramFloorMib() : Memory.vramFloorMib(null)
   }
 
-  readonly property var reserve: Quattro.reserveReading(Memory.swapTotals(swaps))
+  readonly property var swapTotals: Memory.swapTotals(swaps)
+  readonly property var reserve: Quattro.reserveReading(swapTotals)
   readonly property real psiSome: psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : -1
   readonly property var psiNeedle: Quattro.psiNeedleFrac(psiSome < 0 ? null : psiSome)
   readonly property var fuelNeedle: Quattro.fuelNeedleFrac(rootDrive === null ? null : rootDrive.pctFree)
@@ -234,7 +235,7 @@ Panel {
   // the settings section).
   readonly property real listHeight: (valuesOnly ? valuesContent : content).implicitHeight
   readonly property var valueRows: Quattro.valueRows(
-    psiSome < 0 ? null : psiSome, reserve, rootDrive, vram, codes)
+    psiSome < 0 ? null : psiSome, reserve, swapTotals, rootDrive, vram, codes)
 
   // ---------------------------------------------------------------------------
   // Layout measures. The mockup is designed on the 443px card (the
@@ -286,6 +287,12 @@ Panel {
   // letters and ticks shrink to exactly the marks the dial draws (the
   // captain's ruling).
   readonly property var scaleSize: Quattro.vramScaleSize(psiDial.width)
+
+  // Round 7.5 item 19: the settings section always STARTS collapsed. Whatever
+  // edge the popup takes - open or close - the section is folded first, so an
+  // expanded settings block can never survive a screen exit and mis-render on
+  // the way back.
+  onOpenedChanged: if (typeof content !== "undefined" && content) content.settingsOpen = false
 
   CardBar { id: cardBar; api: root.bar }
 
@@ -495,8 +502,11 @@ Panel {
                     id: battIcon
                     anchors.fill: parent
                     symbol: "battery"
-                    color: root.reserve.pct >= root.battPair.amber ? Quattro.PAL.green
-                      : (root.reserve.pct >= root.battPair.red ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                    color: {
+                      var band = Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red)
+                      return band === "green" ? Quattro.PAL.green
+                        : (band === "yellow" ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                    }
 
                     SequentialAnimation {
                       running: Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red) === "red"
@@ -511,6 +521,11 @@ Panel {
                   spacing: 2
                   Layout.alignment: Qt.AlignHCenter
 
+                  // Round 7 item 1: the battery threshold display is a row of
+                  // colored bars. Each bar's color comes from its CENTER
+                  // percentage against the drawn pair - red first, duplicates
+                  // allowed, no hidden reorder - and the moving tick lines are
+                  // gone. Two red bars at 20, three at 30, exactly as drawn.
                   Repeater {
                     model: Quattro.LED_COUNT
 
@@ -519,42 +534,15 @@ Panel {
                       width: (84 * root.unit - (Quattro.LED_COUNT - 1) * 2) / Quattro.LED_COUNT
                       height: 9
                       radius: 2
+                      readonly property real center: (index + 0.5) * (100 / Quattro.LED_COUNT)
+                      readonly property string zone: Quattro.battSegmentZone(center, root.battPair)
                       readonly property bool lit: index < Quattro.litSegments(root.reserve.pct)
-                      readonly property string ledWord: Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red)
-                      readonly property color bandColor: ledWord === "green" ? Quattro.PAL.green
-                        : (ledWord === "yellow" ? Quattro.PAL.amber : Quattro.PAL.redHot)
-                      color: lit ? bandColor : Quattro.PAL.ledOff
+                      readonly property color zoneColor: zone === "green" ? Quattro.PAL.green
+                        : (zone === "amber" ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                      color: lit ? zoneColor : Quattro.PAL.ledOff
                       border.width: 1
-                      border.color: lit ? bandColor : Quattro.PAL.line
-                    }
-                  }
-                }
-
-                // The reserve's threshold ticks (the captain's 2026-11-07
-                // ruling): where the drawn amber and red lines sit, red below
-                // amber, because this gauge's bad end is empty.
-                Item {
-                  width: 84 * root.unit
-                  height: 5
-                  Layout.alignment: Qt.AlignHCenter
-
-                  Rectangle {
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                    height: 1
-                    color: Quattro.PAL.line
-                  }
-
-                  Repeater {
-                    model: Quattro.battTickFracs(root.battPair)
-
-                    Rectangle {
-                      required property var modelData
-                      x: Math.max(0, Math.min(parent.width - 1.5, parent.width * modelData.f - 0.75))
-                      y: 0
-                      width: 1.5
-                      height: parent.height
-                      color: modelData.cls === "red" ? Quattro.PAL.redHot : Quattro.PAL.amber
+                      border.color: lit ? zoneColor : Quattro.PAL.line
+                      opacity: lit ? 1.0 : 0.45
                     }
                   }
                 }
@@ -829,6 +817,11 @@ Panel {
             color: Quattro.PAL.line
           }
         }
+
+        // Round 7.5 item 16: no SWAP line on the bar card any more. Swap's
+        // stats moved up into the values popup (the SWAP row there), so the
+        // card carries the cluster row and the engine codes and nothing
+        // between them.
 
         // The codes area is a plain Item, not a nested ColumnLayout: in this
         // Qt build a nested ColumnLayout caps at its implicit width and hugs
@@ -1434,6 +1427,9 @@ Panel {
     property real max: 99
     property color tint: Quattro.PAL.amber
     property string label: ""
+    // Round 7.5 item 21: drags quantize to this step. The VRAM rows pass
+    // Quattro.sliderStep("vram") (50 MiB); the PSI and drive rows stay at 1.
+    property int step: 1
     signal moved(real newValue)
 
     readonly property real frac: Math.max(0, Math.min(1, (value - min) / Math.max(1, max - min)))
@@ -1490,7 +1486,9 @@ Panel {
     MouseArea {
       function valueAt(px) {
         var f = Math.max(0, Math.min(1, px / parent.width))
-        return Math.round(slider.min + f * (slider.max - slider.min))
+        var raw = slider.min + f * (slider.max - slider.min)
+        var stepped = Math.round(raw / slider.step) * slider.step
+        return Math.max(slider.min, Math.min(slider.max, stepped))
       }
       anchors.fill: parent
       cursorShape: Qt.PointingHandCursor
@@ -1551,6 +1549,7 @@ Panel {
         value: gaugeRow.pair.amber
         min: gaugeRow.range.min
         max: gaugeRow.range.max
+        step: Quattro.sliderStep(gaugeRow.gaugeKey)
         tint: Quattro.PAL.amber
         label: Quattro.SETTINGS.amberLabel
         onMoved: function(v) {
@@ -1564,6 +1563,7 @@ Panel {
         value: gaugeRow.pair.red
         min: gaugeRow.range.min
         max: gaugeRow.range.max
+        step: Quattro.sliderStep(gaugeRow.gaugeKey)
         tint: Quattro.PAL.redHot
         label: Quattro.SETTINGS.redLabel
         onMoved: function(v) {

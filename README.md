@@ -76,7 +76,7 @@ released once the reading clears the line by 5% of the card's capacity. The
 approach zone is 10% of capacity above the floor. While the telltale is red it
 polls every 20 seconds instead of 60, the same adaptive posture the rest of
 the repo uses. The telltale is silent — it never sends a notification; VRAM
-alerts stay Memory Monitor's job.
+alerts stay Quattro Dash's job.
 
 Hovering the telltale names the GPU, the reading, and the floor; clicking it
 opens a small popup with the numbers: free of total, the floor, the guarded

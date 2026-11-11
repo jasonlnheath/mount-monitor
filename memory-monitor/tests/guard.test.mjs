@@ -18,7 +18,7 @@ test("the guard is on unless the user says otherwise - the ask is an insist, not
 });
 
 test("the ask is the captain's copy", () => {
-  assert.equal(Memory.guardAskTitle(), "Memory Monitor - the guard");
+  assert.equal(Memory.guardAskTitle(), "Quattro Dash - the guard");
   const body = Memory.guardAskBody({ guard: null });
   assert.match(body, /The guard is the agent that steps in when a critical line is crossed\./);
   assert.match(body, /It does guard: it runs when your critical threshold is reached\./);
@@ -92,7 +92,7 @@ test("a dead guard retracts its claim by the captured id", () => {
   const died = Memory.retractClaimFor({ outcome: "died", claimId: "99", pct: 98 });
   assert.equal(died.replaceable, true);
   assert.equal(died.args[died.args.indexOf("-r") + 1], "99");
-  assert.equal(died.args[died.args.indexOf("-A") + 1], "default:Open Memory Monitor", "the death toast's copy says Click to open Memory Monitor");
+  assert.equal(died.args[died.args.indexOf("-A") + 1], "default=Open Quattro Dash", "the death toast's copy says Click to open Quattro Dash");
   const hint = died.args[died.args.indexOf("-h") + 1];
   assert.match(hint, /^STRING:omarchy-exec-argv:/);
   same(JSON.parse(hint.slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
@@ -114,6 +114,7 @@ test("an arm record is written the same way every time", () => {
     eventKey: "ram|3|ram|1",
     type: "ram",
     band: 3,
+    signal: "swap",
     outcome: "who knows",
     pid: 4242,
     survived: true,
@@ -125,6 +126,9 @@ test("an arm record is written the same way every time", () => {
   assert.equal(record.pid, 4242);
   assert.equal(record.survived, true);
   assert.equal(record.claimId, "77");
+  assert.equal(record.signal, "swap", "the signal survives the record, so a restart's retraction names the same signal");
+  assert.equal(Memory.armRecord({ type: "hd", band: 3, outcome: "started" }).signal, undefined,
+    "an hd record carries no signal, so its retraction keeps the device line");
   same(record.reasons, ["one reason"]);
   assert.equal(record.inline, true);
 });
@@ -163,7 +167,7 @@ test("an arm record carries what a retraction needs, so a restart can act on the
   assert.equal(plan.args[0], "notify-send");
   const body = plan.args[plan.args.length - 1];
   assert.match(body, /The guard did not survive/);
-  assert.match(body, /has reached 98% usage/, "the fresh toast carries the record's own reading, rounded up");
+  assert.match(body, /has reached 98 PSI/, "the fresh toast carries the record's own reading, rounded up");
 });
 
 test("a restart reconciles an orphaned arm from the file alone, once, and never the arm it is running", () => {

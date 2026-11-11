@@ -83,15 +83,15 @@ test("pairs are rounded whole numbers inside the slider range", () => {
   same(Q.gaugeRange("vram"), { min: 1, max: Q.GAUGE_MIB_MAX });
 });
 
-test("the ordering law holds wherever a pair comes from: red never sits below amber on psi and hd", () => {
+test("the ordering law holds wherever a pair comes from: red never sits below amber on psi and hd, and vram inverts", () => {
   same(Q.gaugePair("psi", { amber: 95, red: 70 }), { amber: 95, red: 95 },
     "a stored pair that arrives crossed is pushed back by the same rule the sliders use");
   same(Q.gaugePair("hd", { amber: 91, red: 90 }), { amber: 91, red: 91 });
-});
-
-test("the ordering law inverts where the marks count what is left: amber never sits below red on batt and vram", () => {
-  same(Q.gaugePair("batt", { amber: 5, red: 10 }), { amber: 10, red: 10 });
   same(Q.gaugePair("vram", { amber: 300, red: 500 }), { amber: 500, red: 500 });
+  // Round 7 item 1: the battery leaves the ordering law. Duplicates of a color
+  // are allowed there; its bars are the threshold display.
+  same(Q.gaugePair("batt", { amber: 5, red: 10 }), { amber: 5, red: 10 },
+    "the battery keeps a crossed pair: the captain colors the bars he wants");
 });
 
 test("a coolant red the captain moved carries its amber on the fixed margin, the way the card always drew it", () => {
@@ -117,14 +117,16 @@ test("moving amber up through red pushes red up on the up-bad gauges, keeping th
   same(Q.adjustGaugePair("hd", "amber", 92, { amber: 80, red: 90 }), { amber: 92, red: 93 });
 });
 
-test("moving amber down through red pushes red down where the marks count what is left", () => {
-  same(Q.adjustGaugePair("batt", "amber", 8, { amber: 20, red: 10 }), { amber: 8, red: 8 });
+test("moving amber down through red pushes red down only on the vram gauge; the battery is free", () => {
   same(Q.adjustGaugePair("vram", "amber", 400, { amber: 1500, red: 500 }), { amber: 400, red: 400 });
+  // Round 7: the battery never pushes. Each slider colors its own bars.
+  same(Q.adjustGaugePair("batt", "amber", 8, { amber: 20, red: 10 }), { amber: 8, red: 10 });
 });
 
-test("moving red up through amber pushes amber up where the marks count what is left", () => {
-  same(Q.adjustGaugePair("batt", "red", 30, { amber: 20, red: 10 }), { amber: 30, red: 30 });
+test("moving red up through amber pushes amber up on vram; the battery keeps its own red count", () => {
   same(Q.adjustGaugePair("vram", "red", 1600, { amber: 1500, red: 500 }), { amber: 1600, red: 1600 });
+  // Round 7: two red bars or three red bars, whatever the captain drags.
+  same(Q.adjustGaugePair("batt", "red", 30, { amber: 20, red: 10 }), { amber: 20, red: 30 });
 });
 
 test("a move that crosses nothing leaves the other slider alone", () => {
@@ -203,14 +205,15 @@ test("ledBandWith at the locked 25/10 is ledBand, and moves with the pair", () =
     "at the recommended 20/10 the green edge is the amber tick");
 });
 
-test("battTickFracs puts red below amber, in needle fractions", () => {
-  const ticks = Q.battTickFracs({ amber: 20, red: 10 });
-  same(ticks, [
-    { f: 0.1, cls: "red" },
-    { f: 0.2, cls: "amber" },
-  ]);
-  assert.ok(ticks[0].f < ticks[1].f, "the red tick sits below the amber tick on the reserve gauge");
-  same(Q.battTickFracs(null), [{ f: 0.1, cls: "red" }, { f: 0.2, cls: "amber" }]);
+test("the battery's bars are the threshold display: zone-colored segments, no tick lines", () => {
+  // Round 7 item 1: the moving red and yellow lines (battTickFracs) are gone;
+  // each LED segment wears its zone color, red checked first so a crossed or
+  // duplicated pair still reads one way.
+  assert.equal(Q.battTickFracs, undefined);
+  assert.equal(Q.battSegmentZone(5, { amber: 20, red: 10 }), "red");
+  assert.equal(Q.battSegmentZone(15, { amber: 20, red: 10 }), "amber");
+  assert.equal(Q.battSegmentZone(25, { amber: 20, red: 10 }), "green");
+  assert.equal(Q.battSegmentZone(15, { amber: 10, red: 30 }), "red", "red dominates the overlap");
 });
 
 test("coolantBandWith bands from the drawn thresholds, with the margin fallback", () => {
@@ -235,34 +238,36 @@ test("the coolant band and hover keep a floor-chain pair past the slider scale",
   assert.equal(Q.coolantBandWith(12287, 16310, 12288, 13288), 2, "one MiB below the floor is red");
   assert.equal(Q.coolantBandWith(400, 16310, null, null), 2, "a junk pair falls back to the recommended 500/1500");
   const tip = Q.coolantTipWith({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288, 13288);
-  assert.equal(tip.rows[0].text, "3.6 GiB used, 12.3 GiB free of 15.9 GiB.",
-    "the Now row reports free OF TOTAL, the round-3 doctrine the lane and stat rows carry");
-  assert.equal(tip.rows[1].text,
-    Q.coolantTip({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288).rows[1].text,
-    "the What row carries the locked tip's headroom sentence, not the retired reserved vocabulary");
-  assert.ok(tip.rows[3].text.includes("Red below 12288 MiB free. Amber below 13288 MiB free."), tip.rows[3].text);
+  assert.equal(tip.rows.length, 1, "round 7 item 2: the hover is the simple reading, one line");
+  assert.equal(tip.rows[0].text, "77% Free (12.3/15.9 GiB).",
+    "round 7.5 item 17: the Now row is the standard free format, free of total");
+  assert.equal(Q.coolantTip({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288).rows[0].text, tip.rows[0].text,
+    "the locked wrapper and the drawn pair agree on the one-line reading");
 });
 
 // ---------------------------------------------------------------------------
 // The settings row's copy: one sentence per setting, in the row
 // ---------------------------------------------------------------------------
 
-test("every gauge the row offers carries its own one-sentence description", () => {
+test("every gauge the row offers carries its what-is and why-we-measure lines, no band colors", () => {
   for (const key of Q.GAUGE_KEYS) {
-    const sentence = Q.SETTINGS.copy[key];
-    assert.equal(typeof sentence, "string", `${key} has a description`);
-    assert.ok(sentence.length > 0);
-    assert.ok(/^[A-Z].*\.$/.test(sentence), `${key}'s description is one sentence ending in a period`);
-    assert.equal(sentence.split(".").length - 1, 1, `${key}'s description is exactly one sentence`);
+    const copy = Q.SETTINGS.copy[key];
+    assert.equal(typeof copy, "string", `${key} has a description`);
+    // Round 7.5 item 18: one flowing paragraph, two sentences.
+    assert.doesNotMatch(copy, /\n/, `${key}'s copy is one paragraph`);
+    const sentences = copy.split(". ");
+    assert.equal(sentences.length, 2, `${key}'s copy is a what sentence and a why sentence`);
+    assert.ok(/^[A-Z].*\.$/.test(copy), `${key}'s paragraph starts with a capital and ends in a period`);
+    assert.equal(/amber|red/i.test(copy), false, `${key}'s copy names no band color`);
   }
   assert.equal(Q.gaugeTitle("psi"), "RAM PRESSURE");
   assert.equal(Q.gaugeTitle("hd"), "ROOT DRIVE");
   assert.equal(Q.gaugeTitle("batt"), "SWAP RESERVE");
-  assert.equal(Q.gaugeTitle("vram"), "VRAM COOLANT");
+  assert.equal(Q.gaugeTitle("vram"), "VRAM", "round 7 item 4: the lane is VRAM everywhere");
   assert.equal(Q.SETTINGS.header.length > 0, true);
   assert.equal(Q.SETTINGS.reset.length > 0, true);
-  assert.equal(Q.SETTINGS.hint.includes("Red never crosses amber"), true,
-    "the row says the law in words once, but never enforces it with a warning");
+  assert.equal(Q.SETTINGS.hint, "Drag a slider to set where each color starts.",
+    "the battery's bars are colored by the sliders now, so the hint says that");
 });
 
 // ---------------------------------------------------------------------------
@@ -303,7 +308,7 @@ test("the settings round trip keeps the gauge pairs beside the ceilings", () => 
   same(empty.gaugeSettings, {}, "no pairs stored is no pairs, not garbage");
 });
 
-test("any pair the state file could hold reads back in range and ordered, in both kernels", () => {
+test("any pair the state file could hold reads back in range, ordered on the law's gauges, in both kernels", () => {
   const stored = [
     { amber: 70, red: 90 }, { amber: 95, red: 70 }, { amber: 0, red: 100 },
     { amber: -10, red: 500 }, { amber: "hot", red: 90 }, { amber: 1.4, red: 98.9 },
@@ -318,7 +323,8 @@ test("any pair the state file could hold reads back in range and ordered, in bot
       assert.ok(p.amber >= range.min && p.amber <= range.max, `${key} amber ${p.amber} in range from ${JSON.stringify(raw)}`);
       assert.ok(p.red >= range.min && p.red <= range.max, `${key} red ${p.red} in range from ${JSON.stringify(raw)}`);
       if (Q.gaugeRedAbove(key)) assert.ok(p.red >= p.amber, `${key} red above amber from ${JSON.stringify(raw)}`);
-      else assert.ok(p.amber >= p.red, `${key} amber above red from ${JSON.stringify(raw)}`);
+      else if (key !== "batt") assert.ok(p.amber >= p.red, `${key} amber above red from ${JSON.stringify(raw)}`);
+      // batt keeps whatever it stored: duplicates of a color are allowed there.
     }
   }
 });
@@ -353,7 +359,7 @@ test("the panel renders the settings row from quattro.js and edits through the m
   const PANEL = repoFile("memory-monitor/QuattroDash.qml");
   assert.equal(PANEL.includes("Quattro.SETTINGS.copy[gaugeRow.gaugeKey]"), true,
     "each row's sentence is quattro.js's, not the panel's");
-  assert.equal(PANEL.includes("Quattro.battTickFracs("), true, "the reserve gauge draws its threshold ticks");
+  assert.equal(PANEL.includes("Quattro.battSegmentZone("), true, "round 7 item 1: the battery colors its bars from the drawn pair, no tick lines");
   assert.equal(PANEL.includes("Quattro.coolantBandWith("), true,
     "the coolant light tints from the settings pair, not the fixed margin");
   assert.equal(PANEL.includes("onClicked: content.settingsOpen = !content.settingsOpen"), true,
@@ -362,10 +368,12 @@ test("the panel renders the settings row from quattro.js and edits through the m
     "the row carries the reset button");
 });
 
-test("the settings copy carries no ordering warning, because the push model is the law", () => {
+test("the settings copy carries no ordering warning and no band-color essay", () => {
   const strings = [Q.SETTINGS.hint].concat(Q.GAUGE_KEYS.map(key => Q.SETTINGS.copy[key]));
   assert.equal(strings.some(s => /warn/i.test(s)), false,
-    "no warning message guards the ordering: the push model does");
+    "no warning message guards the ordering: the sliders and the coloring do");
+  assert.equal(strings.some(s => /amber|red/i.test(s)), false,
+    "round 7 item 3: the copy describes the metric, not the colors");
 });
 
 test("a refused threshold lands as quattro.js's toast naming the critical line", () => {

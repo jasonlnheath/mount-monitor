@@ -1,4 +1,4 @@
-# Memory Monitor
+# Quattro Dash
 
 An [Omarchy](https://omarchy.org) bar plugin that watches **System RAM, VRAM,
 and your drives**, and tells you when one of them crosses a line **you** set.
@@ -7,9 +7,9 @@ It is a monitor first. It measures, shows, alerts, logs, and hands the reading
 to your agent. It never kills, throttles, unloads, or reconfigures anything —
 what happens when a line is crossed is your decision, made with your agent.
 
-Memory Monitor is the sibling plugin of [Mount Monitor](../README.md) in this
+Quattro Dash is the sibling plugin of [Mount Monitor](../README.md) in this
 repository. Mount Monitor owns which drives are watched (its `mounts` setting
-and its partition onboarding); Memory Monitor reads that same list, shows the
+and its partition onboarding); Quattro Dash reads that same list, shows the
 severity of those drives, and alerts only for drives Mount Monitor is not
 already alerting on — so one drive produces one toast, not two.
 
@@ -33,8 +33,8 @@ already alerting on — so one drive produces one toast, not two.
 ## Thresholds: you set the ceilings
 
 - **Amber 80%** and **red 90%** are the documented defaults, except System RAM,
-  whose recommended amber default is 70%: pressure is worth warning about
-  earlier than a drive filling up.
+  whose amber and red read in PSI (recommended amber 70): pressure is worth
+  warning about earlier than a drive filling up.
 - **Critical ships unset.** No critical band exists, no critical toast can fire,
   and the bar cannot glow for a ceiling you never chose. First run asks you for
   your ceilings; until the baseline log has enough samples the question says
@@ -47,28 +47,32 @@ already alerting on — so one drive produces one toast, not two.
   dragged live from the QuattroDash's gauge settings row.
 - Validation is `0 < amber < red < critical < 100`, with critical allowed to be
   unset. Thresholds live in `~/.local/state/memory-monitor/settings.json`.
-- Memory Monitor never writes a system limit. Your ceiling and the kernel's
+- Quattro Dash never writes a system limit. Your ceiling and the kernel's
   ceiling (systemd-oomd's PSI and swap limits) are shown side by side, because
   they are different numbers and only one of them is yours.
 
 ## What "used" means
 
-- **System RAM is measured by what is actually available:**
-  `(MemTotal − MemAvailable) / MemTotal`, always shown beside the absolute
-  `MemAvailable` in GiB. `MemFree` is the flattering number; `MemAvailable` is
-  what the kernel thinks a large allocation can actually get.
-- **PSI memory is not the band.** It is the re-alert gate, the poll escalator,
-  and the evidence a later report re-anchors from. A held band re-fires when its
-  severity increases, when PSI memory crosses the stall floor, or when swap
-  crosses oomd's swap limit — because a machine sitting at its ceiling and a
-  machine stalling are not the same event.
+- **The RAM band is pressure plus the swap reserve** (round 7): the kernel's
+  Pressure Stall Information (`/proc/pressure/memory`, some avg10) against the
+  PSI pair, and the swap reserve's free percent against the reserve pair —
+  whichever band is more severe — and the toast names its signal, pressure or
+  swap. Percent-used never resolves a band: it stays a reading, logged and
+  handed to the agent beside the absolute `MemAvailable` in GiB (`MemFree` is
+  the flattering number; `MemAvailable` is what the kernel thinks a large
+  allocation can actually get).
+- **PSI is also the re-alert gate and the poll escalator.** A held band re-fires
+  when its severity increases, when PSI memory crosses the stall floor, or when
+  swap crosses oomd's swap limit — because a machine sitting at its ceiling and
+  a machine stalling are not the same event.
 - **Toasts are events, not states.** An alert fires on a crossing. A resource
   that merely sits in a band is carried by the badge, the detail window, and the
   log — so a machine that rests high does not re-toast forever, and a genuinely
   worse excursion still gets a toast.
 - **Swap and zram are in the RAM picture** (swap used%, zram fill, compression
-  ratio) and act as the RAM alert's escalator. Swap is not a fourth thresholded
-  control.
+  ratio). The swap reserve is one of the RAM band's two signals, and swap past
+  oomd's own limit re-fires a held band; swap is not a fourth resource with an
+  alert of its own.
 - **VRAM** shows total, used and free with absolute MiB beside every percent, the
   per-process breakdown `nvidia-smi` can see, and an explicit **desktop /
   compositor (unattributed)** row — clamped at zero — because `nvidia-smi` cannot
@@ -80,35 +84,39 @@ already alerting on — so one drive produces one toast, not two.
 A toast on every amber, red and critical alert event, in the spec's own words:
 
 ```
-Memory Monitor
+Quattro Dash
 Caution: Amber Alert
-Device (System Ram) has reached 82% usage.
+System RAM pressure has reached 72 PSI.
 Click to address with agent, otherwise ignore.
 ```
 
 ```
-Memory Monitor
+Quattro Dash
 WARNING: RED ALERT
-Device (System RAM) has reached 91% usage.
+Swap reserve is 92 percent used.
 Click to open an agent to actively monitor/guard against OOM, otherwise ignore.
 ```
 
 ```
-Memory Monitor
+Quattro Dash
 CRITICAL ALERT!
-Device has reached 98% usage.
+System RAM pressure has reached 98 PSI.
 Agent has been notified and is guarding against OOM.
 ```
 
-The percentage is the **live reading, rounded up**, not the threshold: a mount at
-97% is not told "reached 95%".
+A ram toast names its signal's own number: PSI for a pressure band, the used
+percent for the swap reserve. Drives and VRAM keep the percent-used wording,
+and the percentage is the **live reading, rounded up**, not the threshold: a
+mount at 97% is not told "reached 95%". Every toast wears the check-engine
+emblem logo, tinted plain, amber or red by the band.
 
 - **Amber** is normal urgency. If Do Not Disturb is on, the notification service
-  silences it — and Memory Monitor records it, in the log and in the detail
+  silences it — and Quattro Dash records it, in the log and in the detail
   window's **"Alerts you did not see"** section. Silenced, never lost.
-- **Red** rides critical urgency so it bypasses DND, and never expires.
-- **Critical** rides critical urgency, never expires, and preempts an unanswered
-  lower-band toast rather than queueing behind it.
+- **Red and critical ride normal urgency too** (round 7: every toast is
+  temporary — normal urgency with a finite timeout, the tinted emblem logo
+  carrying the severity). Critical preempts an unanswered lower-band toast
+  rather than queueing behind it.
 - **Clicking** an amber or red toast opens your agent (Omarchy's default agent,
   `omarchy agent prompt`, overridable with `agentCommand`) with the reading.
   Clicking a critical toast opens the detail window — never a second agent on
@@ -124,9 +132,9 @@ per machine, and only when the machine has headroom for it — the agent and the
 terminal it opens are themselves memory consumers, inside the cgroup oomd is
 watching. When the claim does not hold, the toast says so:
 
-- `The standing guard is off. Click to open Memory Monitor, otherwise ignore.`
-- `The guard could not start. Click to open Memory Monitor, otherwise ignore.`
-- `The guard did not survive. Click to open Memory Monitor, otherwise ignore.`
+- `The standing guard is off. Click to open Quattro Dash, otherwise ignore.`
+- `The guard could not start. Click to open Quattro Dash, otherwise ignore.`
+- `The guard did not survive. Click to open Quattro Dash, otherwise ignore.`
 
 The last one replaces the claim toast it retracts, by the notification id captured
 when the claim was sent, so a guarantee cannot outlive the thing it names.
@@ -148,7 +156,7 @@ Information from `/proc/pressure/memory`, some avg10, amber from 70, red at
 90; ROOT DRIVE as a fuel gauge where F is 100 percent free, the amber zone
 from 20 down to 10 percent free, the red zone below 10 percent free), a SWAP
 RESERVE battery telltale with a
-ten-segment LED bar (green at 20 percent or more, yellow from 10, red below
+ten-segment LED bar (green at 20 percent or more, amber from 10, red below
 10, pulsing when red, no swap configured reads as the empty state), and BELOW
 the battery, centered, the VRAM instrument: a square the size of the SWAP
 RESERVE square carrying the STANDARD ISO coolant warning light (the
@@ -163,7 +171,7 @@ the unlit monochrome glyph, and a missing reading reads unlit with no needle.
 The three percent-gauge bands start at the settings row's recommended
 defaults, the coolant light follows the VRAM floor until its sliders are
 touched, and the row moves them all live.
-Hovering the instrument shows VRAM used / free of total in GiB. Under the cluster, the
+Hovering the instrument reads the standard free format. Under the cluster, the
 codes area: ONE column under one check-engine head, DRIVE codes only, always
 most critical at the top, rows stretched across the full card so each code
 carries its reading and its status. The doctrine is round 2's: RAM monitoring
@@ -171,7 +179,7 @@ is PRESSURE + SWAP RESERVE, never amount used, so a high System RAM reading
 is the pressure gauge and the reserve battery and NO code; VRAM high lights
 the coolant light only. A code is a watched DRIVE sitting over your amber or
 red ceiling, wearing an OBD-style name (C plus four stable digits) and a
-hover decode (Issue / Status / Fix). An empty column reads "ENGINE CLEAR" under
+one-line hover status (round 7: the severity line only). An empty column reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
 code sends the same fixed prompt the toasts send to your default agent (inline
 when `agentInline` is set) with the dashboard's own pre-computed diagnosis
@@ -183,22 +191,30 @@ same single-flight, budget-gated check that owns every critical-band agent
 launch; its prompt carries the diagnosis too. Armed, the agent starts;
 refused, nothing starts and the red "not sent." toast says why: the guard is
 off, an agent is already on it, no memory headroom, or another screen owns
-the guard. Hovering any instrument gives the plain-words teaching decode, PSI
-included: it is a real kernel metric, not one we invented.
+the guard. Swap's numbers live in the values
+popup (the SWAP row), not on the bar card, and swap, VRAM and disk free-ness
+all read one standard format: "80% Free (6.4/8 GiB)".
 
 The bottom of the dash carries the gauge settings row, collapsed until you
-open it: one amber/red slider pair per gauge, each with its one-sentence
-description in the row, and a reset button that writes back the recommended
-defaults. The pairs move the drawn bands live — the RAM and ROOT DRIVE dials
-redraw their zones, the SWAP RESERVE gauge gains threshold ticks under its LED
-bar, and the VRAM COOLANT gauge re-tints amber or red as free VRAM
-crosses its thresholds — and red never crosses amber: moving one slider
-through the other pushes it.
+open it (and always collapsed when the popup opens or closes: the section
+never survives a screen exit expanded): one amber/red slider pair per gauge,
+each with its two-sentence paragraph in the row (what the metric is, why we
+measure it), and a reset button that writes back the recommended defaults
+without closing the popup: the state watcher skips this widget's own write,
+so the reset cannot bounce the card shut mid-click. The VRAM sliders move in
+50 MiB steps. The pairs move the drawn
+bands live — the RAM and ROOT DRIVE dials redraw their zones, and the battery
+under SWAP RESERVE recolors its bars: each bar takes its color from its own
+center percentage against the drawn pair, two red bars at 20, three at 30,
+duplicates allowed, no hidden reorder. The VRAM battery re-tints amber or red
+as free VRAM crosses its thresholds — and red never crosses amber on the RAM
+and root drive pairs: moving one slider through the other pushes it.
 There is no warning message; the push is the whole rule. The RAM pressure and
 root drive pairs are the plugin's real alert ceilings (the same numbers the
-detail window edits), and the reserve ticks and coolant thresholds are display
-pairs stored beside them in `~/.local/state/memory-monitor/settings.json`, so
-everything loads back on the next shell start.
+detail window edits), the reserve pair resolves the RAM band's swap signal, and
+the coolant thresholds stay a display pair — all stored in
+`~/.local/state/memory-monitor/settings.json`, so everything loads back on the
+next shell start.
 
 ## The detail window
 
@@ -225,7 +241,7 @@ monitoring continues.
 
 Nominal: drives 60 s, RAM 30 s, VRAM 60 s. Escalated for any resource at red or
 critical, and further while PSI memory is stalling. Restored when a descent
-holds. Memory Monitor runs no `udevadm monitor` of its own — Mount Monitor's is
+holds. Quattro Dash runs no `udevadm monitor` of its own — Mount Monitor's is
 this machine's event-driven block watcher.
 
 ## Install

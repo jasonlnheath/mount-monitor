@@ -96,7 +96,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "diagnosisConsumers", "diagnosisJson",
     "gaugePair", "adjustGaugePair", "gaugeRedAbove", "gaugeRange",
     "gaugeClamp", "zoneArcsFor", "psiZoneArcsFor", "fuelZoneArcsFor", "ledBandWith",
-    "battTickFracs", "coolantBandWith", "gaugeTitle",
+    "battSegmentZone", "coolantBandWith", "gaugeTitle",
     "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
     "ceilingBlockedToast", "tierFromState", "tierFromStateWith",
   ]) {
@@ -246,18 +246,12 @@ test("fuelNeedleFrac reads the percent free directly", () => {
 // the Metric row; copy verbatim from the approved mockup)
 // ---------------------------------------------------------------------------
 
-test("psiTip: the approved five rows with the live Now line and the /proc metric named", () => {
-  const tip = Quattro.psiTip({ some_avg10: 12.8 });  assert.equal(tip.header, "RAM PRESSURE");
-  same(tip.rows.map(r => r.label), ["Now:", "Metric:", "What:", "Why:", "Ranges:"]);
+test("psiTip: the simple reading, one line, with the live zone word", () => {
+  const tip = Quattro.psiTip({ some_avg10: 12.8 });
+  assert.equal(tip.header, "RAM PRESSURE");
+  same(tip.rows.map(r => r.label), ["Now:"]);
+  assert.equal(tip.rows[0].text, "12.8 PSI, green, healthy.");
   assert.equal(Quattro.psiTip({ some_avg10: 68 }).rows[0].text, "68.0 PSI, amber, getting heavy.");
-  assert.equal(tip.rows[1].text,
-    "PSI is a real kernel metric. It stands for Pressure Stall Information and comes from /proc/pressure/memory in Linux. It reports the percent of time programs were stalled waiting for RAM, averaged over the last 10 seconds.");
-  assert.equal(tip.rows[2].text,
-    "We show the kernel\u2019s \u201csome\u201d average, meaning at least one program was stuck waiting for RAM. The scale is 0 to 100 because that is exactly how the kernel reports it.");
-  assert.equal(tip.rows[3].text,
-    "High pressure means the machine is starved for memory. Everything slows down and crashes get more likely.");
-  assert.equal(tip.rows[4].text,
-    "Green below 60. Amber from 60 to 80. Red at 80 and above, which needs attention now.");
 });
 
 test("psiTip: the zone words are the mockup's, and a missing reading says so instead of inventing one", () => {
@@ -267,39 +261,24 @@ test("psiTip: the zone words are the mockup's, and a missing reading says so ins
   assert.equal(Quattro.psiTip({}).rows[0].text, "no pressure reading yet.");
 });
 
-test("battTip: the approved four rows with the live Reserve line and the ranges stated", () => {
+test("battTip: the simple reading, one line, and a machine with no swap says so honestly", () => {
   const tip = Quattro.battTip({ present: true, pct: 38 });
   assert.equal(tip.header, "SWAP RESERVE");
-  same(tip.rows.map(r => r.label), ["Reserve:", "What:", "Why:", "Ranges:"]);
+  same(tip.rows.map(r => r.label), ["Reserve:"]);
   assert.equal(tip.rows[0].text, "38 percent remaining right now.");
-  assert.equal(tip.rows[1].text,
-    "Emergency swap is spare disk space the kernel uses when RAM runs out. It is the reserve that keeps the machine alive under memory pressure.");
-  assert.equal(tip.rows[2].text,
-    "When this reserve drains to empty, the system stops like a car out of fuel.");
-  assert.equal(tip.rows[3].text,
-    "Green at 25 percent or more. Yellow from 10 to 25. Red below 10. Right now: green.");
-  assert.equal(Quattro.battTip({ present: true, pct: 9 }).rows[3].text.endsWith("Right now: red."), true);
-  assert.equal(Quattro.battTip({ present: true, pct: 15 }).rows[3].text.endsWith("Right now: yellow."), true);
   assert.equal(Quattro.battTip({ present: true, pct: 15 }).rows[0].text, "15 percent remaining right now.");
+  const none = Quattro.battTip({ present: false, pct: 0 });
+  assert.equal(none.rows.length, 1);
+  assert.equal(none.rows[0].text, "no swap is configured.");
 });
 
-test("battTip: a machine with no swap says so, honestly", () => {
-  const tip = Quattro.battTip({ present: false, pct: 0 });
-  assert.equal(tip.rows[0].text, "no swap is configured.");
-});
-
-test("fuelTip: the approved four rows with the live GB Now line", () => {
+test("fuelTip: the simple reading, one line, in the live GB", () => {
   const root = { target: "/", device: "/dev/nvme1n1p2", pctFree: 77, pctUsed: 23, availKb: 1501820186, sizeKb: 1950990074 };
   const tip = Quattro.fuelTip(root);
   assert.equal(tip.header, "ROOT DRIVE");
-  same(tip.rows.map(r => r.label), ["Now:", "What:", "Why:", "Ranges:"]);
-  assert.equal(tip.rows[0].text, "1538 GB free of 1998 GB (77 percent).");
-  assert.equal(tip.rows[1].text,
-    "Fuel shows free space on the root drive, the disk that holds the OS and your files. F means 100 percent free, E means none.");
-  assert.equal(tip.rows[2].text,
-    "When the root drive fills up the system can freeze or fail to write. Performance hinges on keeping it free.");
-  assert.equal(tip.rows[3].text,
-    "Red below 10 percent free. Keep the needle away from E.");
+  same(tip.rows.map(r => r.label), ["Now:"]);
+  assert.equal(tip.rows[0].text, "77% Free (1538/1998 GB).",
+    "round 7.5 item 17: the Now row is the standard free format");
   assert.equal(Quattro.fuelTip(null).rows[0].text, "no root reading yet.");
 });
 
@@ -545,29 +524,26 @@ test("gibFromMib: one decimal, the MiB to GiB divide, the light's hover units", 
   assert.equal(Quattro.gibFromMib(null), "unknown");
 });
 
-test("coolantTip: the light's hover shows VRAM used / free of total, and the floor teaching stays", () => {
+test("coolantTip: the simple reading, one line: VRAM used / free of total", () => {
   const tip = Quattro.coolantTip({ present: true, usedMib: 15200, freeMib: 1184, totalMib: 16384 }, 500);
   // Round 3: the lane is the whole VRAM tank - the hover reports free OF
-  // TOTAL, not a reserved remainder.
+  // TOTAL, not a reserved remainder. Round 7: one line only.
   assert.equal(tip.header, "VRAM");
-  same(tip.rows.map(r => r.label), ["Now:", "What:", "Why:", "Ranges:"]);
-  assert.equal(tip.rows[0].text, "14.8 GiB used, 1.2 GiB free of 16.0 GiB.");
-  assert.equal(tip.rows[3].text.endsWith("vramFloorMib setting, 500 MiB unset."), true,
-    "the ranges row names the setting and the default");
-  assert.equal(tip.rows[3].text.startsWith("Red below the floor. Amber within 1000 MiB of the floor above it."), true,
-    "the ranges row teaches the fixed margin, not a fraction of total");
+  same(tip.rows.map(r => r.label), ["Now:"]);
+  assert.equal(tip.rows[0].text, "7% Free (1.2/16.0 GiB).",
+    "round 7.5 item 17: the Now row is the standard free format, free of total");
   const empty = Quattro.coolantTip(null, 500);
   assert.equal(empty.rows[0].text, "no VRAM reading yet.", "a missing reading is said, not drawn as zero");
 });
 
-test("codeTip: the approved three-row decode with the severity color class", () => {
+test("codeTip: the simple status, one line with the severity color class", () => {
   const codes = Quattro.codesFromReadings([
     { type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05", band: 2, pct: 96, target: "/", ro: false }]);
   const tip = Quattro.codeTip(codes[0]);
   assert.equal(tip.header, codes[0].code);
   assert.equal(tip.sev, "r");
-  same(tip.rows.map(r => r.label), ["Issue:", "Status:", "Fix:"]);
-  assert.equal(tip.rows[2].text, "agent has the crash pattern and is processing now.");
+  same(tip.rows.map(r => r.label), ["Status:"]);
+  assert.equal(tip.rows[0].text, "severe, over your red ceiling.");
 });
 
 // ---------------------------------------------------------------------------
@@ -917,9 +893,9 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     // The gauge threshold settings row (the captain's 2026-11-07 ruling): the
     // pairs, the ranges, the push model's law and the row's sentences are all
     // quattro.js data the panel renders and the monitor owns on disk.
-    "Quattro.SETTINGS", "Quattro.GAUGE_KEYS",
+    "Quattro.SETTINGS", "Quattro.GAUGE_KEYS", "Quattro.valueRows(",
     "Quattro.gaugePair(", "Quattro.gaugeRange(", "Quattro.gaugeTitle(",
-    "Quattro.battTickFracs(",
+    "Quattro.battSegmentZone(",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
   }
@@ -1078,16 +1054,20 @@ test("round 6 reservoir scale: one point under the faces, ticks exactly the dial
   assert.equal(size.tickW, Math.max(2, Math.round(2.6 * s)));
 });
 
-test("round 4/5 stat rows: the captain's numbers, in honest units", () => {
+test("round 7 stat rows: the captain's numbers, in honest units, swap line included", () => {
   // findmnt gives KiB: 426757813 KiB x 1024 = 437.0 GB decimal - "437 GB free"
   // is honest GB. VRAM comes from nvidia-smi in MiB, so the honest unit is GiB.
+  // Round 7 item 9: the dash gains a SWAP line of its own.
   const fuel = { availKb: 426757813, sizeKb: 546875001, pctFree: 78 };
   const vramFull = { vramUsedMib: 9000, vramFreeMib: 7303, vramTotalMib: 16303 };
   const vramLow = { vramUsedMib: 14903, vramFreeMib: 1400, vramTotalMib: 16303 };
-  const rows = Quattro.valueRows(20, { present: true, pct: 85 }, fuel, vramFull, []);
-  same(rows.map(r => r.label), ["RAM PRESSURE", "SWAP RESERVE", "ROOT DRIVE", "VRAM"]);
-  same(rows.map(r => r.value), ["20.0 PSI", "85 percent", "437 GB free", "7.1 GiB free"]);
-  const amber = Quattro.valueRows(20, { present: true, pct: 85 }, fuel, vramLow, []);
-  assert.equal(amber[3].value, "1.4 GiB free");
-  assert.equal(Quattro.valueRows(20, { present: true, pct: 85 }, fuel, null, [])[3].value, "no reading");
+  const swap = { swapTotalKb: 8 * 1048576, swapUsedKb: Math.round(1.2 * 1048576) };
+  const rows = Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, vramFull, []);
+  same(rows.map(r => r.label), ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
+  // Round 7.5 item 17: the standard free format on every resource row.
+  same(rows.map(r => r.value), ["20.0 PSI", "85 percent", "85% Free (6.8/8 GiB)", "78% Free (437/560 GB)", "45% Free (7.1/15.9 GiB)"]);
+  const amber = Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, vramLow, []);
+  assert.equal(amber[4].value, "9% Free (1.4/15.9 GiB)");
+  assert.equal(Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, null, [])[4].value, "no reading");
+  assert.equal(Quattro.valueRows(20, { present: true, pct: 85 }, null, fuel, vramFull, [])[2].value, "none configured");
 });

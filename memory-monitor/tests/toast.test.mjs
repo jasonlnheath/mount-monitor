@@ -1,6 +1,7 @@
-// Toast copy is the captain's copy, pinned verbatim. Urgency and timeout are
-// what make a red survive the shell's Do Not Disturb routing, and the click argv
-// is what makes it clickable after a shell restart.
+// Toast copy is the captain's copy, pinned verbatim. Round 7: every toast is
+// temporary (the tinted logo carries the state, so no urgency can force this
+// shell's never-expire critical), the app is Quattro Dash, and the RAM toast
+// names its signal: pressure in PSI, or the swap reserve.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Memory, qtList, same } from "./load.mjs";
@@ -18,18 +19,31 @@ test("the amber copy is the spec's copy for each resource type", () => {
     Memory.amberBody({ type: "vram", pct: 82 }).split("\n"),
     ["Caution: Amber Alert", "Device (VRAM) has reached 82% usage.", "Click to address with agent, otherwise ignore."],
   );
+  // Round 7: RAM no longer toasts on percent-used. Its amber names the signal.
   same(
-    Memory.amberBody({ type: "ram", pct: 82 }).split("\n"),
-    ["Caution: Amber Alert", "Device (System Ram) has reached 82% usage.", "Click to address with agent, otherwise ignore."],
+    Memory.amberBody({ type: "ram", band: 1, pct: 72, signal: "psi" }).split("\n"),
+    ["Caution: Amber Alert", "System RAM pressure has reached 72 PSI.", "Click to address with agent, otherwise ignore."],
+  );
+  same(
+    Memory.amberBody({ type: "ram", band: 1, pct: 18, signal: "swap" }).split("\n"),
+    ["Caution: Amber Alert", "Swap reserve is 18 percent used.", "Click to address with agent, otherwise ignore."],
   );
 });
 
 test("the red copy is the spec's copy, and its type word is capitalised as the spec writes it", () => {
   same(
-    Memory.redBody({ type: "ram", pct: 91 }).split("\n"),
+    Memory.redBody({ type: "ram", band: 2, pct: 91, signal: "psi" }).split("\n"),
     [
       "WARNING: RED ALERT",
-      "Device (System RAM) has reached 91% usage.",
+      "System RAM pressure has reached 91 PSI.",
+      "Click to open an agent to actively monitor/guard against OOM, otherwise ignore.",
+    ],
+  );
+  same(
+    Memory.redBody({ type: "ram", band: 2, pct: 8, signal: "swap" }).split("\n"),
+    [
+      "WARNING: RED ALERT",
+      "Swap reserve is 8 percent used.",
       "Click to open an agent to actively monitor/guard against OOM, otherwise ignore.",
     ],
   );
@@ -51,19 +65,20 @@ test("the red copy is the spec's copy, and its type word is capitalised as the s
   );
 });
 
-test("XX% is the live reading rounded up, never the threshold that fired", () => {
-  // Crossed 90% at a reading of 90.01%: the toast says 91%, not 90%.
-  assert.match(Memory.redBody({ type: "ram", pct: 90.01 }), /has reached 91% usage/);
-  assert.match(Memory.amberBody({ type: "ram", pct: 80.4 }), /has reached 81% usage/);
-  assert.match(Memory.criticalBody({ pct: 97.2, guardState: "armed" }), /has reached 98% usage/);
-  assert.match(Memory.redBody({ type: "ram", pct: 91.0 }), /has reached 91% usage/);
+test("the reading is rounded up, never the threshold that fired", () => {
+  // Crossed the red line at a reading of 90.01: the toast says 91, not 90.
+  assert.match(Memory.redBody({ type: "hd", pct: 90.01 }), /has reached 91% usage/);
+  assert.match(Memory.amberBody({ type: "vram", pct: 80.4 }), /has reached 81% usage/);
+  assert.match(Memory.redBody({ type: "ram", band: 2, pct: 90.01, signal: "psi" }), /reached 91 PSI/);
+  assert.match(Memory.amberBody({ type: "ram", band: 1, pct: 80.4, signal: "swap" }), /is 81 percent used/);
+  assert.match(Memory.criticalBody({ pct: 97.2, signal: "psi", guardState: "armed" }), /reached 98 PSI/);
 });
 
 test("the critical copy names the guard state it is actually in", () => {
-  assert.match(Memory.criticalBody({ pct: 98, guardState: "armed" }), /Agent has been notified and is guarding against OOM\./);
-  assert.match(Memory.criticalBody({ pct: 98, guardState: "off" }), /The standing guard is off\. Click to open Memory Monitor, otherwise ignore\./);
-  assert.match(Memory.criticalBody({ pct: 98, guardState: "refused" }), /The guard could not start\. Click to open Memory Monitor, otherwise ignore\./);
-  assert.match(Memory.criticalBody({ pct: 98, guardState: "died" }), /The guard did not survive\. Click to open Memory Monitor, otherwise ignore\./);
+  assert.match(Memory.criticalBody({ pct: 98, signal: "psi", guardState: "armed" }), /Agent has been notified and is guarding against OOM\./);
+  assert.match(Memory.criticalBody({ pct: 98, signal: "psi", guardState: "off" }), /The standing guard is off\. Click to open Quattro Dash, otherwise ignore\./);
+  assert.match(Memory.criticalBody({ pct: 98, signal: "psi", guardState: "refused" }), /The guard could not start\. Click to open Quattro Dash, otherwise ignore\./);
+  assert.match(Memory.criticalBody({ pct: 98, signal: "psi", guardState: "died" }), /The guard did not survive\. Click to open Quattro Dash, otherwise ignore\./);
   // An unknown state never produces the claim sentence.
   const fallback = Memory.criticalBody({ pct: 98, guardState: "who knows" });
   assert.equal(fallback.includes("has been notified"), false);
@@ -71,34 +86,34 @@ test("the critical copy names the guard state it is actually in", () => {
 
   // An arm already live is not a fresh claim: the sentence is suppressed, and
   // the reading is still reported.
-  const unbacked = Memory.criticalBody({ pct: 96.4, guardState: "unbacked" });
+  const unbacked = Memory.criticalBody({ pct: 96.4, signal: "psi", guardState: "unbacked" });
   assert.equal(unbacked.includes("has been notified"), false, "a critical while an arm is live carries no claim sentence");
   assert.equal(unbacked.includes("could not start"), false, "and no false fallback sentence either");
-  assert.match(unbacked, /Device has reached 97% usage\./);
+  assert.match(unbacked, /System RAM pressure has reached 97 PSI\./);
   assert.equal(unbacked.split("\n").length, 2, "the claim is suppressed, not replaced by new copy");
 });
 
 test("only an armed guard emits the claim", () => {
   for (const state of Memory.criticalGuardStates()) {
-    const body = Memory.criticalBody({ pct: 98, guardState: state });
+    const body = Memory.criticalBody({ pct: 98, signal: "psi", guardState: state });
     const claims = body.includes("has been notified and is guarding");
     assert.equal(claims, state === "armed", state);
   }
 });
 
-test("red and critical are critical urgency; amber is normal", () => {
+test("round 7: every toast rides normal urgency, because this shell's critical never expires", () => {
   assert.equal(Memory.urgencyFor(ramAlert(1, 82)), "normal");
-  assert.equal(Memory.urgencyFor(ramAlert(2, 91)), "critical");
-  assert.equal(Memory.urgencyFor(ramAlert(3, 98)), "critical");
+  assert.equal(Memory.urgencyFor(ramAlert(2, 91)), "normal");
+  assert.equal(Memory.urgencyFor(ramAlert(3, 98)), "normal");
 });
 
-test("a never-expiring alert goes to the notice lane, so it cannot hold the alert queue shut", () => {
+test("an escalated alert still rides the notice lane, but every timeout is finite now", () => {
   assert.equal(Memory.notifyLaneFor(ramAlert(1, 82)), "alert");
   assert.equal(Memory.notifyLaneFor(ramAlert(2, 91)), "notice");
   assert.equal(Memory.notifyLaneFor(ramAlert(3, 98)), "notice");
   assert.equal(Memory.timeoutFor(ramAlert(1, 82)), 20000);
-  assert.equal(Memory.timeoutFor(ramAlert(2, 91)), 0);
-  assert.equal(Memory.timeoutFor(ramAlert(3, 98)), 0);
+  assert.equal(Memory.timeoutFor(ramAlert(2, 91)), 30000);
+  assert.equal(Memory.timeoutFor(ramAlert(3, 98)), 30000);
 });
 
 test("escalation displaces the live notice instead of queueing behind it", () => {
@@ -135,13 +150,13 @@ test("every notice-lane send prints its id, so an escalation can replace the liv
   assert.equal(replace[replace.indexOf("-r") + 1], "47", "the displacing notice carries the live id it replaces");
 });
 
-test("amber is silenced by DND, red is not", () => {
+test("round 7: nothing bypasses DND, and a silenced red is recorded like a silenced amber", () => {
   assert.equal(Memory.deliveryVerdict(ramAlert(1, 82), true), "silenced-dnd");
-  assert.equal(Memory.deliveryVerdict(ramAlert(2, 91), true), "shown");
-  assert.equal(Memory.deliveryVerdict(ramAlert(3, 98), true), "shown");
+  assert.equal(Memory.deliveryVerdict(ramAlert(2, 91), true), "silenced-dnd");
+  assert.equal(Memory.deliveryVerdict(ramAlert(3, 98), true), "silenced-dnd");
   assert.equal(Memory.deliveryVerdict(ramAlert(1, 82), false), "shown");
   assert.equal(Memory.deliveryVerdict(ramAlert(1, 82), null), "unknown", "an unreadable DND setting is not assumed");
-  assert.equal(Memory.bypassesDnd(ramAlert(2, 91)), true);
+  assert.equal(Memory.bypassesDnd(ramAlert(2, 91)), false);
   assert.equal(Memory.bypassesDnd(ramAlert(1, 82)), false);
 });
 
@@ -187,15 +202,15 @@ test("the notify-send argv is typed, carries the app name, and carries the click
   });
   assert.equal(argv[0], "notify-send");
   assert.equal(argv[1], "-a");
-  assert.equal(argv[2], "Memory Monitor");
+  assert.equal(argv[2], "Quattro Dash");
   assert.equal(argv.includes("-e"), true);
-  assert.equal(argv[argv.indexOf("-u") + 1], "critical");
-  assert.equal(argv.includes("-t"), false, "a critical alert never carries a timeout");
-  assert.equal(argv[argv.indexOf("-A") + 1], "default:Open guarding agent");
+  assert.equal(argv[argv.indexOf("-u") + 1], "normal");
+  assert.equal(argv[argv.indexOf("-t") + 1], "30000", "a red toast is temporary now");
+  assert.equal(argv[argv.indexOf("-A") + 1], "default=Open guarding agent");
   const hint = argv[argv.indexOf("-h") + 1];
   assert.match(hint, /^STRING:omarchy-exec-argv:/);
   same(JSON.parse(hint.slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
-  assert.equal(argv[argv.length - 2], "Memory Monitor");
+  assert.equal(argv[argv.length - 2], "Quattro Dash");
   assert.match(argv[argv.length - 1], /^WARNING: RED ALERT/);
 });
 
@@ -203,13 +218,13 @@ test("an amber carries a bounded timeout so it cannot hold the queue", () => {
   const argv = Memory.notifyArgs(ramAlert(1, 82), null, { clickArgv: ["omarchy", "agent", "prompt", "p"] });
   assert.equal(argv[argv.indexOf("-u") + 1], "normal");
   assert.equal(argv[argv.indexOf("-t") + 1], "20000");
-  assert.equal(argv[argv.indexOf("-A") + 1], "default:Address with agent");
+  assert.equal(argv[argv.indexOf("-A") + 1], "default=Address with agent");
 });
 
 test("critical's click opens the detail window, never a second agent on top of the guard", () => {
   same(Memory.ipcOpenDetailArgv(), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
   same(Memory.clickArgvFor(ramAlert(3, 98), null, {}), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
-  assert.equal(Memory.actionFor(ramAlert(3, 98)), "Open Memory Monitor");
+  assert.equal(Memory.actionFor(ramAlert(3, 98)), "Open Quattro Dash");
 });
 
 test("amber and red clicks run the agent prompt as one typed argument", () => {
@@ -224,7 +239,7 @@ test("a configured agentCommand replaces the default and the prompt is still one
   const argv = Memory.clickArgvFor(ramAlert(2, 91), qtList(["my-agent", "--ask"]), { logPath: "/log" });
   same(argv.slice(0, 2), ["my-agent", "--ask"]);
   assert.equal(argv.length, 3);
-  assert.equal(argv[2].includes("Memory Monitor reports"), true);
+  assert.equal(argv[2].includes("Quattro Dash reports"), true);
   assert.equal(Memory.clickArgvFor(ramAlert(2, 91), qtList([]), { logPath: "/log" })[0], "omarchy", "an empty override is not an override");
 });
 
@@ -236,23 +251,23 @@ test("the exec hint sends nothing the notification service's own validator would
 });
 
 test("a replacement notice carries the id of the notice it answers, and the click its copy promises", () => {
-  const args = Memory.notifyReplaceArgs("42", "Memory Monitor", "body", {
+  const args = Memory.notifyReplaceArgs("42", "Quattro Dash", "body", {
     clickArgv: Memory.ipcOpenDetailArgv(),
     action: Memory.actionFor({ kind: "alert", band: 3 }),
   });
-  same(args.slice(0, 7), ["notify-send", "-a", "Memory Monitor", "-e", "-r", "42", "-u"]);
-  assert.equal(args[args.indexOf("-u") + 1], "critical");
-  assert.equal(args[args.indexOf("-A") + 1], "default:Open Memory Monitor");
+  same(args.slice(0, 7), ["notify-send", "-a", "Quattro Dash", "-e", "-r", "42", "-u"]);
+  assert.equal(args[args.indexOf("-u") + 1], "normal");
+  assert.equal(args[args.indexOf("-A") + 1], "default=Open Quattro Dash");
   const hint = args[args.indexOf("-h") + 1];
   assert.match(hint, /^STRING:omarchy-exec-argv:/);
   same(JSON.parse(hint.slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
-  assert.equal(args[args.length - 2], "Memory Monitor");
+  assert.equal(args[args.length - 2], "Quattro Dash");
   assert.equal(args[args.length - 1], "body");
   assert.equal(Memory.notifyReplaceArgs("", "t", "b", {}), null, "no id, no replacement - the caller sends a fresh notice");
 
   const refused = Memory.notifyReplaceArgs("42", "t", "b", { clickArgv: ["-rm", "-rf", "/"], action: "Open" });
   assert.equal(refused.includes("-h"), false, "a program the notification service would refuse is not sent as a hint");
-  assert.equal(refused[refused.indexOf("-A") + 1], "default:Open", "the live action stays");
+  assert.equal(refused[refused.indexOf("-A") + 1], "default=Open", "the live action stays");
 });
 
 test("the printed id is parsed from notify-send's output as it arrives", () => {

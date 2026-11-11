@@ -6,7 +6,7 @@
 // quietly stopped being a monitor of one decision kernel.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Memory, RingKit, repoFile, same } from "./load.mjs";
+import { Memory, Quattro, RingKit, repoFile, same } from "./load.mjs";
 
 const QML = repoFile("memory-monitor/MemoryMonitor.qml");
 const PANEL = repoFile("memory-monitor/MemoryPanel.qml");
@@ -77,7 +77,7 @@ test("the widget builds every notification through Memory.notifyArgs and never w
   assert.equal(plan.replaceable, false);
   assert.equal(plan.args[0], "notify-send");
   assert.equal(plan.args.includes("-u"), true);
-  assert.equal(plan.args.includes("critical"), true, "a dead guard is still a critical toast");
+  assert.equal(plan.args[plan.args.indexOf("-u") + 1], "normal", "round 7 item 12: even the dead-guard toast is temporary");
   const replaceable = Memory.retractClaimFor({ outcome: "died", type: "ram", key: "ram", id: Memory.memId("ram"), pct: 97, claimId: "42" });
   assert.equal(replaceable.replaceable, true);
   assert.equal(replaceable.args[0], "notify-send");
@@ -123,14 +123,14 @@ test("the click path is typed argv, and the critical click opens the detail wind
   assert.equal(amber.length, 4, "the whole prompt is one argument, never a shell string");
   assert.equal(amber[3].includes("\n"), true, "the prompt is a paragraph, and a paragraph in one argv element is why typed argv matters");
   assert.equal(amber[3].includes("&&"), false);
-  assert.equal(amber[3].includes("82%"), true, "the prompt carries the reading, rounded up");
+  assert.equal(amber[3].includes("82 PSI"), true, "the prompt carries the reading, rounded up, in the signal's own unit");
   // The hint the notification service prefers, and the live action it falls back
   // to, are both present on every band alert.
   const argv = Memory.notifyArgs({ kind: "alert", band: 2, type: "ram", key: "ram", id: Memory.memId("ram"), pct: 91.2 }, null);
   const joined = argv.join(" ");
   assert.equal(joined.includes("-h STRING:omarchy-exec-argv:["), true);
-  assert.equal(joined.includes("-A default:"), true);
-  assert.equal(joined.includes("-u critical"), true);
+  assert.equal(joined.includes("-A default="), true, "round 7 item 12: the action label rides an equals, no colon form");
+  assert.equal(joined.includes("-u normal"), true, "round 7 item 12: no toast is critical urgency any more");
 });
 
 test("the widget reads every setting through a normalize* helper, because a Qt list is not a JavaScript Array", () => {
@@ -377,14 +377,21 @@ test("the widget's own copy is only the bar's logo and the tooltip, both of whic
   // QuattroDash is the bar emblem (the approved design): the MIL artwork
   // renders through QuattroSymbol, so the widget's own copy is only the bar
   // tooltip, which memory.js supplies.
-  assert.equal(QML.includes("Memory.barTooltip(") || QML.includes("Memory.tooltipText("), true);
+  assert.equal(QML.includes("Memory.barTooltip("), true);
   const both = QML + "\n" + PANEL;
   assert.equal(both.includes("Memory.unavailableText("), true, "a missing reading is named, not drawn as zero");
   assert.equal(both.includes("Memory.unreachableBandNote("), true, "a stuck band says so instead of latching in silence");
+  assert.equal(PANEL.includes("Memory.ramReleaseStore("), true,
+    "the store a held ram band's release note reads is memory.js's decision, never the panel's");
   assert.equal(both.includes("Memory.alertsYouDidNotSeeText("), true, "a toast DND swallowed is still reported");
   assert.equal(both.includes("Memory.kernelCeilingText("), true, "oomd's ceiling is reported, not replaced");
   assert.equal(both.includes("Memory.swapText("), true);
   assert.equal(both.includes("Memory.psiText("), true);
+  // Ruling 14: the detail window's header is the one sentence the panel owns,
+  // and it names the product - the technical plugin id keeps its
+  // memory-monitor spelling everywhere else.
+  assert.equal(PANEL.includes('"Memory Monitor"'), false);
+  assert.equal(PANEL.includes('"Quattro Dash"'), true);
 });
 
 test("a dash-launched severe dispatch rides the same arm gate the toast path rides", () => {
@@ -396,4 +403,37 @@ test("a dash-launched severe dispatch rides the same arm gate the toast path rid
   assert.match(dispatch, /startArm\(alert, true, diagnosisJsonText\)/,
     "the dispatched agent IS the arm: one flight, one agent, the v1 doctrine");
   assert.match(dispatch, /why: decision\.why/, "the refusal names why so the dash can say so");
+});
+
+test("the dash card no longer draws the SWAP caption; the popup row stays", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  assert.doesNotMatch(dash, /Quattro\.swapLine/, "the card never calls swapLine; the popup row owns swap");
+  const rows = Quattro.valueRows(1, { present: true, pct: 80 }, { swapTotalKb: 8 * 1024 * 1024, swapUsedKb: 0 }, null, null, []);
+  assert.ok(rows.some((r) => r.label === "SWAP"), "the values popup keeps the SWAP row");
+});
+
+test("the dash collapses settings whenever the popup opens or closes", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  assert.match(
+    dash,
+    /onOpenedChanged:[^\n]*settingsOpen = false/,
+    "every open/close edge starts the settings section collapsed",
+  );
+  assert.match(dash, /property bool settingsOpen: false/, "settings never restore expanded state");
+});
+
+test("the state watcher skips our own write, so a reset cannot bounce the popup", () => {
+  const monitor = repoFile("memory-monitor/MemoryMonitor.qml");
+  assert.match(
+    monitor,
+    /onFileChanged:[^\n]*lastStateWriteAt/,
+    "a write this widget just made cannot re-enter through the watcher",
+  );
+  assert.match(monitor, /lastStateWriteAt = /, "writeState stamps its own writes");
+});
+
+test("the gauge slider quantizes drags to its step", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  assert.match(dash, /property int step/, "the slider carries a step");
+  assert.match(dash, /sliderStep\(/, "the slider reads the step from quattro.js");
 });

@@ -35,11 +35,11 @@ import "ringkit.js" as RingKit
 // sitting in a band. `primed` is carried, so a shell restart does not re-toast a
 // band that was already held.
 //
-// Amber rides normal urgency on the watchdog-released lane and is silenced by
-// Do Not Disturb — but recorded, in the log and in the panel's "Alerts you did
-// not see". Red and critical ride critical urgency, which is the only thing the
-// shell's shouldBypassDnd lets through, and therefore timeout 0, their own
-// never-expiring process lane, and a persisted exec hint that keeps a
+// Round 7: every toast rides normal urgency with a finite timeout — the tinted
+// logo carries the severity — so a toast of any band can be silenced by Do Not
+// Disturb, and is recorded when it is, in the log and in the panel's "Alerts
+// you did not see". Red and critical keep their own process lane,
+// watchdog-released like the amber one, and a persisted exec hint keeps a
 // restart-surviving toast clickable.
 //
 // Amber and red clicks send an agent prompt. Critical clicks open the detail
@@ -105,8 +105,9 @@ BarWidget {
   property var dnd: null
 
   // ---- Queues. `alertQueue` is the watchdog-released amber lane;
-  //      `noticeQueue` is the never-expiring red/critical lane. Band escalation
-  //      preempts an unanswered lower-band toast rather than queueing behind it.
+  //      `noticeQueue` is the red/critical/question lane, watchdog-released
+  //      too (round 7: every toast is temporary). Band escalation preempts an
+  //      unanswered lower-band toast rather than queueing behind it.
   property var alertQueue: []
   property var noticeQueue: []
   property int alertQueueMax: 8
@@ -331,6 +332,9 @@ BarWidget {
       ram.oomdWatchedCgroup = oomd ? oomd.oomdWatchedCgroup : "";
       ram.band = bandOf("ram");
       ram.latched = latchedOf("ram");
+      // Which signal holds the band, so the panel's release note speaks the
+      // right unit (PSI for pressure, percent used for the reserve).
+      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt")).signal;
     }
     ramReading = ram;
 
@@ -421,6 +425,7 @@ BarWidget {
       var ram = JSON.parse(JSON.stringify(ramReading));
       ram.band = bandOf("ram");
       ram.latched = latchedOf("ram");
+      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt")).signal;
       ramReading = ram;
     }
     if (vramReading !== null) {
@@ -441,7 +446,15 @@ BarWidget {
 
   function applyBand(key, type, pct, ceiling, latchedTarget, entry): void {
     var previous = bandOf(key);
-    var result = Memory.resolveBand(pct, ceiling, previous, type);
+    var result;
+    if (type === "ram") {
+      // Round 7 item 8: the ram store watches PRESSURE (PSI) and the swap
+      // reserve. The held band is the more severe of the two signals' bands,
+      // each hysteresized against the same previous band in its own unit.
+      result = Memory.resolveRamBand(ramReading, ceiling, previous, gaugePairFor("batt"));
+    } else {
+      result = Memory.resolveBand(pct, ceiling, previous, type);
+    }
     latchedTarget[key] = result.latched;
     var held = result.band;
     var next = JSON.parse(JSON.stringify(bands));
@@ -468,7 +481,14 @@ BarWidget {
     if (isWriter && (held !== previous || firstSample)) saveState();
     if (!fire) return;
     if (entry) entry.band = held;
-    queueAlert(entry, held, type, key, result.latched);
+    // The toast says the signal's own number: PSI for a pressure band, the
+    // used percent for a swap band. The MemAvailable percent is data for the
+    // agent's block, never the toast's headline number.
+    var signalPct = entry === null || entry === undefined ? undefined : entry.pct;
+    if (type === "ram" && ramReading !== null) {
+      signalPct = result.signal === "swap" ? ramReading.swapPct : ramReading.psiSomeAvg10;
+    }
+    queueAlert(entry, held, type, key, result.latched, result.signal, signalPct);
   }
 
   // ---------------------------------------------------------------------------
@@ -476,7 +496,7 @@ BarWidget {
   // daemon drops a silenced amber without keeping a record of dropping it.
   // ---------------------------------------------------------------------------
 
-  function alertEvent(entry, band, type, key, latched): var {
+  function alertEvent(entry, band, type, key, latched, signal, signalPct): var {
     var base = entry === null || entry === undefined ? {} : entry;
     return {
       kind: "band",
@@ -484,8 +504,13 @@ BarWidget {
       id: base.id === undefined ? Memory.memId(key) : base.id,
       type: type,
       band: band,
-      pct: base.pct,
+      // Round 7 item 8: a ram alert's pct is the signal's own reading, so the
+      // toast and the agent prompt never print MemAvailable percent as PSI.
+      pct: signalPct === undefined ? base.pct : signalPct,
       latched: latched,
+      // Round 7 item 8: which ram signal produced the band, so the toast can
+      // say pressure or swap. Absent for hd and vram.
+      signal: signal === undefined ? undefined : signal,
       target: base.target,
       device: base.device,
       fstype: base.fstype,
@@ -500,10 +525,10 @@ BarWidget {
     };
   }
 
-  function queueAlert(entry, band, type, key, latched): void {
+  function queueAlert(entry, band, type, key, latched, signal, signalPct): void {
     if (!isWriter) return;
     if (band === 0) return;
-    var alert = alertEvent(entry, band, type, key, latched);
+    var alert = alertEvent(entry, band, type, key, latched, signal, signalPct);
 
     // Mount Monitor already toasts the drives it watches, with its own words,
     // its own thresholds and its own click target. One toast per crossing.
@@ -554,6 +579,7 @@ BarWidget {
     var alert = alertQueue[0];
     activeAlert = alert;
     notifyProcArgs = Memory.notifyArgs(alert, agentCommandArgv(), {
+      iconDir: root.iconDir,
       clickArgv: Memory.clickArgvFor(alert, agentCommandArgv(), {
         inline: Memory.normalizeBool(setting("agentInline", false), false),
         reading: readingFor(alert.type, alert),
@@ -579,9 +605,9 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // The never-expiring lane: red and critical. Its own process, because
-  // notify-send blocks while its action is live and a critical toast has no
-  // timeout. No timer ever releases it.
+  // The notice lane: red, critical and the questions. Its own process, because
+  // notify-send blocks while its action is live. Round 7 released it too: a
+  // stuck question cannot wedge the lane forever.
   // ---------------------------------------------------------------------------
 
   function fireNextNotice(): void {
@@ -605,6 +631,7 @@ BarWidget {
       resting: alert.resting === undefined ? null : alert.resting,
     });
     var args = Memory.notifyArgs(alert, agentCommandArgv(), {
+      iconDir: root.iconDir,
       clickArgv: clickArgv,
       printId: true,
       replaceId: alert.replaceId === undefined ? "" : alert.replaceId,
@@ -613,9 +640,17 @@ BarWidget {
     noticePrintedId = "";
     noticeProc.command = args;
     noticeProc.running = true;
+    noticeWatchdog.restart();
     // A question is not an emergency: the ceiling question and the guard ask ride
-    // the critical lane so they stay clickable, and neither one arms an agent.
+    // the notice lane so they stay on screen, and neither one arms an agent.
     if (Memory.isArmNotice(alert) && guardState === "armed") startArm(alert);
+  }
+
+  function releaseActiveNotice(reason): void {
+    if (!noticeProc.running) return;
+    console.warn("memory-monitor: released a notice:", reason);
+    noticeWatchdogFired = true;
+    noticeProc.running = false;
   }
 
   // A severity rise over the notice on the screen displaces it: the incoming
@@ -681,6 +716,7 @@ BarWidget {
         eventKey: eventKey,
         type: alert.type,
         band: alert.band,
+        signal: alert.signal,
         outcome: decision.reason === "no headroom for the guard" ? "refused" : "skipped",
         reasons: budget.reasons.concat([decision.reason]),
         startedAt: new Date().toISOString(),
@@ -704,6 +740,9 @@ BarWidget {
       key: alert.key,
       id: alert.id,
       pct: alert.pct,
+      // The signal rides the record so a restart's retraction toast names the
+      // same signal and unit the original toast did.
+      signal: alert.signal,
       target: alert.target,
       outcome: "started",
       startedAt: new Date().toISOString(),
@@ -752,7 +791,7 @@ BarWidget {
 
   // A sentence claiming an agent is guarding may not outlive the arm it names.
   function retractClaim(record): void {
-    var plan = Memory.retractClaimFor(record);
+    var plan = Memory.retractClaimFor(record, { iconDir: root.iconDir });
     if (plan === null || plan.args === null || plan.args === undefined) return;
     if (!plan.replaceable) console.warn("memory-monitor:", Memory.degradationText("claim-unretractable"));
     // Both shapes come from memory.js: a replace by captured id, or a fresh
@@ -836,6 +875,7 @@ BarWidget {
     var payload = JSON.stringify(next);
     if (payload === lastStateWrite) return;
     lastStateWrite = payload;
+    lastStateWriteAt = new Date().getTime();
     stateWritten = true;
     stateFile.setText(payload);
   }
@@ -848,7 +888,7 @@ BarWidget {
 
   // ---------------------------------------------------------------------------
   // Onboarding: the ceiling question and the insist-guard ask. Both are notices
-  // that must be answered, so both ride the never-expiring lane, and both carry
+  // that must be answered, so both ride the notice lane, and both carry
   // a stable identity so a shell restart replaces them instead of stacking a
   // second copy of a restart-surviving notice.
   // ---------------------------------------------------------------------------
@@ -876,7 +916,7 @@ BarWidget {
       band: 3,
       pct: ramReading === null ? null : ramReading.pct,
       guardState: "off",
-      title: "Memory Monitor - your ceilings",
+      title: "Quattro Dash - your ceilings",
       resting: resting,
       body: Memory.ceilingsQuestion("ram", ramReading, oomd, state.thresholds, resting)
         + "\n\n" + Memory.ceilingsQuestion("vram", vramReading, oomd, state.thresholds, resting)
@@ -1124,6 +1164,18 @@ BarWidget {
   property var activeAlert: null
   property var activeNotice: null
   property bool noticePreempting: false
+  // Round 7 item 12: every toast is temporary, so the notice lane can no longer
+  // promise to hold a popup forever - it carries the same 120s watchdog release
+  // the alert lane has. A question the watchdog releases was interrupted, not
+  // answered: it stays unrecorded and is asked again when the lane is free.
+  property bool noticeWatchdogFired: false
+  // The toast logo lives beside this file; Qt.resolvedUrl anchors it to the
+  // plugin directory wherever the shell installed it.
+  readonly property string iconDir: {
+    var url = Qt.resolvedUrl("icons").toString();
+    if (url.indexOf("file://") === 0) url = url.substring(7);
+    return decodeURIComponent(url);
+  }
   property var notifyProcArgs: []
   property var noticeProcArgs: []
   property string noticePrintedId: ""
@@ -1135,6 +1187,13 @@ BarWidget {
   property bool reconcileDone: false
   property bool stateWritten: false
   property string lastStateWrite: ""
+  // Round 7.5 item 20: when this widget last wrote the state file, in epoch
+  // ms. The FileView watcher fires on our own atomic writes too; a reload
+  // within 500 ms of our own write is our own echo, and reloading it rebinds
+  // every dash binding in one frame - the height flicker that could bounce
+  // the popup shut mid-reset. Our memory is already the truth, so the echo is
+  // skipped.
+  property real lastStateWriteAt: 0
   property string vramVerdict: ""
 
   // ---------------------------------------------------------------------------
@@ -1293,8 +1352,10 @@ BarWidget {
   property string oomdActiveText: ""
 
   // ---------------------------------------------------------------------------
-  // Notification lanes. `notifyProc` is the watchdog-released amber lane;
-  // `noticeProc` is the never-expiring red/critical lane that no timer releases.
+  // Notification lanes. Both lanes build their argv in memory.js and both are
+  // watchdog-released now that every toast is temporary: `notifyProc` carries
+  // the band alerts, `noticeProc` the notices and questions. A notice the
+  // watchdog releases stays unrecorded, so the question is asked again.
   // ---------------------------------------------------------------------------
 
   Process {
@@ -1312,6 +1373,13 @@ BarWidget {
       root.alertQueue = root.alertQueue.slice(1);
       root.fireNextAlert();
     }
+  }
+
+  Timer {
+    id: noticeWatchdog
+    interval: 120000
+    repeat: false
+    onTriggered: root.releaseActiveNotice("watchdog")
   }
 
   Process {
@@ -1346,10 +1414,13 @@ BarWidget {
       onStreamFinished: if (this.text.trim() !== "") console.warn("memory-monitor: notify-send:", this.text.trim())
     }
     onExited: function(exitCode, exitStatus) {
+      noticeWatchdog.stop();
       var notice = root.activeNotice;
+      var interrupted = root.noticeWatchdogFired;
       root.activeNotice = null;
       root.noticePreempting = false;
-      if (notice !== null) {
+      root.noticeWatchdogFired = false;
+      if (notice !== null && !interrupted) {
         root.recordNoticeDelivered(notice, exitCode);
         var at = root.noticeQueue.indexOf(notice);
         if (at >= 0) root.noticeQueue = root.noticeQueue.slice(at + 1);
@@ -1430,7 +1501,10 @@ BarWidget {
     atomicWrites: true
     printErrors: false
     onLoaded: root.loadState(text())
-    onFileChanged: reload()
+    // Round 7.5 item 20: a write this widget just made is not a foreign
+    // change. Skip the echo reload so a settings write (a slider drag, a
+    // reset) can never bounce the popup shut under the captain's hand.
+    onFileChanged: if (new Date().getTime() - lastStateWriteAt > 500) reload()
     onLoadFailed: root.loadState("")
   }
 
@@ -1486,8 +1560,8 @@ BarWidget {
 
   // ---------------------------------------------------------------------------
   // Timers. The poll timers are per resource and reschedule themselves from what
-  // that resource was last seen doing. The watchdogs release a wedged child, and
-  // no timer ever releases the never-expiring notice lane.
+  // that resource was last seen doing. The watchdogs release a wedged child on
+  // either lane, each after 120 s (round 7 gave the notice lane one too).
   // ---------------------------------------------------------------------------
 
   Timer {

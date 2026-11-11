@@ -95,7 +95,10 @@ test("an unreachable descent is unreachable in both engines", () => {
   const kit = RingKit.descentReachable(3, MM_THRESHOLDS, 4, 1.5);
   const mine = Memory.descentReachable(3, MM_THRESHOLDS, "ram", 1_000_000, 65_588_588);
   assert.equal(kit, false);
-  assert.equal(mine.reachable, false);
+  // Round 7: RAM is measured by PRESSURE (PSI) now, and a PSI band always
+  // releases - pressure falls when the stall ends, so the ram engine diverges
+  // from RingKit's percent-headroom answer on purpose (pinned in round7.test).
+  assert.equal(mine.reachable, true);
   assert.equal(RingKit.descentReachable(3, MM_THRESHOLDS, 4, 10), true);
   assert.equal(Memory.descentReachable(3, MM_THRESHOLDS, "ram", 10_000_000, 65_588_588).reachable, true);
   // A band with no line has nothing to reach.

@@ -1,10 +1,12 @@
-// The RAM band is an availability band, not a percent-used band, and swap is
-// not a fourth threshold. Fixtures are this rig's own /proc and tool output.
+// The RAM reading is an availability reading, and since round 7 the RAM BAND
+// is pressure (PSI) plus the swap reserve - never percent-used. Swap is
+// escalated by oomd's limit, not a fourth threshold. Fixtures are this rig's
+// own /proc and tool output.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Memory, fixture, same } from "./load.mjs";
 
-test("MemAvailable drives the band, not MemFree and not percent-used", () => {
+test("the reading is MemAvailable-based, not MemFree and not a flattering percent", () => {
   const info = Memory.parseMeminfo(fixture("meminfo.txt"));
   assert.equal(info.MemTotal, 65588588);
   const pct = Memory.ramUsedPct(info);
@@ -12,7 +14,9 @@ test("MemAvailable drives the band, not MemFree and not percent-used", () => {
   // On this rig MemAvailable is BELOW MemFree plus cache: a MemFree-based
   // monitor would report a machine at 97.96% as if it had room.
   assert.ok(pct > 90, "the honest reading is the alarming one");
-  assert.ok(Memory.bandForPct(pct, { amber: 80, red: 90, critical: null }) === 2);
+  // Round 7: the honest percent stays a READING. It no longer resolves the
+  // band - pressure (psiBandFor) and the swap reserve do.
+  assert.equal(typeof Memory.psiBandFor, "function");
 });
 
 test("a missing MemAvailable is unknown, never 0%", () => {
@@ -33,7 +37,7 @@ test("the rig's meminfo parses to a full reading", () => {
   assert.equal(Memory.isMemId(reading.id), true);
 });
 
-test("PSI is parsed as key=value and is a gate, not a band", () => {
+test("PSI is parsed as key=value; the stall gate stays, and psiBandFor is the band", () => {
   const psi = Memory.parsePsi(fixture("psi-memory.txt"));
   assert.equal(psi.some_avg10, 0.18);
   assert.equal(psi.full_avg300, 0.83);
@@ -41,6 +45,10 @@ test("PSI is parsed as key=value and is a gate, not a band", () => {
 
   const stall = Memory.parsePsi(fixture("psi-stall.txt"));
   assert.equal(Memory.psiStalling(stall, Memory.PSI_STALL_FLOOR), true);
+  // Round 7: PSI is the RAM band's metric now, judged against the same
+  // threshold store the psi gauge pair edits.
+  assert.equal(Memory.psiBandFor(stall.some_avg10, { amber: 70, red: 90, critical: null }), 0,
+    "stalling at the 1.0 floor is below the amber line: the gate and the band are different lines");
 });
 
 test("no PSI interface is not 'no pressure'", () => {
