@@ -1065,7 +1065,7 @@ test("round 7 stat rows: the captain's numbers, in honest units, swap line inclu
   const rows = Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, vramFull, []);
   same(rows.map(r => r.label), ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
   // Round 7.5 item 17: the standard free format on every resource row.
-  same(rows.map(r => r.value), ["20.0 PSI", "85 percent", "85% Free (1.2/8 GiB)", "78% Free (437/560 GB)", "45% Free (7.1/15.9 GiB)"]);
+  same(rows.map(r => r.value), ["20.0 PSI", "85 percent", "85% Free (6.8/8 GiB)", "78% Free (437/560 GB)", "45% Free (7.1/15.9 GiB)"]);
   const amber = Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, vramLow, []);
   assert.equal(amber[4].value, "9% Free (1.4/15.9 GiB)");
   assert.equal(Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, null, [])[4].value, "no reading");

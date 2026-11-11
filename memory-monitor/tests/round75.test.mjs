@@ -10,15 +10,16 @@
 //   21. the VRAM gauge sliders move in 50 MiB steps.
 //   22. the bar tooltip's dot column pads by character count - the shell
 //       renders it in a monospace font, so every dot sits in the same column.
-// Items 19 (settings start collapsed) and 20 (reset never closes the popup)
-// are QML wiring, pinned as delegation guards in the last block.
+// Items 16 (swap off the bar card), 19 (settings start collapsed) and 20
+// (reset never closes the popup) have their QML wiring pinned as delegation
+// guards in delegation.test.mjs.
 // Red first - every assertion here failed against the round-7 code.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Memory, Quattro, repoFile } from "./load.mjs";
+import { Memory, Quattro } from "./load.mjs";
 
 const PLUGIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PSI_T = { amber: 70, red: 90, critical: null };
@@ -75,11 +76,14 @@ test("every ram toast and prompt names its signal's unit, never the MemAvailable
   assert.doesNotMatch(prompt, /MemAvailable/, "the prompt never leads with the RAM percent");
 });
 
-test("resolveRamBand never reads the MemAvailable percent", () => {
-  const src = repoFile("memory-monitor/memory.js");
-  const body = src.slice(src.indexOf("function resolveRamBand"));
-  const fn = body.slice(0, body.indexOf("\n}"));
-  assert.doesNotMatch(fn, /\br\.pct\b/, "the band law consumes psi and swapPct only");
+test("a reading with only the MemAvailable percent gives no band and never fires", () => {
+  const result = Memory.resolveRamBand({ pct: 99 }, PSI_T, 0, BATT);
+  assert.equal(result.band, 0, "with no psi and no swap reading there is no band to draw");
+  assert.equal(
+    Memory.shouldFireAlert({ band: 0, previousBand: 0 }),
+    false,
+    "no fire at band 0",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -93,7 +97,7 @@ test("freeLine is the one standard free format", () => {
 
 test("swapLine reads the standard free format", () => {
   const swap = { swapTotalKb: 8 * 1024 * 1024, swapUsedKb: Math.round(1.6 * 1024 * 1024) };
-  assert.equal(Quattro.swapLine(swap), "80% Free (1.6/8 GiB)");
+  assert.equal(Quattro.swapLine(swap), "80% Free (6.4/8 GiB)");
   assert.equal(Quattro.swapLine({ swapTotalKb: 0, swapUsedKb: 0 }), "none configured");
   assert.equal(Quattro.swapLine(null), "none configured");
 });
@@ -108,7 +112,7 @@ test("the value rows read the standard free format for swap, disk and VRAM", () 
   const vram = { vramFreeMib: 3649, vramTotalMib: 16303 };
   const rows = Quattro.valueRows(4.2, { present: false, pct: 0 }, swap, rootDrive, vram, []);
   const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]));
-  assert.match(byLabel["SWAP"], /^\d+% Free \([\d.]+\/[\d.]+ GiB\)$/, "swap row in the standard format");
+  assert.equal(byLabel["SWAP"], "76% Free (6.1/8 GiB)", "the swap row names the free amount, 1.9 of 8 GiB used");
   assert.match(byLabel["ROOT DRIVE"], /^\d+% Free \([\d.]+\/[\d.]+ GB\)$/, "disk row in the standard format");
   assert.match(byLabel["VRAM"], /^\d+% Free \([\d.]+\/[\d.]+ GiB\)$/, "VRAM row in the standard format");
 });
@@ -180,46 +184,3 @@ test("barTooltip aligns the dot column in character space and drops the width es
   assert.equal(typeof Memory.padToWidth, "undefined", "the width pad is gone");
 });
 
-// ---------------------------------------------------------------------------
-// 16. The SWAP line moves off the bar card (above the engine codes) into the
-// values popup it already rides.
-// ---------------------------------------------------------------------------
-
-test("the dash card no longer draws the SWAP caption; the popup row stays", () => {
-  const dash = repoFile("memory-monitor/QuattroDash.qml");
-  assert.doesNotMatch(dash, /Quattro\.swapLine/, "the card never calls swapLine; the popup row owns swap");
-  const rows = Quattro.valueRows(1, { present: true, pct: 80 }, { swapTotalKb: 8 * 1024 * 1024, swapUsedKb: 0 }, null, null, []);
-  assert.ok(rows.some((r) => r.label === "SWAP"), "the values popup keeps the SWAP row");
-});
-
-// ---------------------------------------------------------------------------
-// 19/20/21 QML wiring, pinned as delegation guards: settings always start
-// collapsed, the state watcher ignores our own write so a reset cannot bounce
-// the popup shut, and the gauge slider carries the quantized step.
-// ---------------------------------------------------------------------------
-
-test("the dash collapses settings whenever the popup opens or closes", () => {
-  const dash = repoFile("memory-monitor/QuattroDash.qml");
-  assert.match(
-    dash,
-    /onOpenedChanged:[^\n]*settingsOpen = false/,
-    "every open/close edge starts the settings section collapsed",
-  );
-  assert.match(dash, /property bool settingsOpen: false/, "settings never restore expanded state");
-});
-
-test("the state watcher skips our own write, so a reset cannot bounce the popup", () => {
-  const monitor = repoFile("memory-monitor/MemoryMonitor.qml");
-  assert.match(
-    monitor,
-    /onFileChanged:[^\n]*lastStateWriteAt/,
-    "a write this widget just made cannot re-enter through the watcher",
-  );
-  assert.match(monitor, /lastStateWriteAt = /, "writeState stamps its own writes");
-});
-
-test("the gauge slider quantizes drags to its step", () => {
-  const dash = repoFile("memory-monitor/QuattroDash.qml");
-  assert.match(dash, /property int step/, "the slider carries a step");
-  assert.match(dash, /sliderStep\(/, "the slider reads the step from quattro.js");
-});

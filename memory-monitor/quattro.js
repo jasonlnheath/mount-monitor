@@ -805,7 +805,7 @@ function gibTrim(mib) {
 }
 
 // Round 7.5 item 17: swap's stat line is the one standard free format -
-// "80% Free (1.9/8 GiB)" - and a machine with no swap says so. It never draws
+// "80% Free (6.4/8 GiB)" - and a machine with no swap says so. It never draws
 // a healthy zero.
 function swapLine(swap) {
   const s = swap || {};
@@ -813,7 +813,7 @@ function swapLine(swap) {
   const usedKb = asNumber(s.swapUsedKb);
   if (totalKb === null || totalKb <= 0 || usedKb === null) return "none configured";
   const usedPct = (usedKb / totalKb) * 100;
-  const line = freeLine(100 - usedPct, gibTrim(usedKb / 1024), gibTrim(totalKb / 1024), "GiB");
+  const line = freeLine(100 - usedPct, gibTrim((totalKb - usedKb) / 1024), gibTrim(totalKb / 1024), "GiB");
   return line === null ? "none configured" : line;
 }
 

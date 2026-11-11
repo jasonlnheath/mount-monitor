@@ -374,7 +374,7 @@ test("the code row's hover is one line too", () => {
 
 test("the values popup carries the SWAP row in the standard free format", () => {
   const swap = { swapTotalKb: 8 * 1048576, swapUsedKb: Math.round(1.2 * 1048576) };
-  assert.equal(Quattro.swapLine(swap), "85% Free (1.2/8 GiB)");
+  assert.equal(Quattro.swapLine(swap), "85% Free (6.8/8 GiB)");
   assert.equal(Quattro.swapLine({ swapTotalKb: 0, swapUsedKb: 0 }), "none configured");
   assert.equal(Quattro.swapLine(null), "none configured");
   const rows = Quattro.valueRows(20, { present: true, pct: 85 }, swap,
@@ -382,7 +382,7 @@ test("the values popup carries the SWAP row in the standard free format", () => 
     { vramUsedMib: 9000, vramFreeMib: 7303, vramTotalMib: 16303 }, []);
   const labels = rows.map(r => r.label);
   same2(labels, ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
-  assert.equal(rows[2].value, "85% Free (1.2/8 GiB)");
+  assert.equal(rows[2].value, "85% Free (6.8/8 GiB)");
   assert.match(rows[3].value, /^78% Free \([\d.]+\/[\d.]+ GB\)$/);
   assert.match(rows[4].value, /^45% Free \([\d.]+\/[\d.]+ GiB\)$/);
 });

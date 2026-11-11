@@ -2370,7 +2370,7 @@ function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
   const kind = kindLabel(type);
   // Round 7: the ram store is PSI now, so its question reads in PSI. Every
   // other type keeps its percent wording.
-  const unit = type === "ram" ? " PSI" : "%";
+  const unit = restingUnit(type);
   const lines = [];
   lines.push("Quattro Dash - " + kind + " ceilings");
   lines.push("Measured now: " + restingText(type, reading));

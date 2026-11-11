@@ -6,7 +6,7 @@
 // quietly stopped being a monitor of one decision kernel.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Memory, RingKit, repoFile, same } from "./load.mjs";
+import { Memory, Quattro, RingKit, repoFile, same } from "./load.mjs";
 
 const QML = repoFile("memory-monitor/MemoryMonitor.qml");
 const PANEL = repoFile("memory-monitor/MemoryPanel.qml");
@@ -403,4 +403,37 @@ test("a dash-launched severe dispatch rides the same arm gate the toast path rid
   assert.match(dispatch, /startArm\(alert, true, diagnosisJsonText\)/,
     "the dispatched agent IS the arm: one flight, one agent, the v1 doctrine");
   assert.match(dispatch, /why: decision\.why/, "the refusal names why so the dash can say so");
+});
+
+test("the dash card no longer draws the SWAP caption; the popup row stays", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  assert.doesNotMatch(dash, /Quattro\.swapLine/, "the card never calls swapLine; the popup row owns swap");
+  const rows = Quattro.valueRows(1, { present: true, pct: 80 }, { swapTotalKb: 8 * 1024 * 1024, swapUsedKb: 0 }, null, null, []);
+  assert.ok(rows.some((r) => r.label === "SWAP"), "the values popup keeps the SWAP row");
+});
+
+test("the dash collapses settings whenever the popup opens or closes", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  assert.match(
+    dash,
+    /onOpenedChanged:[^\n]*settingsOpen = false/,
+    "every open/close edge starts the settings section collapsed",
+  );
+  assert.match(dash, /property bool settingsOpen: false/, "settings never restore expanded state");
+});
+
+test("the state watcher skips our own write, so a reset cannot bounce the popup", () => {
+  const monitor = repoFile("memory-monitor/MemoryMonitor.qml");
+  assert.match(
+    monitor,
+    /onFileChanged:[^\n]*lastStateWriteAt/,
+    "a write this widget just made cannot re-enter through the watcher",
+  );
+  assert.match(monitor, /lastStateWriteAt = /, "writeState stamps its own writes");
+});
+
+test("the gauge slider quantizes drags to its step", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  assert.match(dash, /property int step/, "the slider carries a step");
+  assert.match(dash, /sliderStep\(/, "the slider reads the step from quattro.js");
 });

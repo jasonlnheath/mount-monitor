@@ -193,7 +193,7 @@ refused, nothing starts and the red "not sent." toast says why: the guard is
 off, an agent is already on it, no memory headroom, or another screen owns
 the guard. Swap's numbers live in the values
 popup (the SWAP row), not on the bar card, and swap, VRAM and disk free-ness
-all read one standard format: "80% Free (1.2/8 GiB)".
+all read one standard format: "80% Free (6.4/8 GiB)".
 
 The bottom of the dash carries the gauge settings row, collapsed until you
 open it (and always collapsed when the popup opens or closes: the section
