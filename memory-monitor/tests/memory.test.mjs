@@ -185,23 +185,17 @@ test("an ascent is immediate; only a descent is held", () => {
   assert.equal(up.changed, true);
 });
 
-test("a band that cannot release at its margin says so in MemAvailable terms", () => {
+test("a band states its release point in its own unit, and a PSI band always releases", () => {
+  // Round 7: the ram band is pressure (PSI), so the MemAvailable gate is gone:
+  // pressure falls on its own, and the release line reads in PSI.
   const t = { amber: 80, red: 90, critical: 98 };
-  // 62.5 GiB total; band 2 releases below 86%, which needs 8.75 GiB free.
-  const reachable = Memory.descentReachable(2, t, "ram", 10_000_000, 65_588_588);
+  const reachable = Memory.descentReachable(2, t, "ram", 4_482_240, 65_588_588);
   assert.equal(reachable.reachable, true);
   assert.equal(reachable.releasePct, 86, "the release point is the ceiling minus the hysteresis");
-  const unreachable = Memory.descentReachable(2, t, "ram", 4_482_240, 65_588_588);
-  assert.equal(unreachable.reachable, false);
-
   const note = Memory.unreachableBandNote(2, t, "ram", 4_482_240, 65_588_588);
-  assert.match(note, /this band cannot clear at its current margin/);
-  assert.match(note, /releases only below 86%/);
-  assert.match(note, /GiB/, "the reason is absolute, because a percent hides how far it is");
-  assert.match(Memory.unreachableBandNote(2, t, "ram", 10_000_000, 65_588_588), /releases below 86%/);
-});
+  assert.match(note, /releases below 86 PSI/);
+  assert.equal(note.includes("GiB"), false);
 
-test("an HD band is always reachable - free space is reclaimable", () => {
   const hd = Memory.descentReachable(2, { amber: 80, red: 90, critical: 98 }, "hd");
   assert.equal(hd.reachable, true);
   assert.equal(hd.needKb, null, "no absolute need is invented for a drive");
@@ -276,32 +270,28 @@ test("bandDot: white none, orange amber, red red and critical", () => {
 
 test("the bar popup is a name column and a color-dot column under a centered title", () => {
   // Round 2, the captain's edits on the preview board: the real name up top,
-  // no column headers, no Free column, status = color dot only, and the RAM
-  // / VRAM / Drive labels line up. The bar's tooltip is one centered Text
-  // sized to its widest line, so every row still spans the same total width
-  // and the two columns hold; the title line stays short and centers.
+  // no column headers, no Free column, status = color dot only. Round 7 item 10:
+  // the rows pad by ESTIMATED GLYPH WIDTH (a proportional font makes equal
+  // character counts unequal widths, which is exactly the ragged dot column the
+  // captain screenshotted), so every row's estimated width matches and the
+  // dots sit on one vertical line.
   const tip = Memory.barTooltip([
     { type: "ram", band: 0, pct: 42 },
     { type: "vram", band: 1, pct: 63 },
     { type: "hd", band: 2, pct: 97, latched: true },
   ]);
-  assert.deepEqual(tip.split("\n"), [
-    "Quattro Dash",
-    "RAM    \u26AA ",
-    "VRAM   \uD83D\uDFE0",
-    "Drive  \uD83D\uDD34",
-  ]);
-  // Every dot starts on the same column: two spaces past the longest name.
-  for (const line of tip.split("\n").slice(1)) {
-    assert.equal(/\S/.test(line.slice(0, 7)), true, "the name occupies the left column");
-    assert.equal(/\S/.test(line.slice(7)), true, "the dot occupies the right column");
-  }
-  // The shell centers each line inside the widest one, so equal total widths
-  // are what keep the two columns aligned.
-  const widths = tip.split("\n").slice(1).map((line) => line.length);
+  const lines = tip.split("\n");
+  assert.equal(lines[0], "Quattro Dash");
+  const widths = lines.slice(1).map((line) => Memory.textWidthUnits(line));
   for (const w of widths) {
-    assert.equal(w, widths[0], "every row spans the same total width");
+    assert.equal(w, widths[0], "every row's estimated width matches, so the dot column lines up");
   }
+  const names = lines.slice(1).map((line) => line.trim().split(/\s\s/)[0].trim());
+  assert.match(names[0], /^RAM/);
+  assert.match(names[1], /^VRAM/);
+  assert.match(names[2], /^Drive/);
+  // Width, not character count, is the measure: Drive is wider than RAM.
+  assert.ok(Memory.textWidthUnits("Drive") > Memory.textWidthUnits("RAM"));
 });
 
 test("a drive that is away keeps its row, with the white dot in the status column", () => {
@@ -309,11 +299,14 @@ test("a drive that is away keeps its row, with the white dot in the status colum
     { type: "ram", band: 0, pct: 42 },
     { type: "hd", absent: true, band: 0 },
   ]);
-  assert.deepEqual(tip.split("\n"), [
-    "Quattro Dash",
-    "RAM    \u26AA",
-    "Drive  \u26AA",
-  ]);
+  const lines = tip.split("\n");
+  assert.equal(lines[0], "Quattro Dash");
+  assert.match(lines[1], /^RAM/);
+  assert.match(lines[2], /^Drive/);
+  assert.ok(lines[1].includes("\u26AA"), "the white dot rides the RAM row");
+  assert.ok(lines[2].includes("\u26AA"), "the away drive keeps its row and draws the white dot");
+  const widths = lines.slice(1).map((line) => Memory.textWidthUnits(line));
+  assert.equal(widths[0], widths[1]);
 });
 
 test("an empty watch list is the title alone", () => {

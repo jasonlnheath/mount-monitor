@@ -18,7 +18,7 @@ test("the guard is on unless the user says otherwise - the ask is an insist, not
 });
 
 test("the ask is the captain's copy", () => {
-  assert.equal(Memory.guardAskTitle(), "Memory Monitor - the guard");
+  assert.equal(Memory.guardAskTitle(), "Quattro Dash - the guard");
   const body = Memory.guardAskBody({ guard: null });
   assert.match(body, /The guard is the agent that steps in when a critical line is crossed\./);
   assert.match(body, /It does guard: it runs when your critical threshold is reached\./);
@@ -92,7 +92,7 @@ test("a dead guard retracts its claim by the captured id", () => {
   const died = Memory.retractClaimFor({ outcome: "died", claimId: "99", pct: 98 });
   assert.equal(died.replaceable, true);
   assert.equal(died.args[died.args.indexOf("-r") + 1], "99");
-  assert.equal(died.args[died.args.indexOf("-A") + 1], "default:Open Memory Monitor", "the death toast's copy says Click to open Memory Monitor");
+  assert.equal(died.args[died.args.indexOf("-A") + 1], "default=Open Quattro Dash", "the death toast's copy says Click to open Quattro Dash");
   const hint = died.args[died.args.indexOf("-h") + 1];
   assert.match(hint, /^STRING:omarchy-exec-argv:/);
   same(JSON.parse(hint.slice("STRING:omarchy-exec-argv:".length)), ["qs", "ipc", "call", "memory-monitor", "openDetail"]);
