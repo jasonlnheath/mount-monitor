@@ -114,6 +114,7 @@ test("an arm record is written the same way every time", () => {
     eventKey: "ram|3|ram|1",
     type: "ram",
     band: 3,
+    signal: "swap",
     outcome: "who knows",
     pid: 4242,
     survived: true,
@@ -125,6 +126,9 @@ test("an arm record is written the same way every time", () => {
   assert.equal(record.pid, 4242);
   assert.equal(record.survived, true);
   assert.equal(record.claimId, "77");
+  assert.equal(record.signal, "swap", "the signal survives the record, so a restart's retraction names the same signal");
+  assert.equal(Memory.armRecord({ type: "hd", band: 3, outcome: "started" }).signal, undefined,
+    "an hd record carries no signal, so its retraction keeps the device line");
   same(record.reasons, ["one reason"]);
   assert.equal(record.inline, true);
 });

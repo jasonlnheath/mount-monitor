@@ -69,6 +69,12 @@ Panel {
   readonly property var oomd: mon("oomd", null)
   readonly property var mmState: mon("state", {})
   readonly property var alertEvents: mon("unseenAlerts", [])
+  // The store that resolved the held ram band, so its release note quotes the
+  // line the band actually crossed: the PSI pair for a pressure-held band,
+  // the drawn batt pair inverted for a swap-held one.
+  readonly property var ramRelease: root.ram === null ? null : Memory.ramReleaseStore(
+    root.ram.signal, Memory.thresholdsFor(root.mmState, "ram"),
+    callMonitor("gaugePairFor", ["batt"], null))
 
   function bandColor(band) {
     if (band >= 2) return root.redColor
@@ -158,8 +164,8 @@ Panel {
         }
         Text {
           visible: root.ram !== null && root.ram.band >= 1
-          text: root.ram === null ? "" : Memory.unreachableBandNote(
-            root.ram.band, Memory.thresholdsFor(root.mmState, "ram"), "ram",
+          text: root.ram === null || root.ramRelease === null ? "" : Memory.unreachableBandNote(
+            root.ram.band, root.ramRelease.thresholds, root.ramRelease.type,
             root.ram.memAvailableKb, root.ram.memTotalKb, root.ram.signal)
           color: root.warnColor
           wrapMode: Text.Wrap

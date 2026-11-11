@@ -381,10 +381,17 @@ test("the widget's own copy is only the bar's logo and the tooltip, both of whic
   const both = QML + "\n" + PANEL;
   assert.equal(both.includes("Memory.unavailableText("), true, "a missing reading is named, not drawn as zero");
   assert.equal(both.includes("Memory.unreachableBandNote("), true, "a stuck band says so instead of latching in silence");
+  assert.equal(PANEL.includes("Memory.ramReleaseStore("), true,
+    "the store a held ram band's release note reads is memory.js's decision, never the panel's");
   assert.equal(both.includes("Memory.alertsYouDidNotSeeText("), true, "a toast DND swallowed is still reported");
   assert.equal(both.includes("Memory.kernelCeilingText("), true, "oomd's ceiling is reported, not replaced");
   assert.equal(both.includes("Memory.swapText("), true);
   assert.equal(both.includes("Memory.psiText("), true);
+  // Ruling 14: the detail window's header is the one sentence the panel owns,
+  // and it names the product - the technical plugin id keeps its
+  // memory-monitor spelling everywhere else.
+  assert.equal(PANEL.includes('"Memory Monitor"'), false);
+  assert.equal(PANEL.includes('"Quattro Dash"'), true);
 });
 
 test("a dash-launched severe dispatch rides the same arm gate the toast path rides", () => {

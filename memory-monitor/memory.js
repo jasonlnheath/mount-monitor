@@ -1406,6 +1406,17 @@ function descentReachable(band, thresholds, type, memAvailableKb, memTotalKb) {
   return { reachable: true, releasePct: rule.releasePct, needKb: null, totalKb: asNumber(memTotalKb) };
 }
 
+// The store a held ram band's release note reads: the pair that resolved the
+// band, not always the PSI pair. A swap-held band releases on the batt pair's
+// inverted lines with the swap margin; a pressure-held band releases on the
+// PSI ceilings with the ram margin.
+function ramReleaseStore(signal, psiThresholds, battPair) {
+  if (sanitizeText(signal, 8) === "swap") {
+    return { thresholds: reserveThresholds(battPair), type: "swap" };
+  }
+  return { thresholds: psiThresholds, type: "ram" };
+}
+
 function unreachableBandNote(band, thresholds, type, memAvailableKb, memTotalKb, signal) {
   const rule = descentReachable(band, thresholds, type, memAvailableKb, memTotalKb);
   if (rule.releasePct === null) return "";
@@ -2158,6 +2169,9 @@ function armRecord(opts) {
     key: sanitizePath(o.key),
     id: sanitizeText(o.id, 64),
     pct: asNumber(o.pct),
+    // Tri-state like the alert's own field: absent for hd and vram (never a
+    // present-but-empty word), "psi" or "swap" for a ram reading.
+    signal: asString(o.signal) === "" ? undefined : sanitizeText(o.signal, 8),
     target: sanitizePath(o.target),
     outcome,
     pid: asNumber(o.pid),
@@ -2484,8 +2498,21 @@ function kernelCeilingText(oomd) {
 // user-set ceiling and never moved without his word. It is derived from the
 // machine's own measured resting level, and marked provisional when the log
 // cannot yet say what that is.
+// The PSI store floors at the captain-approved defaults and only lifts above
+// the resting level when that level actually exceeds a line: PSI is not a
+// percent of a ceiling, so a resting 4 must not draw an amber at 6.
 function recommendCeilings(type, resting) {
   const sitting = restingPctFor(resting, type);
+  if (type === "ram") {
+    if (sitting === null) {
+      return { amber: DEFAULT_AMBER_RAM, red: DEFAULT_RED, critical: DEFAULT_RED + 5, restingPct: null, provisional: true };
+    }
+    const base = Math.round(sitting);
+    const amber = Math.min(97, base < DEFAULT_AMBER_RAM ? DEFAULT_AMBER_RAM : base + 2);
+    const red = Math.min(98, base < DEFAULT_RED ? DEFAULT_RED : base + 7);
+    const critical = Math.min(99, Math.max(red + 5, base + 10));
+    return { amber, red, critical, restingPct: sitting, provisional: false };
+  }
   const base = sitting === null ? DEFAULT_RED : Math.round(sitting);
   const amber = Math.min(97, Math.max(1, base + 2));
   const red = Math.min(98, amber + 5);
@@ -2714,6 +2741,7 @@ function guardStateText(settings) {
 
 function ceilingText(type, settings) {
   const t = thresholdsFor(settings, type);
+  const unit = restingUnit(type);
   const who = level => {
     const all = normalizeThresholds(settings && settings.thresholds);
     const kind = all[type] || all.ram;
@@ -2723,8 +2751,8 @@ function ceilingText(type, settings) {
   };
   const critical = t.critical === null
     ? "critical: " + degradationText("critical-unset")
-    : "critical: " + t.critical + "%" + who("critical");
-  return "amber " + t.amber + "%" + who("amber") + "  -  red " + t.red + "%" + who("red") + "  -  " + critical;
+    : "critical: " + t.critical + unit + who("critical");
+  return "amber " + t.amber + unit + who("amber") + "  -  red " + t.red + unit + who("red") + "  -  " + critical;
 }
 
 function swapText(reading) {
@@ -2774,9 +2802,15 @@ function alertsYouDidNotSeeText(events) {
   if (silenced.length === 0) return "none - no alert was silenced by Do Not Disturb";
   const lines = [silenced.length + " alert silenced by Do Not Disturb. It is recorded here and in the log."];
   for (const event of silenced) {
+    const type = sanitizeText(event.type, 16);
+    // A ram event's number is its signal's own reading: PSI for pressure,
+    // percent used for the reserve. Every other type is a percent.
+    const unit = type === "ram"
+      ? (sanitizeText(event.signal, 8) === "swap" ? "% used" : " PSI")
+      : "%";
     lines.push(
-      (asString(event.at) || "") + "  " + kindLabel(sanitizeText(event.type, 16)) +
-      "  " + readingPct(event.pct) + "%  " + (BAND_NAMES[asNumber(event.band) || 0] || "")
+      (asString(event.at) || "") + "  " + kindLabel(type) +
+      "  " + readingPct(event.pct) + unit + "  " + (BAND_NAMES[asNumber(event.band) || 0] || "")
     );
   }
   return lines.join("\n");

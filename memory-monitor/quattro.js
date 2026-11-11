@@ -243,7 +243,8 @@ function adjustGaugePair(key, which, value, current) {
 // tick lines). Green at the amber line or above, amber between the lines,
 // red below the red line. A crossed pair extends red upward, and a duplicated
 // pair draws one run: the color jump happens exactly where the captain drew
-// it, with no hidden reorder.
+// it, with no hidden reorder. The crossed-pair law itself is ledBandWith's,
+// the one owner - this is the segment word for its band word.
 
 // Live dial zones from a pair. The drive gauge needle reads percent FREE, so
 // its used-percent thresholds flip ends when they land on the dial; at the
@@ -285,11 +286,8 @@ var fuelZoneArcs = [{ from: 0, to: FUEL_RED_BELOW / 100, kind: "red" }];
 
 function battSegmentZone(center, pair) {
   const p = gaugePair("batt", pair);
-  const v = asNumber(center);
-  if (v === null) return "red";
-  if (v >= Math.max(p.amber, p.red)) return "green";
-  if (v >= p.red && p.red <= p.amber) return "amber";
-  return "red";
+  const band = ledBandWith(center, p.amber, p.red);
+  return band === "yellow" ? "amber" : band;
 }
 
 // The battery band from the pair: green at the amber line or above, yellow

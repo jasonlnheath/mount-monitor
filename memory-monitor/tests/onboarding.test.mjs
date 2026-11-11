@@ -35,7 +35,7 @@ test("the ceiling question reports the reading before it asks anything", () => {
   assert.match(lines[2], /Your amber: 70 PSI \(default\)\. Your red: 90 PSI \(default\)\./);
   assert.match(lines[3], /^Your critical: not set - you have no ceiling, and no critical alert can fire\.$/);
   assert.match(lines[4], /^The kernel's ceiling: oomd at PSI 50% for 20s, or swap at 90%, watching \/user\.slice/);
-  assert.match(lines[5], /^Recommended from this machine: amber 77 PSI, red 82 PSI, critical 85 PSI\.$/);
+  assert.match(lines[5], /^Recommended from this machine: amber 77 PSI, red 90 PSI, critical 95 PSI\.$/);
   assert.match(lines[6], /^This machine rests at 75 PSI, which is inside your amber line\.$/);
 });
 
@@ -85,7 +85,7 @@ test("an unmeasured machine is recommended the documented defaults, never 'from 
   assert.ok(rec.amber < rec.red, "the provisional pair is never amber above red");
 
   const measured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 75 });
-  assert.match(measured, /^Recommended from this machine: amber 77 PSI, red 82 PSI, critical 85 PSI\.$/m);
+  assert.match(measured, /^Recommended from this machine: amber 77 PSI, red 90 PSI, critical 95 PSI\.$/m);
   assert.equal(measured.includes("Recommended defaults until measured"), false);
 });
 

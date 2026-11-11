@@ -496,8 +496,11 @@ Panel {
                     id: battIcon
                     anchors.fill: parent
                     symbol: "battery"
-                    color: root.reserve.pct >= root.battPair.amber ? Quattro.PAL.green
-                      : (root.reserve.pct >= root.battPair.red ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                    color: {
+                      var band = Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red)
+                      return band === "green" ? Quattro.PAL.green
+                        : (band === "yellow" ? Quattro.PAL.amber : Quattro.PAL.redHot)
+                    }
 
                     SequentialAnimation {
                       running: Quattro.ledBandWith(root.reserve.pct, root.battPair.amber, root.battPair.red) === "red"

@@ -113,6 +113,22 @@ test("a PSI band always releases: no MemAvailable gate on a pressure metric", ()
   assert.equal(note.includes("GiB"), false, "a PSI release is not stated in memory bytes");
 });
 
+test("a held ram band's release note reads the store that resolved the band", () => {
+  const store = Memory.ramReleaseStore("swap", PSI_T, BATT);
+  assert.equal(store.type, "swap");
+  assert.equal(store.thresholds.amber, 80);
+  assert.equal(store.thresholds.red, 90);
+  assert.equal(
+    Memory.unreachableBandNote(2, store.thresholds, store.type, 1, 1, "swap"),
+    "This band releases below 88% used.",
+    "the swap-held band releases on the reserve's own line and margin, never the PSI pair's",
+  );
+  const psi = Memory.ramReleaseStore("psi", PSI_T, BATT);
+  assert.equal(psi.type, "ram");
+  assert.equal(psi.thresholds, PSI_T);
+  assert.equal(Memory.unreachableBandNote(2, psi.thresholds, psi.type, 1, 1, "psi"), "This band releases below 86 PSI.");
+});
+
 // ---------------------------------------------------------------------------
 // 5. The toasts are Quattro Dash's, not Memory Monitor's
 // ---------------------------------------------------------------------------
@@ -394,6 +410,9 @@ test("the ram resting level is measured in PSI from the log", () => {
   const rec = Memory.recommendCeilings("ram", { ram: 4 });
   assert.equal(rec.restingPct, 4);
   assert.ok(rec.amber > rec.restingPct, "a PSI recommendation still clears the resting level");
+  // The PSI recommendation floors at the captain-approved defaults: a resting
+  // 4 is not a machine that wants an amber at 6.
+  same2([rec.amber, rec.red, rec.critical], [70, 90, 95]);
 });
 
 // ---------------------------------------------------------------------------
@@ -440,12 +459,6 @@ test("ruling 14: the manifest names the product Quattro Dash, keeping the techni
 test("ruling 14: the plugin README speaks Quattro Dash", () => {
   const readme = repoFile("memory-monitor/README.md");
   assert.equal(readme.includes("Memory Monitor"), false, "the user-facing docs carry the rename");
-});
-
-test("ruling 14: the detail window header is Quattro Dash", () => {
-  const panel = repoFile("memory-monitor/MemoryPanel.qml");
-  assert.equal(panel.includes('"Memory Monitor"'), false);
-  assert.equal(panel.includes('"Quattro Dash"'), true);
 });
 
 test("ruling 14: install.sh copies the toast icons beside the installed widget", () => {

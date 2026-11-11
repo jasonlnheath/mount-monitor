@@ -98,7 +98,8 @@ test("a ceiling the user set is never relabelled as a default", () => {
   assert.equal(set.ok, true);
   assert.equal(set.thresholds.ram.redSetBy, "user");
   assert.equal(Memory.ceilingText("ram", set).includes("(you set it)"), true);
-  assert.equal(Memory.ceilingText("ram", set).includes("amber 70% (default)"), true);
+  assert.equal(Memory.ceilingText("ram", set).includes("amber 70 PSI (default)"), true,
+    "the ram store reads in PSI, the unit the ceilings question asks in");
 });
 
 test("the unset critical reads out loud in the detail window", () => {
