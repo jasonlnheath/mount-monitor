@@ -875,6 +875,7 @@ BarWidget {
     var payload = JSON.stringify(next);
     if (payload === lastStateWrite) return;
     lastStateWrite = payload;
+    lastStateWriteAt = new Date().getTime();
     stateWritten = true;
     stateFile.setText(payload);
   }
@@ -1186,6 +1187,13 @@ BarWidget {
   property bool reconcileDone: false
   property bool stateWritten: false
   property string lastStateWrite: ""
+  // Round 7.5 item 20: when this widget last wrote the state file, in epoch
+  // ms. The FileView watcher fires on our own atomic writes too; a reload
+  // within 500 ms of our own write is our own echo, and reloading it rebinds
+  // every dash binding in one frame - the height flicker that could bounce
+  // the popup shut mid-reset. Our memory is already the truth, so the echo is
+  // skipped.
+  property real lastStateWriteAt: 0
   property string vramVerdict: ""
 
   // ---------------------------------------------------------------------------
@@ -1493,7 +1501,10 @@ BarWidget {
     atomicWrites: true
     printErrors: false
     onLoaded: root.loadState(text())
-    onFileChanged: reload()
+    // Round 7.5 item 20: a write this widget just made is not a foreign
+    // change. Skip the echo reload so a settings write (a slider drag, a
+    // reset) can never bounce the popup shut under the captain's hand.
+    onFileChanged: if (new Date().getTime() - lastStateWriteAt > 500) reload()
     onLoadFailed: root.loadState("")
   }
 

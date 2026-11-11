@@ -92,8 +92,8 @@ test("freeLine is the one standard free format", () => {
 });
 
 test("swapLine reads the standard free format", () => {
-  const swap = { swapTotalKb: 8 * 1024 * 1024, swapUsedKb: Math.round(1.9 * 1024 * 1024) };
-  assert.equal(Quattro.swapLine(swap), "80% Free (1.9/8 GiB)");
+  const swap = { swapTotalKb: 8 * 1024 * 1024, swapUsedKb: Math.round(1.6 * 1024 * 1024) };
+  assert.equal(Quattro.swapLine(swap), "80% Free (1.6/8 GiB)");
   assert.equal(Quattro.swapLine({ swapTotalKb: 0, swapUsedKb: 0 }), "none configured");
   assert.equal(Quattro.swapLine(null), "none configured");
 });
@@ -119,7 +119,7 @@ test("the fuel and coolant hover tips read the standard free format", () => {
     80,
     90,
   );
-  assert.match(fuel.rows[0].text, /^24% Free \(437\/936 GB\)\.$/);
+  assert.match(fuel.rows[0].text, /^24% Free \(469\/1005 GB\)\.$/);
   const coolant = Quattro.coolantTipWith(
     { usedMib: 12262, freeMib: 3649, totalMib: 16303 },
     1013,

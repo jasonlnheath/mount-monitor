@@ -277,7 +277,8 @@ test("fuelTip: the simple reading, one line, in the live GB", () => {
   const tip = Quattro.fuelTip(root);
   assert.equal(tip.header, "ROOT DRIVE");
   same(tip.rows.map(r => r.label), ["Now:"]);
-  assert.equal(tip.rows[0].text, "1538 GB free of 1998 GB (77 percent).");
+  assert.equal(tip.rows[0].text, "77% Free (1538/1998 GB).",
+    "round 7.5 item 17: the Now row is the standard free format");
   assert.equal(Quattro.fuelTip(null).rows[0].text, "no root reading yet.");
 });
 
@@ -529,7 +530,8 @@ test("coolantTip: the simple reading, one line: VRAM used / free of total", () =
   // TOTAL, not a reserved remainder. Round 7: one line only.
   assert.equal(tip.header, "VRAM");
   same(tip.rows.map(r => r.label), ["Now:"]);
-  assert.equal(tip.rows[0].text, "14.8 GiB used, 1.2 GiB free of 16.0 GiB.");
+  assert.equal(tip.rows[0].text, "7% Free (1.2/16.0 GiB).",
+    "round 7.5 item 17: the Now row is the standard free format, free of total");
   const empty = Quattro.coolantTip(null, 500);
   assert.equal(empty.rows[0].text, "no VRAM reading yet.", "a missing reading is said, not drawn as zero");
 });
@@ -893,7 +895,7 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     // quattro.js data the panel renders and the monitor owns on disk.
     "Quattro.SETTINGS", "Quattro.GAUGE_KEYS", "Quattro.valueRows(",
     "Quattro.gaugePair(", "Quattro.gaugeRange(", "Quattro.gaugeTitle(",
-    "Quattro.battSegmentZone(", "Quattro.swapLine(",
+    "Quattro.battSegmentZone(",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
   }
@@ -1062,9 +1064,10 @@ test("round 7 stat rows: the captain's numbers, in honest units, swap line inclu
   const swap = { swapTotalKb: 8 * 1048576, swapUsedKb: Math.round(1.2 * 1048576) };
   const rows = Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, vramFull, []);
   same(rows.map(r => r.label), ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
-  same(rows.map(r => r.value), ["20.0 PSI", "85 percent", "15 percent used, 1.2 GiB of 8 GiB", "437 GB free", "7.1 GiB free"]);
+  // Round 7.5 item 17: the standard free format on every resource row.
+  same(rows.map(r => r.value), ["20.0 PSI", "85 percent", "85% Free (1.2/8 GiB)", "78% Free (437/560 GB)", "45% Free (7.1/15.9 GiB)"]);
   const amber = Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, vramLow, []);
-  assert.equal(amber[4].value, "1.4 GiB free");
+  assert.equal(amber[4].value, "9% Free (1.4/15.9 GiB)");
   assert.equal(Quattro.valueRows(20, { present: true, pct: 85 }, swap, fuel, null, [])[4].value, "no reading");
   assert.equal(Quattro.valueRows(20, { present: true, pct: 85 }, null, fuel, vramFull, [])[2].value, "none configured");
 });

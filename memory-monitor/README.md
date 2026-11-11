@@ -171,7 +171,7 @@ the unlit monochrome glyph, and a missing reading reads unlit with no needle.
 The three percent-gauge bands start at the settings row's recommended
 defaults, the coolant light follows the VRAM floor until its sliders are
 touched, and the row moves them all live.
-Hovering the instrument shows VRAM used / free of total in GiB. Under the cluster, the
+Hovering the instrument reads the standard free format. Under the cluster, the
 codes area: ONE column under one check-engine head, DRIVE codes only, always
 most critical at the top, rows stretched across the full card so each code
 carries its reading and its status. The doctrine is round 2's: RAM monitoring
@@ -191,13 +191,18 @@ same single-flight, budget-gated check that owns every critical-band agent
 launch; its prompt carries the diagnosis too. Armed, the agent starts;
 refused, nothing starts and the red "not sent." toast says why: the guard is
 off, an agent is already on it, no memory headroom, or another screen owns
-the guard. Hovering any instrument gives the plain-words teaching decode, PSI
-included: it is a real kernel metric, not one we invented.
+the guard. Swap's numbers live in the values
+popup (the SWAP row), not on the bar card, and swap, VRAM and disk free-ness
+all read one standard format: "80% Free (1.2/8 GiB)".
 
 The bottom of the dash carries the gauge settings row, collapsed until you
-open it: one amber/red slider pair per gauge, each with its two-line
-description in the row (what the metric is, why we measure it), and a reset
-button that writes back the recommended defaults. The pairs move the drawn
+open it (and always collapsed when the popup opens or closes: the section
+never survives a screen exit expanded): one amber/red slider pair per gauge,
+each with its two-sentence paragraph in the row (what the metric is, why we
+measure it), and a reset button that writes back the recommended defaults
+without closing the popup: the state watcher skips this widget's own write,
+so the reset cannot bounce the card shut mid-click. The VRAM sliders move in
+50 MiB steps. The pairs move the drawn
 bands live — the RAM and ROOT DRIVE dials redraw their zones, and the battery
 under SWAP RESERVE recolors its bars: each bar takes its color from its own
 center percentage against the drawn pair, two red bars at 20, three at 30,

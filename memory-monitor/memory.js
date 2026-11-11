@@ -2886,38 +2886,13 @@ function badgeLabel(type) {
   return "";
 }
 
-// Round 7 item 10: the captain's screenshot shows the dot column ragged. The
-// tooltip pads names by CHARACTER COUNT, and a proportional font renders equal
-// counts at unequal widths - "RAM" plus two spaces is narrower than "Drive".
-// The pad is therefore computed in estimated glyph widths, so every row's
-// rendered prefix matches and the dots sit on one vertical line.
-function textWidthUnits(text) {
-  const t = String(text === undefined || text === null ? "" : text);
-  let total = 0;
-  for (const ch of t) {
-    if (" iljtfr.,:;'".indexOf(ch) >= 0) total += 320;
-    else if (ch === " ") total += 300;
-    else if ("mwMW".indexOf(ch) >= 0) total += 900;
-    else if (ch >= "A" && ch <= "Z") total += 720;
-    else if (ch >= "0" && ch <= "9") total += 640;
-    else if (ch >= "a" && ch <= "z") total += 560;
-    else total += 640;
-  }
-  return total;
-}
-
-function padToWidth(name, widthUnits) {
-  let padded = String(name === undefined || name === null ? "" : name);
-  let width = textWidthUnits(padded);
-  while (width < widthUnits) {
-    padded += " ";
-    width += 300;
-  }
-  return padded;
-}
-
-// One color-emoji circle, estimated in the same units textWidthUnits speaks.
-const EMOJI_WIDTH = 1400;
+// Round 7.5 item 22: the captain's second screenshot shows the dot column
+// ragged under the width-estimate pad. The real law is the surface itself: the
+// bar's tooltip bubble renders in a MONOSPACE font, so equal character counts
+// land on equal columns and the pad is a plain character count. The estimate
+// machinery (textWidthUnits, padToWidth, EMOJI_WIDTH) is gone - it was built
+// for a proportional font that this surface never uses, and the differing pad
+// counts it produced were the jank.
 
 // The bar popup's status column is a color dot and nothing else (the
 // captain's round-2 edits on the preview board): white when nothing is over
@@ -2954,24 +2929,20 @@ function barTooltip(entries) {
     rows.push({ name: label, dot: bandDot(entry.band) });
   }
   if (rows.length === 0) return "Quattro Dash";
-  // The bar's tooltip is one centered Text sized to its widest line. The dot
-  // column holds because every row's estimated glyph width matches: pad in
-  // width units, never in character counts.
+  // The bar's tooltip is one centered Text in a monospace font. The dot
+  // column holds because every row carries the same character count before
+  // its dot: the name left-aligned, spaces to the longest name, a two-space
+  // gap, then the dot.
   let longestName = 0;
   for (const row of rows) {
-    longestName = Math.max(longestName, textWidthUnits(row.name));
-  }
-  let width = 0;
-  for (const row of rows) {
-    // The status dots are color emoji circles of essentially equal rendered
-    // width, whatever their JS string length says, so the dot counts as one
-    // fixed emoji width on every row.
-    const w = longestName + 600 + EMOJI_WIDTH;
-    if (w > width) width = w;
+    longestName = Math.max(longestName, [...row.name].length);
   }
   const lines = ["Quattro Dash"];
   for (const row of rows) {
-    lines.push(padToWidth(row.name + "  ", longestName + 600) + row.dot);
+    const gap = [...row.name].length < longestName
+      ? " ".repeat(longestName - [...row.name].length)
+      : "";
+    lines.push(row.name + gap + "  " + row.dot);
   }
   return lines.join("\n");
 }

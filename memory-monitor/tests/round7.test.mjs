@@ -246,31 +246,22 @@ test("the toast logo is the check-engine emblem", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. The tooltip's dot column lines up in a proportional font
+// 10, reshaped by round 7.5 item 22: the shell renders the tooltip in a
+// monospace font, so the pad is a character count and the dots align by
+// construction. The width-estimate law is gone (see round75.test.mjs).
 // ---------------------------------------------------------------------------
 
-test("barTooltip pads by estimated glyph width, not character count", () => {
-  assert.ok(Memory.textWidthUnits("Drive") > Memory.textWidthUnits("RAM"), "width, not length, is the measure");
+test("barTooltip aligns its dot column by character count in the mono font", () => {
   const tip = Memory.barTooltip([
     { type: "ram", band: 0, pct: 42 },
     { type: "vram", band: 1, pct: 63 },
     { type: "hd", band: 2, pct: 97 },
   ]);
   const lines = tip.split("\n").slice(1);
-  const widths = lines.map(l => Memory.textWidthUnits(l));
-  // Character-count padding (the screenshot bug) puts "Drive" and "RAM" at
-  // equal CHAR counts, so their rendered widths differ by about one glyph.
-  // Width padding puts every row at the shared target: never under it, and
-  // never more than one space of slack above it, which keeps the dot column
-  // inside one space width across rows.
-  const target = Math.max(...["RAM", "VRAM", "Drive"].map(n => Memory.textWidthUnits(n))) + 600;
-  for (const w of widths) assert.ok(w >= target, "no row is narrower than the shared column");
-  assert.ok(Math.max(...widths) - Math.min(...widths) <= 300, "the dot column sits within one space width across rows");
-  const charPadded = ["Drive", "RAM"].map(n => n.padEnd(7));
-  assert.ok(
-    Math.abs(Memory.textWidthUnits(charPadded[0]) - Memory.textWidthUnits(charPadded[1])) > 300,
-    "character padding is measurably ragged, the bug the width pad replaces"
-  );
+  const charLens = lines.map((l) => [...l].length);
+  assert.equal(new Set(charLens).size, 1, "every row is the same character count: one dot column");
+  const dots = lines.map((l) => [...l].lastIndexOf(" ") + 1);
+  assert.equal(new Set(dots).size, 1, "every dot starts at the same character index");
 });
 
 test("the ram band is the more severe of the pressure and swap bands, and names its signal", () => {
@@ -340,10 +331,11 @@ test("the settings copy says what each metric is and why we measure it, no amber
   for (const key of Quattro.GAUGE_KEYS) {
     const copy = Quattro.SETTINGS.copy[key];
     assert.equal(typeof copy, "string", `${key} has copy`);
-    const sentences = copy.split("\n");
-    assert.equal(sentences.length, 2, `${key}'s copy is one what line and one why line`);
-    assert.ok(/^[A-Z]/.test(sentences[0]) && /\.$/.test(sentences[0]), `${key}'s what is one sentence`);
-    assert.ok(/^[A-Z]/.test(sentences[1]) && /\.$/.test(sentences[1]), `${key}'s why is one sentence`);
+    // Round 7.5 item 18: one flowing paragraph, two sentences.
+    assert.doesNotMatch(copy, /\n/, `${key}'s copy is one paragraph, not two lines`);
+    const parts = copy.split(". ");
+    assert.equal(parts.length, 2, `${key}'s copy is one what sentence and one why sentence`);
+    assert.ok(/^[A-Z]/.test(copy) && /\.$/.test(copy), `${key}'s paragraph starts and ends cleanly`);
     assert.equal(/amber|red/i.test(copy), false, `${key}'s copy names no band color`);
   }
   assert.equal(Quattro.SETTINGS.hint, "Drag a slider to set where each color starts.");
@@ -359,10 +351,12 @@ test("the hover popups are the simple reading, one line", () => {
   assert.equal(batt.rows[0].text, "38 percent remaining right now.");
   const fuel = Quattro.fuelTipWith({ pctFree: 77, availKb: 1501820186, sizeKb: 1950990074 }, 80, 90);
   assert.equal(fuel.rows.length, 1);
-  assert.equal(fuel.rows[0].text, "1538 GB free of 1998 GB (77 percent).");
+  assert.equal(fuel.rows[0].text, "77% Free (1538/1998 GB).",
+    "round 7.5 item 17: the standard free format");
   const coolant = Quattro.coolantTipWith({ present: true, usedMib: 15200, freeMib: 1184, totalMib: 16384 }, 500, 1500);
   assert.equal(coolant.rows.length, 1);
-  assert.equal(coolant.rows[0].text, "14.8 GiB used, 1.2 GiB free of 16.0 GiB.");
+  assert.equal(coolant.rows[0].text, "7% Free (1.2/16.0 GiB).",
+    "round 7.5 item 17: the standard free format");
   assert.equal(Quattro.psiTipWith(null, 70, 90).rows[0].text, "no pressure reading yet.");
   assert.equal(Quattro.battTipWith({ present: false, pct: 0 }, 20, 10).rows[0].text, "no swap is configured.");
   assert.equal(Quattro.fuelTipWith(null, 80, 90).rows[0].text, "no root reading yet.");
@@ -378,9 +372,9 @@ test("the code row's hover is one line too", () => {
   assert.equal(tip.rows[0].text, codes[0].status);
 });
 
-test("the dash gains a SWAP line", () => {
+test("the values popup carries the SWAP row in the standard free format", () => {
   const swap = { swapTotalKb: 8 * 1048576, swapUsedKb: Math.round(1.2 * 1048576) };
-  assert.equal(Quattro.swapLine(swap), "15 percent used, 1.2 GiB of 8 GiB");
+  assert.equal(Quattro.swapLine(swap), "85% Free (1.2/8 GiB)");
   assert.equal(Quattro.swapLine({ swapTotalKb: 0, swapUsedKb: 0 }), "none configured");
   assert.equal(Quattro.swapLine(null), "none configured");
   const rows = Quattro.valueRows(20, { present: true, pct: 85 }, swap,
@@ -388,7 +382,9 @@ test("the dash gains a SWAP line", () => {
     { vramUsedMib: 9000, vramFreeMib: 7303, vramTotalMib: 16303 }, []);
   const labels = rows.map(r => r.label);
   same2(labels, ["RAM PRESSURE", "SWAP RESERVE", "SWAP", "ROOT DRIVE", "VRAM"]);
-  assert.equal(rows[2].value, "15 percent used, 1.2 GiB of 8 GiB");
+  assert.equal(rows[2].value, "85% Free (1.2/8 GiB)");
+  assert.match(rows[3].value, /^78% Free \([\d.]+\/[\d.]+ GB\)$/);
+  assert.match(rows[4].value, /^45% Free \([\d.]+\/[\d.]+ GiB\)$/);
 });
 
 test("the ram ceilings question speaks PSI", () => {

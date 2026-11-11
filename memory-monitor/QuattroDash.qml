@@ -288,6 +288,12 @@ Panel {
   // captain's ruling).
   readonly property var scaleSize: Quattro.vramScaleSize(psiDial.width)
 
+  // Round 7.5 item 19: the settings section always STARTS collapsed. Whatever
+  // edge the popup takes - open or close - the section is folded first, so an
+  // expanded settings block can never survive a screen exit and mis-render on
+  // the way back.
+  onOpenedChanged: if (typeof content !== "undefined" && content) content.settingsOpen = false
+
   CardBar { id: cardBar; api: root.bar }
 
   PopupCard {
@@ -812,16 +818,10 @@ Panel {
           }
         }
 
-        // Round 7 item 9: the dash says swap on its own line, centered under
-        // the cluster row, the same honest string the stat rows carry - or
-        // that there is none configured.
-        Text {
-          Layout.alignment: Qt.AlignHCenter
-          text: Quattro.swapLine(root.swapTotals)
-          color: root.dim
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
+        // Round 7.5 item 16: no SWAP line on the bar card any more. Swap's
+        // stats moved up into the values popup (the SWAP row there), so the
+        // card carries the cluster row and the engine codes and nothing
+        // between them.
 
         // The codes area is a plain Item, not a nested ColumnLayout: in this
         // Qt build a nested ColumnLayout caps at its implicit width and hugs
@@ -1427,6 +1427,9 @@ Panel {
     property real max: 99
     property color tint: Quattro.PAL.amber
     property string label: ""
+    // Round 7.5 item 21: drags quantize to this step. The VRAM rows pass
+    // Quattro.sliderStep("vram") (50 MiB); the PSI and drive rows stay at 1.
+    property int step: 1
     signal moved(real newValue)
 
     readonly property real frac: Math.max(0, Math.min(1, (value - min) / Math.max(1, max - min)))
@@ -1483,7 +1486,9 @@ Panel {
     MouseArea {
       function valueAt(px) {
         var f = Math.max(0, Math.min(1, px / parent.width))
-        return Math.round(slider.min + f * (slider.max - slider.min))
+        var raw = slider.min + f * (slider.max - slider.min)
+        var stepped = Math.round(raw / slider.step) * slider.step
+        return Math.max(slider.min, Math.min(slider.max, stepped))
       }
       anchors.fill: parent
       cursorShape: Qt.PointingHandCursor
@@ -1544,6 +1549,7 @@ Panel {
         value: gaugeRow.pair.amber
         min: gaugeRow.range.min
         max: gaugeRow.range.max
+        step: Quattro.sliderStep(gaugeRow.gaugeKey)
         tint: Quattro.PAL.amber
         label: Quattro.SETTINGS.amberLabel
         onMoved: function(v) {
@@ -1557,6 +1563,7 @@ Panel {
         value: gaugeRow.pair.red
         min: gaugeRow.range.min
         max: gaugeRow.range.max
+        step: Quattro.sliderStep(gaugeRow.gaugeKey)
         tint: Quattro.PAL.redHot
         label: Quattro.SETTINGS.redLabel
         onMoved: function(v) {

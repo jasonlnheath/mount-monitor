@@ -239,8 +239,8 @@ test("the coolant band and hover keep a floor-chain pair past the slider scale",
   assert.equal(Q.coolantBandWith(400, 16310, null, null), 2, "a junk pair falls back to the recommended 500/1500");
   const tip = Q.coolantTipWith({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288, 13288);
   assert.equal(tip.rows.length, 1, "round 7 item 2: the hover is the simple reading, one line");
-  assert.equal(tip.rows[0].text, "3.6 GiB used, 12.3 GiB free of 15.9 GiB.",
-    "the Now row reports free OF TOTAL, the round-3 doctrine the lane and stat rows carry");
+  assert.equal(tip.rows[0].text, "77% Free (12.3/15.9 GiB).",
+    "round 7.5 item 17: the Now row is the standard free format, free of total");
   assert.equal(Q.coolantTip({ present: true, usedMib: 3710, freeMib: 12600, totalMib: 16310 }, 12288).rows[0].text, tip.rows[0].text,
     "the locked wrapper and the drawn pair agree on the one-line reading");
 });
@@ -253,10 +253,11 @@ test("every gauge the row offers carries its what-is and why-we-measure lines, n
   for (const key of Q.GAUGE_KEYS) {
     const copy = Q.SETTINGS.copy[key];
     assert.equal(typeof copy, "string", `${key} has a description`);
-    const lines = copy.split("\n");
-    assert.equal(lines.length, 2, `${key}'s copy is a what line and a why line`);
-    assert.ok(/^[A-Z].*\.$/.test(lines[0]), `${key}'s what is one sentence ending in a period`);
-    assert.ok(/^[A-Z].*\.$/.test(lines[1]), `${key}'s why is one sentence ending in a period`);
+    // Round 7.5 item 18: one flowing paragraph, two sentences.
+    assert.doesNotMatch(copy, /\n/, `${key}'s copy is one paragraph`);
+    const sentences = copy.split(". ");
+    assert.equal(sentences.length, 2, `${key}'s copy is a what sentence and a why sentence`);
+    assert.ok(/^[A-Z].*\.$/.test(copy), `${key}'s paragraph starts with a capital and ends in a period`);
     assert.equal(/amber|red/i.test(copy), false, `${key}'s copy names no band color`);
   }
   assert.equal(Q.gaugeTitle("psi"), "RAM PRESSURE");

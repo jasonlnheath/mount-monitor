@@ -724,9 +724,8 @@ function fuelTipWith(root, amberUsed, redUsed) {
   const pctFree = r === null ? null : asNumber(r.pctFree);
   const gb = r === null ? null : gbFromKb(r.availKb);
   const gbTotal = r === null ? null : gbFromKb(r.sizeKb);
-  const now = pctFree === null || gb === null || gbTotal === null
-    ? "no root reading yet."
-    : gb + " GB free of " + gbTotal + " GB (" + Math.round(pctFree) + " percent).";
+  const line = freeLine(pctFree, gb, gbTotal, "GB");
+  const now = line === null ? "no root reading yet." : line + ".";
   return {
     header: INSTRUMENTS.fuel,
     rows: [
@@ -741,9 +740,13 @@ function coolantTipWith(reading, redMib, amberMib) {
   const used = r === null ? null : asNumber(r.usedMib);
   const free = r === null ? null : asNumber(r.freeMib);
   const total = r === null ? null : asNumber(r.totalMib);
-  const now = used === null || free === null
-    ? "no VRAM reading yet."
-    : gibFromMib(used) + " used, " + gibFromMib(free) + " free of " + gibFromMib(total) + ".";
+  const line = freeLine(
+    used === null || total === null || total <= 0 ? null : (free / total) * 100,
+    gibDigits(free),
+    gibDigits(total),
+    "GiB",
+  );
+  const now = line === null ? "no VRAM reading yet." : line + ".";
   return {
     header: INSTRUMENTS.coolant,
     rows: [
@@ -761,16 +764,37 @@ var SETTINGS = {
   reset: "RESET TO DEFAULTS",
   amberLabel: "AMBER",
   redLabel: "RED",
-  // Round 7 item 3: one what line and one why line per metric, no band
-  // colors in the copy. The color names belong to the sliders, not to the
-  // description of what is being measured.
+  // Round 7 item 3, reshaped by round 7.5 item 18: one what-and-why
+  // paragraph per metric, no band colors in the copy. Two sentences, one
+  // flowing string - the settings Text wraps it itself.
   copy: {
-    psi: "Pressure Stall Information is the kernel\u2019s own measure of how long programs waited for RAM.\nWe watch it because high pressure means every program is slowing down.",
-    hd: "The root drive is the disk that holds the OS and your files.\nWe watch it because a full root drive freezes the machine.",
-    batt: "Swap is spare disk space the kernel uses when RAM runs out.\nWe watch it because an empty swap reserve takes the machine down with it.",
-    vram: "VRAM is the memory your graphics card loads programs and models into.\nWe watch it because the next big model load needs free VRAM to fit.",
+    psi: "Pressure Stall Information is the kernel\u2019s own measure of how long programs waited for RAM. We watch it because high pressure means every program is slowing down.",
+    hd: "The root drive is the disk that holds the OS and your files. We watch it because a full root drive freezes the machine.",
+    batt: "Swap is spare disk space the kernel uses when RAM runs out. We watch it because an empty swap reserve takes the machine down with it.",
+    vram: "VRAM is the memory your graphics card loads programs and models into. We watch it because the next big model load needs free VRAM to fit.",
   },
 };
+
+// Round 7.5 item 21: the VRAM gauge sliders move in 50 MiB steps. The MiB
+// scale is huge (the pair rides under GAUGE_MIB_MAX), so a one-MiB drag is
+// invisible noise; 50 MiB is the smallest move the captain can feel. The PSI
+// and drive sliders stay at 1 - their whole range is 99.
+function sliderStep(key) {
+  return key === "vram" ? 50 : 1;
+}
+
+// Round 7.5 item 17: the one standard free format for swap, VRAM and disk.
+// "z% Free (x/y GiB or GB)" - the percent free up front, the absolute pair in
+// parentheses, the unit named once. Everything that reports how much of a
+// resource is left reads through here, so the three resources say it the
+// same way.
+function freeLine(pctFree, freeAmount, totalAmount, unit) {
+  const pct = asNumber(pctFree);
+  const free = freeAmount === null || freeAmount === undefined ? null : String(freeAmount);
+  const total = totalAmount === null || totalAmount === undefined ? null : String(totalAmount);
+  if (pct === null || free === null || total === null || free === "" || total === "") return null;
+  return Math.round(pct) + "% Free (" + free + "/" + total + " " + unit + ")";
+}
 
 // GiB for the swap stat line, trailing .0 trimmed: the captain reads "8 GiB",
 // not "8.0 GiB", while a real fraction keeps its decimal ("1.2 GiB").
@@ -780,18 +804,17 @@ function gibTrim(mib) {
   return (v / 1024).toFixed(1).replace(/\.0$/, "");
 }
 
-// Round 7 item 9: the dash gains a SWAP line. Swap is said in the battery's
-// honest words plus the absolute numbers: "15 percent used, 1.2 GiB of 8 GiB".
-// A machine with no swap says so - it never draws a healthy zero.
+// Round 7.5 item 17: swap's stat line is the one standard free format -
+// "80% Free (1.9/8 GiB)" - and a machine with no swap says so. It never draws
+// a healthy zero.
 function swapLine(swap) {
   const s = swap || {};
   const totalKb = asNumber(s.swapTotalKb);
   const usedKb = asNumber(s.swapUsedKb);
   if (totalKb === null || totalKb <= 0 || usedKb === null) return "none configured";
-  const pct = Math.round((usedKb / totalKb) * 100);
-  const used = gibTrim(usedKb / 1024);
-  const total = gibTrim(totalKb / 1024);
-  return pct + " percent used, " + used + " GiB of " + total + " GiB";
+  const usedPct = (usedKb / totalKb) * 100;
+  const line = freeLine(100 - usedPct, gibTrim(usedKb / 1024), gibTrim(totalKb / 1024), "GiB");
+  return line === null ? "none configured" : line;
 }
 
 // --- round 3 iteration 2: the values-only popup -----------------------------
@@ -823,24 +846,34 @@ function valueRows(psiSome, reserve, swap, rootDrive, vram, codes) {
     value: swapLine(swap),
   });
   const fuel = rootDrive || null;
+  const pctFree = fuel === null ? null : asNumber(fuel.pctFree);
   const gb = fuel === null ? null : gbFromKb(fuel.availKb);
+  const gbTotal = fuel === null ? null : gbFromKb(fuel.sizeKb);
   rows.push({
     label: INSTRUMENTS.fuel,
-    // MARK 5: "Root drive, just say 437GB free." The full "X of Y (Z percent)"
-    // sentence stays where a hover decode can still give it (fuelTip); the
-    // stats row says the one number the captain asked for.
-    value: gb === null
+    // Round 7.5 item 17: the standard free format on the row itself.
+    value: freeLine(pctFree, gb, gbTotal, "GB") === null
       ? "no reading"
-      : gb + " GB free",
+      : freeLine(pctFree, gb, gbTotal, "GB"),
   });
   const freeMib = vram === null ? null : asNumber(vram.vramFreeMib);
+  const totalMib = vram === null ? null : asNumber(vram.vramTotalMib);
   rows.push({
     label: INSTRUMENTS.coolant,
-    // MARK 5: "For VRAM just say 7.1 gigs free." The full sentence stays in the
-    // hover tip (coolantTip), which still says GiB.
-    value: gibDigits(freeMib) === null
+    // Round 7.5 item 17: the standard free format on the row itself.
+    value: freeLine(
+      totalMib === null || totalMib <= 0 ? null : (freeMib / totalMib) * 100,
+      gibDigits(freeMib),
+      gibDigits(totalMib),
+      "GiB",
+    ) === null
       ? "no reading"
-      : gibDigits(freeMib) + " GiB free",
+      : freeLine(
+        totalMib === null || totalMib <= 0 ? null : (freeMib / totalMib) * 100,
+        gibDigits(freeMib),
+        gibDigits(totalMib),
+        "GiB",
+      ),
   });
   const list = codes === null || codes === undefined ? [] : codes;
   for (let i = 0; i < list.length; i += 1) {

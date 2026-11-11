@@ -270,11 +270,11 @@ test("bandDot: white none, orange amber, red red and critical", () => {
 
 test("the bar popup is a name column and a color-dot column under a centered title", () => {
   // Round 2, the captain's edits on the preview board: the real name up top,
-  // no column headers, no Free column, status = color dot only. Round 7 item 10:
-  // the rows pad by ESTIMATED GLYPH WIDTH (a proportional font makes equal
-  // character counts unequal widths, which is exactly the ragged dot column the
-  // captain screenshotted), so every row's estimated width matches and the
-  // dots sit on one vertical line.
+  // no column headers, no Free column, status = color dot only. Round 7.5
+  // item 22: the shell renders the tooltip in a MONOSPACE font, so the pad is
+  // a plain character count - names left-aligned, spaces to the longest name,
+  // a two-space gap, then the dot. Every row's dot sits in the same character
+  // column; the width-estimate machinery that fought the mono font is gone.
   const tip = Memory.barTooltip([
     { type: "ram", band: 0, pct: 42 },
     { type: "vram", band: 1, pct: 63 },
@@ -282,21 +282,16 @@ test("the bar popup is a name column and a color-dot column under a centered tit
   ]);
   const lines = tip.split("\n");
   assert.equal(lines[0], "Quattro Dash");
-  const widths = lines.slice(1).map((line) => Memory.textWidthUnits(line));
-  // Round 7 item 10: the pad is width-based. Every row reaches the shared
-  // column target and stays within one space width of the others, so the dot
-  // column lines up in a proportional font - equal character counts would not.
-  const target = Math.max(...["RAM", "VRAM", "Drive"].map((n) => Memory.textWidthUnits(n))) + 600;
-  for (const w of widths) {
-    assert.ok(w >= target, "no row is narrower than the shared column");
-  }
-  assert.ok(Math.max(...widths) - Math.min(...widths) <= 300, "the dot column sits within one space width across rows");
+  const charLens = lines.slice(1).map((line) => [...line].length);
+  assert.equal(
+    new Set(charLens).size,
+    1,
+    "every row carries the same character count, so the mono dots align",
+  );
   const names = lines.slice(1).map((line) => line.trim().split(/\s\s/)[0].trim());
   assert.match(names[0], /^RAM/);
   assert.match(names[1], /^VRAM/);
   assert.match(names[2], /^Drive/);
-  // Width, not character count, is the measure: Drive is wider than RAM.
-  assert.ok(Memory.textWidthUnits("Drive") > Memory.textWidthUnits("RAM"));
 });
 
 test("a drive that is away keeps its row, with the white dot in the status column", () => {
@@ -310,8 +305,8 @@ test("a drive that is away keeps its row, with the white dot in the status colum
   assert.match(lines[2], /^Drive/);
   assert.ok(lines[1].includes("\u26AA"), "the white dot rides the RAM row");
   assert.ok(lines[2].includes("\u26AA"), "the away drive keeps its row and draws the white dot");
-  const widths = lines.slice(1).map((line) => Memory.textWidthUnits(line));
-  assert.ok(Math.max(...widths) - Math.min(...widths) <= 300, "the away drive's dot shares the RAM row's column, within one space");
+  const charLens = lines.slice(1).map((line) => [...line].length);
+  assert.equal(new Set(charLens).size, 1, "the away drive's dot shares the RAM row's character column");
 });
 
 test("an empty watch list is the title alone", () => {
