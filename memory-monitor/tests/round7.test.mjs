@@ -36,25 +36,17 @@ test("psiBandFor judges PSI against the ram threshold store", () => {
   assert.equal(withCritical, 3, "a user-set critical PSI makes the critical band");
 });
 
-test("reserveBandFor: the battery pair is a real signal, red checked first", () => {
-  assert.equal(Memory.reserveBandFor(null, BATT), 0, "no swap configured is no band");
-  assert.equal(Memory.reserveBandFor(9.9, BATT), 2);
-  assert.equal(Memory.reserveBandFor(10, BATT), 1);
-  assert.equal(Memory.reserveBandFor(19.9, BATT), 1);
-  assert.equal(Memory.reserveBandFor(20, BATT), 0);
-  // A crossed or duplicated pair the new picker allows still reads one way:
-  // red wins the overlap.
-  assert.equal(Memory.reserveBandFor(15, { amber: 10, red: 30 }), 2, "red dominates the overlap");
-});
-
-test("the reserve pair inverts into the generic band machinery", () => {
-  assert.equal(Memory.reserveUsedPct(20), 80);
-  assert.equal(Memory.reserveUsedPct(null), null);
+test("the swap reserve resolves through the generic band machinery", () => {
+  // The battery pair is free-percent; the reserve thresholds invert it into
+  // the used-percent lines the generic resolveBand judges (amber 20 free = 80
+  // used, red 10 free = 90 used).
   const t = Memory.reserveThresholds(BATT);
   assert.equal(t.amber, 80);
   assert.equal(t.red, 90);
   assert.equal(t.critical, null);
-  assert.equal(Memory.bandForPct(Memory.reserveUsedPct(9), t), 2, "9 percent free is band 2 through the same resolveBand math");
+  assert.equal(Memory.bandForPct(9, t), 0, "9 percent used is a healthy reserve");
+  assert.equal(Memory.bandForPct(85, t), 1, "85 percent used = 15 percent free, under the amber line");
+  assert.equal(Memory.bandForPct(95, t), 2, "95 percent used = 5 percent free, under the red line");
 });
 
 test("the ram badge band is the worse of pressure and reserve", () => {
@@ -71,7 +63,7 @@ test("the ram toast says the signal, never percent-used", () => {
   );
   same2(
     Memory.amberBody(ramAlert(1, 18, "swap")).split("\n"),
-    ["Caution: Amber Alert", "Swap reserve is down to 18 percent.", "Click to address with agent, otherwise ignore."],
+    ["Caution: Amber Alert", "Swap reserve is 18 percent used.", "Click to address with agent, otherwise ignore."],
   );
   same2(
     Memory.redBody(ramAlert(2, 91, "psi")).split("\n"),
@@ -85,7 +77,7 @@ test("the ram toast says the signal, never percent-used", () => {
     Memory.redBody(ramAlert(2, 8, "swap")).split("\n"),
     [
       "WARNING: RED ALERT",
-      "Swap reserve is down to 8 percent.",
+      "Swap reserve is 8 percent used.",
       "Click to open an agent to actively monitor/guard against OOM, otherwise ignore.",
     ],
   );
@@ -101,16 +93,16 @@ function same2(actual, expected) {
   assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected);
 }
 
-test("the ram tooltip reads pressure and swap, not percent-used", () => {
-  const tip = Memory.tooltipText({
+test("the detail window's ram headline reads pressure and swap, not percent-used", () => {
+  const line = Memory.ramReadingLine({
     type: "ram", band: 1, pct: 62, psiSomeAvg10: 12.34,
-    swapPct: 15.4, swapUsedKb: 12582912, swapTotalKb: 8388608,
+    swapPct: 15.4, swapUsedKb: 1258291, swapTotalKb: 8388608,
     memAvailableKb: 10485760, memTotalKb: 27487790694, latched: false,
   });
-  const lines = tip.split("\n");
-  assert.match(lines[0], /RAM PRESSURE - 12\.3 PSI/);
-  assert.match(tip, /swap 16% used/);
-  assert.equal(lines.some(l => /62%/.test(l)), false, "the used percent is not the headline anymore");
+  assert.match(line, /RAM PRESSURE 12\.3 PSI/);
+  assert.match(line, /swap 16% used/);
+  assert.match(line, /1\.2 GiB of 8 GiB/);
+  assert.equal(line.includes("62%"), false, "the used percent is not the headline anymore");
 });
 
 test("a PSI band always releases: no MemAvailable gate on a pressure metric", () => {
@@ -164,7 +156,8 @@ test("no user-visible copy still says Memory Monitor", () => {
     Memory.kernelCeilingText(null),
     Memory.noWatchedDrivesText(),
     Memory.unreachableBandNote(2, PSI_T, "ram", 1, 1),
-    Memory.tooltipText({ type: "ram", band: 1, pct: 62, psiSomeAvg10: 1 }),
+    Memory.unreachableBandNote(2, { amber: 80, red: 90, critical: null }, "ram", 1, 1, "swap"),
+    Memory.ramReadingLine({ psiSomeAvg10: 1, swapPct: 1, swapUsedKb: 1, swapTotalKb: 1, memAvailableKb: 1, memTotalKb: 1 }),
     Memory.psiText({}),
     Memory.swapText({}),
     Memory.vramUnattributedText(null),
@@ -267,22 +260,28 @@ test("barTooltip pads by estimated glyph width, not character count", () => {
 test("the ram band is the more severe of the pressure and swap bands, and names its signal", () => {
   const RAM_T = { amber: 70, red: 90, critical: null };
   const BATT = { amber: 20, red: 10 };
+  // swapPct is the USED percent everywhere: swapTotals computes used/size, the
+  // toast says "N percent used", and the reserve thresholds invert the free
+  // pair into used lines (80/90). The band function takes the same field.
   const band = (psi, swapPct, prev) => Memory.resolveRamBand(
     { psiSomeAvg10: psi, swapPct: swapPct }, RAM_T, prev === undefined ? 0 : prev, BATT);
   assert.equal(band(75, 15).band, 1, "75 PSI crosses the 70 amber");
   assert.equal(band(75, 15).signal, "psi");
   assert.equal(band(92, 15).band, 2, "92 PSI crosses the 90 red");
-  assert.equal(band(40, 5).band, 2, "swap 5 percent free is under the batt pair's 10 red");
-  assert.equal(band(40, 5).signal, "swap");
-  assert.equal(band(40, 15).band, 1, "swap 15 percent free is under the 20 amber");
-  assert.equal(band(40, 15).signal, "swap");
+  assert.equal(band(40, 5).band, 0, "swap 5 percent used is a healthy reserve, not a red band");
+  assert.equal(band(40, 85).band, 1, "swap 85 percent used is 15 percent free, under the 20 amber");
+  assert.equal(band(40, 85).signal, "swap");
+  assert.equal(band(40, 95).band, 2, "swap 95 percent used is 5 percent free, under the 10 red");
+  assert.equal(band(40, 95).signal, "swap");
   assert.equal(band(40, 30).band, 0);
   assert.equal(band(40, null).band, 0, "no swap configured is no band, never a healthy zero");
   assert.equal(band(null, null).band, 0, "no PSI reading is no band");
-  assert.equal(band(92, 5).signal, "psi", "both signals red: the toast says pressure");
+  assert.equal(band(92, 95).signal, "psi", "both signals red: the toast says pressure");
   // Each signal hysteresizes in its own unit against the same held band.
   assert.equal(band(87, 30, 2).band, 2, "leaving red 90 needs 4 PSI of margin, not a dip to 87");
   assert.equal(band(85, 30, 2).band, 1, "85 PSI is below the 86 release line");
+  assert.equal(band(40, 86, 2).band, 1, "leaving the red reserve needs 4 used-percent of margin: 86 used is below the 90 line by exactly the margin");
+  assert.equal(band(40, 89, 2).band, 2, "89 used does not clear the reserve release line");
 });
 
 // ---------------------------------------------------------------------------

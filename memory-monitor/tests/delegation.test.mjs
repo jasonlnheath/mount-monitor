@@ -123,7 +123,7 @@ test("the click path is typed argv, and the critical click opens the detail wind
   assert.equal(amber.length, 4, "the whole prompt is one argument, never a shell string");
   assert.equal(amber[3].includes("\n"), true, "the prompt is a paragraph, and a paragraph in one argv element is why typed argv matters");
   assert.equal(amber[3].includes("&&"), false);
-  assert.equal(amber[3].includes("82%"), true, "the prompt carries the reading, rounded up");
+  assert.equal(amber[3].includes("82 PSI"), true, "the prompt carries the reading, rounded up, in the signal's own unit");
   // The hint the notification service prefers, and the live action it falls back
   // to, are both present on every band alert.
   const argv = Memory.notifyArgs({ kind: "alert", band: 2, type: "ram", key: "ram", id: Memory.memId("ram"), pct: 91.2 }, null);
@@ -377,7 +377,7 @@ test("the widget's own copy is only the bar's logo and the tooltip, both of whic
   // QuattroDash is the bar emblem (the approved design): the MIL artwork
   // renders through QuattroSymbol, so the widget's own copy is only the bar
   // tooltip, which memory.js supplies.
-  assert.equal(QML.includes("Memory.barTooltip(") || QML.includes("Memory.tooltipText("), true);
+  assert.equal(QML.includes("Memory.barTooltip("), true);
   const both = QML + "\n" + PANEL;
   assert.equal(both.includes("Memory.unavailableText("), true, "a missing reading is named, not drawn as zero");
   assert.equal(both.includes("Memory.unreachableBandNote("), true, "a stuck band says so instead of latching in silence");

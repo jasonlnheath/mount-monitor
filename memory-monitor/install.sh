@@ -83,7 +83,7 @@ fi
 command -v notify-send > /dev/null \
   || echo "notify-send is not installed; Quattro Dash can draw its badge but cannot alert." >&2
 command -v findmnt > /dev/null \
-  || echo "findmnt is not installed; Memory Monitor cannot read your drives." >&2
+  || echo "findmnt is not installed; Quattro Dash cannot read your drives." >&2
 command -v nvidia-smi > /dev/null \
   || echo "nvidia-smi is not installed; the VRAM ring is off. RAM and drives still monitor." >&2
 command -v zramctl > /dev/null \

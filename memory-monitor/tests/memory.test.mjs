@@ -242,11 +242,10 @@ test("nothing watched and nothing held means no badge at all", () => {
 
 test("a held band says it is held in the detail window only; the bar popup drops the held column, for every resource", () => {
   const held = { type: "ram", band: 2, pct: 93, latched: true, memAvailableKb: 1, memTotalKb: 2, swapPct: null };
-  assert.match(Memory.tooltipText(held), /held: this band has not released yet/);
+  assert.match(Memory.ramReadingLine(held), /held: this band has not released yet/);
   const released = { type: "ram", band: 2, pct: 93, latched: false, memAvailableKb: 1, memTotalKb: 2, swapPct: null };
-  assert.equal(Memory.tooltipText(released).includes("held"), false);
-  assert.match(Memory.tooltipText({ type: "vram", band: 1, pct: 82, latched: true, vramUsedMib: 1, vramTotalMib: 2, vramFreeMib: 1 }), /held: this band has not released yet/);
-  assert.match(Memory.tooltipText({ type: "hd", band: 1, pct: 84, latched: true, target: "/data", usedKb: 1, sizeKb: 2, availKb: 1 }), /held: this band has not released yet/);
+  assert.equal(Memory.ramReadingLine(released).includes("held"), false);
+  assert.match(Memory.vramReadingLine({ type: "vram", band: 1, pct: 82, latched: true, vramUsedMib: 1, vramTotalMib: 2, vramFreeMib: 1 }), /held: this band has not released yet/);
   assert.equal(Memory.latchedText(true), "held: this band has not released yet");
   assert.equal(Memory.latchedText(false), "");
   assert.equal(Memory.latchedText(undefined), "", "a group that carries no latch flag is not called held");

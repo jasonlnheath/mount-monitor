@@ -131,8 +131,11 @@ Panel {
         PanelSectionHeader { text: "System RAM"; foreground: root.fg }
         Text {
           visible: root.ram !== null
+          // Round 7 item 2: the detail window's ram headline is the one-line
+          // reading - pressure in PSI, the swap reserve, the available number,
+          // and the held note when a band is stuck.
           text: root.ram === null ? "no reading"
-            : Memory.tooltipText(root.ram).split("\n").join("   ")
+            : Memory.ramReadingLine(root.ram)
           color: root.bandColor(root.ram === null ? 0 : root.ram.band)
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
@@ -157,7 +160,7 @@ Panel {
           visible: root.ram !== null && root.ram.band >= 1
           text: root.ram === null ? "" : Memory.unreachableBandNote(
             root.ram.band, Memory.thresholdsFor(root.mmState, "ram"), "ram",
-            root.ram.memAvailableKb, root.ram.memTotalKb)
+            root.ram.memAvailableKb, root.ram.memTotalKb, root.ram.signal)
           color: root.warnColor
           wrapMode: Text.Wrap
           font.pixelSize: Style.font.bodySmall
@@ -178,7 +181,7 @@ Panel {
         }
         Text {
           visible: root.vram !== null
-          text: root.vram === null ? "" : Memory.tooltipText(root.vram).split("\n").join("   ")
+          text: root.vram === null ? "" : Memory.vramReadingLine(root.vram)
           color: root.bandColor(root.vram === null ? 0 : root.vram.band)
           font.pixelSize: Style.font.bodySmall
           Layout.fillWidth: true

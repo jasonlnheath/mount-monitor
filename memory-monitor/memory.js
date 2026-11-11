@@ -1305,30 +1305,10 @@ function psiBandFor(psi, thresholds) {
   return bandForPct(psi, thresholds);
 }
 
-// The swap RESERVE battery is a real signal too: free percent below the pair's
-// red line is band 2, below amber band 1. No swap configured is no band.
-// Red is checked first, so a crossed pair (the picker now allows duplicates)
-// still reads one way: red dominates the overlap.
-function reserveBandFor(reservePct, battPair) {
-  const pct = asNumber(reservePct);
-  if (pct === null) return 0;
-  const pair = battPair || {};
-  const amber = asNumber(pair.amber);
-  const red = asNumber(pair.red);
-  if (red === null || amber === null) return 0;
-  if (pct < red) return 2;
-  if (pct < amber) return 1;
-  return 0;
-}
-
 // The reserve pair (free percent, red below amber) inverted into the generic
-// resolveBand machinery, whose bad end is high: used-equivalent = 100 - free.
-function reserveUsedPct(reservePct) {
-  const pct = asNumber(reservePct);
-  if (pct === null) return null;
-  return 100 - pct;
-}
-
+// resolveBand machinery, whose bad end is high: the pair's free-percent lines
+// become used-percent lines (amber 20 free = 80 used, red 10 free = 90 used).
+// The swap reading feeds resolveBand as the used-equivalent directly.
 function reserveThresholds(battPair) {
   const pair = battPair || {};
   const amber = asNumber(pair.amber);
@@ -1369,14 +1349,18 @@ function hysteresisPp(type) {
 // band and the swap-reserve band, each resolved with its own hysteresis in its
 // own unit against the same previous band. The returned `signal` names which
 // signal produced the band, so the toast says pressure or swap.
+// The swap signal rides the review's one production path: swapPct is the USED
+// percent, which is exactly the used-equivalent the generic resolveBand
+// machinery judges against the inverted pair (amber 80 used / red 90 used for
+// the 20/10 free pair). A swap reserve 85 percent used is 15 percent free -
+// under the amber line.
 function resolveRamBand(reading, thresholds, previousBand, battPair) {
   const r = reading || {};
   const psiResult = resolveBand(r.psiSomeAvg10, thresholds, previousBand, "ram");
-  const swapUsed = reserveUsedPct(r.swapPct);
   // No swap configured contributes no band: it never reads as a healthy zero.
-  const swapResult = swapUsed === null
+  const swapResult = asNumber(r.swapPct) === null
     ? { band: 0, latched: false }
-    : resolveBand(swapUsed, reserveThresholds(battPair), previousBand, "swap");
+    : resolveBand(r.swapPct, reserveThresholds(battPair), previousBand, "swap");
   return {
     band: ramCombinedBand(psiResult.band, swapResult.band),
     latched: psiResult.latched === true || swapResult.latched === true,
@@ -1422,10 +1406,14 @@ function descentReachable(band, thresholds, type, memAvailableKb, memTotalKb) {
   return { reachable: true, releasePct: rule.releasePct, needKb: null, totalKb: asNumber(memTotalKb) };
 }
 
-function unreachableBandNote(band, thresholds, type, memAvailableKb, memTotalKb) {
+function unreachableBandNote(band, thresholds, type, memAvailableKb, memTotalKb, signal) {
   const rule = descentReachable(band, thresholds, type, memAvailableKb, memTotalKb);
   if (rule.releasePct === null) return "";
-  const unit = type === "ram" ? " PSI" : "%";
+  // The note speaks the held signal's own unit: PSI for a pressure-held band,
+  // percent used for a swap-held band (the reserve pair's used-equivalent),
+  // percent for hd and vram.
+  const sig = sanitizeText(signal, 8);
+  const unit = sig === "swap" ? "% used" : (type === "ram" ? " PSI" : "%");
   return "This band releases below " + rule.releasePct + unit + ".";
 }
 // ---------------------------------------------------------------------------
@@ -1576,7 +1564,7 @@ function ramSignalLine(opts) {
   const o = opts || {};
   const signal = sanitizeText(o.signal, 8) === "swap" ? "swap" : "psi";
   const pct = readingPct(o.pct);
-  if (signal === "swap") return "Swap reserve is down to " + pct + " percent.";
+  if (signal === "swap") return "Swap reserve is " + pct + " percent used.";
   return "System RAM pressure has reached " + pct + " PSI.";
 }
 
@@ -1997,9 +1985,15 @@ function agentPrompt(alert, reading, oomd, logPath) {
   const id = isMemId(a.id) ? a.id : memId(a.key);
   const kind = sanitizeText(a.type, 16);
   const pct = readingPct(a.pct);
+  // The reading is named in its own unit: a ram alert's pct is the signal's
+  // own number (PSI for pressure, percent used for the reserve), never the
+  // MemAvailable percent wearing a wrong unit.
+  const sig = sanitizeText(a.signal, 8);
+  const readingText = kind === "ram" && sig === "swap" ? pct + " percent used"
+    : (kind === "ram" ? pct + " PSI" : pct + "%");
   const fixed = [];
   fixed.push("Quattro Dash reports that " + kindLabel(kind) + " has crossed a ceiling you set.");
-  fixed.push("Resource id: " + id + ". Band: " + (BAND_NAMES[band] || "none") + ". Reading: " + pct + "%.");
+  fixed.push("Resource id: " + id + ". Band: " + (BAND_NAMES[band] || "none") + ". Reading: " + readingText + ".");
   if (band >= 3) {
     fixed.push("This is the critical band. Report what is consuming it, ranked, with sizes.");
     fixed.push("Do not kill, delete, unmount, format, or change any limit on your own.");
@@ -2210,6 +2204,8 @@ function retractClaimFor(arm, opts) {
       clickArgv: ipcOpenDetailArgv(),
       action: actionFor({ kind: "alert", band: 3 }),
       iconDir: o.iconDir,
+      // The retraction wears the same red emblem the toast it replaces wore.
+      alert: { kind: "alert", band: 3, signal: record.signal },
     }),
   };
 }
@@ -2803,6 +2799,14 @@ function latchedText(latched) {
   return normalizeBool(latched, false) ? "held: this band has not released yet" : "";
 }
 
+// GiB with trailing .0 trimmed, the same words the dash's SWAP line uses:
+// the captain reads "8 GiB", while a real fraction keeps its decimal.
+function gibTrimFromKb(kb) {
+  const v = asNumber(kb);
+  if (v === null) return "unknown";
+  return (v / 1048576).toFixed(1).replace(/\.0$/, "") + " GiB";
+}
+
 // The detail window's one-line readings (round 7 item 2: the panel shows the
 // simple current reading, one line per metric). The RAM line names pressure
 // and swap - the two signals the plugin watches now - with the absolute
@@ -2815,7 +2819,7 @@ function ramReadingLine(reading) {
   let line =
     "RAM PRESSURE " + (psi === null ? "unknown" : psi.toFixed(1) + " PSI") +
     " - swap " + (swapPct === null ? "none" : readingPct(swapPct) + "% used") +
-    " (" + mib(r.swapUsedKb) + " of " + mib(r.swapTotalKb) + ")" +
+    " (" + gibTrimFromKb(r.swapUsedKb) + " of " + gibTrimFromKb(r.swapTotalKb) + ")" +
     " - " + gib(r.memAvailableKb) + " free of " + gib(r.memTotalKb);
   if (held.length > 0) line += " - " + held;
   return line;
@@ -2838,34 +2842,6 @@ function gibFromMib0(mibValue) {
   const v = asNumber(mibValue);
   if (v === null) return "unknown";
   return (v / 1024).toFixed(1) + " GiB";
-}
-
-function tooltipText(entry) {
-  const e = entry || {};
-  const type = sanitizeText(e.type, 16);
-  const band = asNumber(e.band) || 0;
-  const pct = readingPct(e.pct);
-  const held = latchedText(e.latched);
-  const lines = [];
-  if (type === "hd") {
-    lines.push((sanitizeText(e.target) || "drive") + " - " + pct + "%");
-    lines.push(mib(e.usedKb) + " used of " + mib(e.sizeKb) + ", " + mib(e.availKb) + " free");
-    if (normalizeBool(e.ro, false)) lines.push("read-only - nothing can be pruned here, only moved off");
-    if (held.length > 0) lines.push(held);
-  } else if (type === "ram") {
-    const psi = asNumber(e.psiSomeAvg10);
-    lines.push("RAM PRESSURE - " + (psi === null ? "unknown" : psi.toFixed(1) + " PSI"));
-    lines.push(gib(e.memAvailableKb) + " available of " + gib(e.memTotalKb));
-    lines.push("swap " + (asNumber(e.swapPct) === null ? "none" : readingPct(e.swapPct) + "% used"));
-    if (held.length > 0) lines.push(held);
-  } else if (type === "vram") {
-    lines.push("VRAM - " + pct + "%");
-    lines.push(asNumber(e.vramUsedMib) + " MiB used of " + asNumber(e.vramTotalMib) + " MiB");
-    lines.push(asNumber(e.vramFreeMib) + " MiB free");
-    if (held.length > 0) lines.push(held);
-  }
-  if (band >= 1) lines.push("Band: " + (BAND_NAMES[band] || "none"));
-  return lines.join("\n");
 }
 
 function badgeLabel(type) {

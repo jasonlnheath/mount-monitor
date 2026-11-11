@@ -332,6 +332,9 @@ BarWidget {
       ram.oomdWatchedCgroup = oomd ? oomd.oomdWatchedCgroup : "";
       ram.band = bandOf("ram");
       ram.latched = latchedOf("ram");
+      // Which signal holds the band, so the panel's release note speaks the
+      // right unit (PSI for pressure, percent used for the reserve).
+      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt")).signal;
     }
     ramReading = ram;
 
@@ -422,6 +425,7 @@ BarWidget {
       var ram = JSON.parse(JSON.stringify(ramReading));
       ram.band = bandOf("ram");
       ram.latched = latchedOf("ram");
+      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt")).signal;
       ramReading = ram;
     }
     if (vramReading !== null) {
@@ -477,7 +481,14 @@ BarWidget {
     if (isWriter && (held !== previous || firstSample)) saveState();
     if (!fire) return;
     if (entry) entry.band = held;
-    queueAlert(entry, held, type, key, result.latched, result.signal);
+    // The toast says the signal's own number: PSI for a pressure band, the
+    // used percent for a swap band. The MemAvailable percent is data for the
+    // agent's block, never the toast's headline number.
+    var signalPct = entry === null || entry === undefined ? undefined : entry.pct;
+    if (type === "ram" && ramReading !== null) {
+      signalPct = result.signal === "swap" ? ramReading.swapPct : ramReading.psiSomeAvg10;
+    }
+    queueAlert(entry, held, type, key, result.latched, result.signal, signalPct);
   }
 
   // ---------------------------------------------------------------------------
@@ -485,7 +496,7 @@ BarWidget {
   // daemon drops a silenced amber without keeping a record of dropping it.
   // ---------------------------------------------------------------------------
 
-  function alertEvent(entry, band, type, key, latched, signal): var {
+  function alertEvent(entry, band, type, key, latched, signal, signalPct): var {
     var base = entry === null || entry === undefined ? {} : entry;
     return {
       kind: "band",
@@ -493,7 +504,9 @@ BarWidget {
       id: base.id === undefined ? Memory.memId(key) : base.id,
       type: type,
       band: band,
-      pct: base.pct,
+      // Round 7 item 8: a ram alert's pct is the signal's own reading, so the
+      // toast and the agent prompt never print MemAvailable percent as PSI.
+      pct: signalPct === undefined ? base.pct : signalPct,
       latched: latched,
       // Round 7 item 8: which ram signal produced the band, so the toast can
       // say pressure or swap. Absent for hd and vram.
@@ -512,10 +525,10 @@ BarWidget {
     };
   }
 
-  function queueAlert(entry, band, type, key, latched, signal): void {
+  function queueAlert(entry, band, type, key, latched, signal, signalPct): void {
     if (!isWriter) return;
     if (band === 0) return;
-    var alert = alertEvent(entry, band, type, key, latched, signal);
+    var alert = alertEvent(entry, band, type, key, latched, signal, signalPct);
 
     // Mount Monitor already toasts the drives it watches, with its own words,
     // its own thresholds and its own click target. One toast per crossing.
@@ -703,6 +716,7 @@ BarWidget {
         eventKey: eventKey,
         type: alert.type,
         band: alert.band,
+        signal: alert.signal,
         outcome: decision.reason === "no headroom for the guard" ? "refused" : "skipped",
         reasons: budget.reasons.concat([decision.reason]),
         startedAt: new Date().toISOString(),
@@ -726,6 +740,9 @@ BarWidget {
       key: alert.key,
       id: alert.id,
       pct: alert.pct,
+      // The signal rides the record so a restart's retraction toast names the
+      // same signal and unit the original toast did.
+      signal: alert.signal,
       target: alert.target,
       outcome: "started",
       startedAt: new Date().toISOString(),
@@ -898,7 +915,7 @@ BarWidget {
       band: 3,
       pct: ramReading === null ? null : ramReading.pct,
       guardState: "off",
-      title: "Memory Monitor - your ceilings",
+      title: "Quattro Dash - your ceilings",
       resting: resting,
       body: Memory.ceilingsQuestion("ram", ramReading, oomd, state.thresholds, resting)
         + "\n\n" + Memory.ceilingsQuestion("vram", vramReading, oomd, state.thresholds, resting)

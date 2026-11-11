@@ -26,7 +26,7 @@ test("the amber copy is the spec's copy for each resource type", () => {
   );
   same(
     Memory.amberBody({ type: "ram", band: 1, pct: 18, signal: "swap" }).split("\n"),
-    ["Caution: Amber Alert", "Swap reserve is down to 18 percent.", "Click to address with agent, otherwise ignore."],
+    ["Caution: Amber Alert", "Swap reserve is 18 percent used.", "Click to address with agent, otherwise ignore."],
   );
 });
 
@@ -43,7 +43,7 @@ test("the red copy is the spec's copy, and its type word is capitalised as the s
     Memory.redBody({ type: "ram", band: 2, pct: 8, signal: "swap" }).split("\n"),
     [
       "WARNING: RED ALERT",
-      "Swap reserve is down to 8 percent.",
+      "Swap reserve is 8 percent used.",
       "Click to open an agent to actively monitor/guard against OOM, otherwise ignore.",
     ],
   );
@@ -70,7 +70,7 @@ test("the reading is rounded up, never the threshold that fired", () => {
   assert.match(Memory.redBody({ type: "hd", pct: 90.01 }), /has reached 91% usage/);
   assert.match(Memory.amberBody({ type: "vram", pct: 80.4 }), /has reached 81% usage/);
   assert.match(Memory.redBody({ type: "ram", band: 2, pct: 90.01, signal: "psi" }), /reached 91 PSI/);
-  assert.match(Memory.amberBody({ type: "ram", band: 1, pct: 80.4, signal: "swap" }), /down to 81 percent/);
+  assert.match(Memory.amberBody({ type: "ram", band: 1, pct: 80.4, signal: "swap" }), /is 81 percent used/);
   assert.match(Memory.criticalBody({ pct: 97.2, signal: "psi", guardState: "armed" }), /reached 98 PSI/);
 });
 

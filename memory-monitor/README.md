@@ -86,26 +86,29 @@ A toast on every amber, red and critical alert event, in the spec's own words:
 ```
 Quattro Dash
 Caution: Amber Alert
-Device (System Ram) has reached 82% usage.
+System RAM pressure has reached 72 PSI.
 Click to address with agent, otherwise ignore.
 ```
 
 ```
 Quattro Dash
 WARNING: RED ALERT
-Device (System RAM) has reached 91% usage.
+Swap reserve is 92 percent used.
 Click to open an agent to actively monitor/guard against OOM, otherwise ignore.
 ```
 
 ```
 Quattro Dash
 CRITICAL ALERT!
-Device has reached 98% usage.
+System RAM pressure has reached 98 PSI.
 Agent has been notified and is guarding against OOM.
 ```
 
-The percentage is the **live reading, rounded up**, not the threshold: a mount at
-97% is not told "reached 95%".
+A ram toast names its signal's own number: PSI for a pressure band, the used
+percent for the swap reserve. Drives and VRAM keep the percent-used wording,
+and the percentage is the **live reading, rounded up**, not the threshold: a
+mount at 97% is not told "reached 95%". Every toast wears the check-engine
+emblem logo, tinted plain, amber or red by the band.
 
 - **Amber** is normal urgency. If Do Not Disturb is on, the notification service
   silences it — and Quattro Dash records it, in the log and in the detail
@@ -176,7 +179,7 @@ is PRESSURE + SWAP RESERVE, never amount used, so a high System RAM reading
 is the pressure gauge and the reserve battery and NO code; VRAM high lights
 the coolant light only. A code is a watched DRIVE sitting over your amber or
 red ceiling, wearing an OBD-style name (C plus four stable digits) and a
-hover decode (Issue / Status / Fix). An empty column reads "ENGINE CLEAR" under
+one-line hover status (round 7: the severity line only). An empty column reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
 code sends the same fixed prompt the toasts send to your default agent (inline
 when `agentInline` is set) with the dashboard's own pre-computed diagnosis
