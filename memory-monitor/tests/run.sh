@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Memory Monitor checks: the node tests over memory.js, quattro.js and
-# ringkit.js (ceilings, bands, hysteresis, the available-based RAM signal, swap
+# ringkit.js (ceilings, bands, hysteresis, the pressure+swap RAM signal, swap
 # escalation, oomd visibility, VRAM, drive dedup, toast copy, DND routing, the
 # guard arm, the baseline log, onboarding, the trust boundary, the QuattroDash
 # bands, code taxonomy and copy-language rule), a conformance check that pins

@@ -12,7 +12,8 @@
  * `tests/memory.test.mjs` pins this.
  *
  * Memory Monitor is the sibling of Mount Monitor and a separate product: it
- * watches System RAM, VRAM and Hard Drive capacity, alerts at user-set ceilings,
+ * watches RAM pressure and the swap reserve, VRAM and Hard Drive capacity,
+ * alerts at user-set ceilings,
  * logs a baseline, and asks before it guards. It runs no partition scan, emits
  * no new-partition notice, keeps no `decisions` map, ships no partition skill,
  * and runs no `udevadm monitor` — Mount Monitor owns which drives are watched
@@ -90,19 +91,21 @@ var POLL_PSI_MS = 5000;
 var HYSTERESIS_PP = { hd: 2, vram: 2, ram: 4 };
 
 // A held band produces a fresh alert event when its severity increases, when
-// PSI memory crosses this floor, or when swap crosses oomd's swap limit. PSI is
-// the re-alert gate and the poll escalator; it is never the band and never a
-// threshold. Provisional from the rig (a pressure-free machine reads 0.00; a
+// PSI memory crosses this floor, or when swap crosses oomd's swap limit. Since
+// round 7 PSI is also one of the ram band's two signals, judged against the
+// psi pair's thresholds; the re-alert gate and the poll escalator are its
+// other jobs. Provisional from the rig (a pressure-free machine reads 0.00; a
 // genuinely tight one reads 1.02), re-anchored by the week-two pass.
 var PSI_STALL_FLOOR = 1.0;
 
 // ---------------------------------------------------------------------------
-// Notifications. Red and critical ride critical urgency because the shell's
-// `shouldBypassDnd()` lets through only `omarchy-action` and a `notify-send`
-// with critical urgency; a non-critical `notify-send` under DND is dropped with
-// no history row at all. Critical urgency on this shell means timeout 0 and a
-// never-expiring process lane, which is why amber stays normal urgency and is
-// silenced-but-recorded rather than shouted.
+// Notifications. Round 7: every toast rides normal urgency with a finite
+// timeout - critical urgency on this shell means timeout 0 (never expires),
+// and a permanent toast is exactly what the captain struck down. The cost is
+// Do Not Disturb: `shouldBypassDnd()` lets through only `omarchy-action` and a
+// critical `notify-send`, so any toast under DND is dropped with no history
+// row at all, and a silenced alert is recorded in the log and the detail
+// window rather than shouted.
 // ---------------------------------------------------------------------------
 
 var URGENCE = { 1: "normal", 2: "normal", 3: "normal" };
@@ -916,8 +919,8 @@ function ramReading(meminfo) {
   };
 }
 
-// PSI is the re-alert gate, the poll escalator, and the re-anchoring evidence.
-// It never moves the bar's band and never moves a threshold.
+// PSI resolves the ram band against the psi pair (round 7) and is still the
+// re-alert gate, the poll escalator, and the re-anchoring evidence.
 function parsePsi(text) {
   const lines = asString(text).split(/\r?\n/);
   const out = {};
@@ -1688,19 +1691,20 @@ function timeoutFor(alert) {
 }
 
 // Amber rides the watchdog-released band-alert lane. Red and critical ride the
-// never-expiring notice lane, because critical urgency on this shell means
-// timeout 0 and `notify-send` blocks while its action is live. A question nobody
-// answered must never hold a worse warning.
+// notice lane, which round 7 gave the same 120 s watchdog release: every toast
+// is temporary now. The lanes stay split because `notify-send` blocks while
+// its action is live, and a question nobody answered must never hold a worse
+// warning.
 function notifyLaneFor(alert) {
-  // A notice that has to be answered rides the never-expiring lane whatever its
-  // band: no timer releases it, so an unanswered question cannot hold a
-  // full-drive warning shut in the queue behind it.
+  // A notice that has to be answered rides the notice lane whatever its band:
+  // an unanswered question cannot hold a full-drive warning shut in the queue
+  // behind it.
   if (isOnboardingNotice(alert)) return "notice";
   const band = asNumber((alert || {}).band) || 0;
   return band >= 2 ? "notice" : "alert";
 }
 
-// Severity on the never-expiring lane, for escalation preemption. A question
+// Severity on the notice lane, for escalation preemption. A question
 // sits below every alert: it is why an emergency never queues behind one.
 function noticeSeverity(notice) {
   if (isOnboardingNotice(notice)) return 0;
@@ -1723,8 +1727,9 @@ function supersedesQueuedNotice(incoming, queued) {
   return noticeSeverity(incoming) > noticeSeverity(queued);
 }
 
-// Amber respects DND: silencing an amber is a legitimate choice the user made by
-// turning DND on. Red bypasses it. Critical is unchanged.
+// Round 7: every toast rides normal urgency, so nothing bypasses DND. A
+// silenced toast of any band is the user's legitimate choice and is recorded
+// rather than shouted.
 function bypassesDnd(alert) {
   return urgencyFor(alert) === "critical";
 }
@@ -1923,7 +1928,7 @@ function notifyArgs(alert, agentCommand, opts) {
   // stacking a second copy of a question that was never answered.
   const replace = sanitizeText(o.replaceId, 64);
   if (replace.length > 0) args.push("-r", replace);
-  // Every never-expiring notice prints its id: the claim needs it to be
+  // Every notice on the notice lane prints its id: the claim needs it to be
   // retractable when the arm dies, and an escalation needs it to displace this
   // notice when a worse one arrives while it is still on the screen.
   if (notifyLaneFor(alert) === "notice" && normalizeBool(o.printId, false)) args.push("-p");
@@ -2252,7 +2257,7 @@ function reconcileArms(arms, liveEventKey) {
 // in place; a finished arm's records are history and take no patch.
 // A printed id may reach the claim only from the notice that IS the claim: the
 // same event the arm was started for, and a band alert - a question never claims
-// an agent. Any other notice printing on the never-expiring lane while the arm
+// an agent. Any other notice printing on the notice lane while the arm
 // is live is another notice's id, and patching it onto the record would have a
 // death retract by an id the claim never held.
 function isArmClaimNotice(arm, notice) {

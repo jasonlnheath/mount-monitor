@@ -35,11 +35,11 @@ import "ringkit.js" as RingKit
 // sitting in a band. `primed` is carried, so a shell restart does not re-toast a
 // band that was already held.
 //
-// Amber rides normal urgency on the watchdog-released lane and is silenced by
-// Do Not Disturb — but recorded, in the log and in the panel's "Alerts you did
-// not see". Red and critical ride critical urgency, which is the only thing the
-// shell's shouldBypassDnd lets through, and therefore timeout 0, their own
-// never-expiring process lane, and a persisted exec hint that keeps a
+// Round 7: every toast rides normal urgency with a finite timeout — the tinted
+// logo carries the severity — so a toast of any band can be silenced by Do Not
+// Disturb, and is recorded when it is, in the log and in the panel's "Alerts
+// you did not see". Red and critical keep their own process lane,
+// watchdog-released like the amber one, and a persisted exec hint keeps a
 // restart-surviving toast clickable.
 //
 // Amber and red clicks send an agent prompt. Critical clicks open the detail
@@ -105,8 +105,9 @@ BarWidget {
   property var dnd: null
 
   // ---- Queues. `alertQueue` is the watchdog-released amber lane;
-  //      `noticeQueue` is the never-expiring red/critical lane. Band escalation
-  //      preempts an unanswered lower-band toast rather than queueing behind it.
+  //      `noticeQueue` is the red/critical/question lane, watchdog-released
+  //      too (round 7: every toast is temporary). Band escalation preempts an
+  //      unanswered lower-band toast rather than queueing behind it.
   property var alertQueue: []
   property var noticeQueue: []
   property int alertQueueMax: 8
@@ -591,9 +592,9 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // The never-expiring lane: red and critical. Its own process, because
-  // notify-send blocks while its action is live and a critical toast has no
-  // timeout. No timer ever releases it.
+  // The notice lane: red, critical and the questions. Its own process, because
+  // notify-send blocks while its action is live. Round 7 released it too: a
+  // stuck question cannot wedge the lane forever.
   // ---------------------------------------------------------------------------
 
   function fireNextNotice(): void {
@@ -869,7 +870,7 @@ BarWidget {
 
   // ---------------------------------------------------------------------------
   // Onboarding: the ceiling question and the insist-guard ask. Both are notices
-  // that must be answered, so both ride the never-expiring lane, and both carry
+  // that must be answered, so both ride the notice lane, and both carry
   // a stable identity so a shell restart replaces them instead of stacking a
   // second copy of a restart-surviving notice.
   // ---------------------------------------------------------------------------
@@ -1531,8 +1532,8 @@ BarWidget {
 
   // ---------------------------------------------------------------------------
   // Timers. The poll timers are per resource and reschedule themselves from what
-  // that resource was last seen doing. The watchdogs release a wedged child, and
-  // no timer ever releases the never-expiring notice lane.
+  // that resource was last seen doing. The watchdogs release a wedged child on
+  // either lane, each after 120 s (round 7 gave the notice lane one too).
   // ---------------------------------------------------------------------------
 
   Timer {

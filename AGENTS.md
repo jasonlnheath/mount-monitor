@@ -39,7 +39,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `memory-monitor/` is the sibling plugin — product name **Quattro Dash**
   (the captain's round-7 renaming; the directory and the technical plugin id
   keep their `memory-monitor` spelling, and user-visible copy says Quattro Dash)
-  (System RAM / VRAM / drive severity,
+  (RAM pressure and swap reserve / VRAM / drive severity,
   user-set ceilings, the QuattroDash instrument cluster, the detail window, the
   baseline log, the guard ask). It has
   its own `manifest.json`, `install.sh`, `README.md`, `skills/` and `tests/`; its

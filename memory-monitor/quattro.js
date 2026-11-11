@@ -134,15 +134,17 @@ var fuelLabels = [
 // Each gauge carries an amber/red pair the captain drags in the settings row
 // at the bottom of the dash, and the pair moves the drawn bands live. The law
 // the sliders enforce is mechanical: on the gauges where the bad end is high
-// (RAM pressure, root drive) red can never sit below amber, and on the pair
-// whose marks count what is LEFT (the swap reserve in percent, the VRAM
-// coolant lines in MiB free) amber can never sit below red. Moving one slider
-// through the other pushes the other, and no warning text exists.
+// (RAM pressure, root drive) red can never sit below amber, and on the VRAM
+// coolant lines (MiB free) amber can never sit below red. Moving one slider
+// through the other pushes the other, and no warning text exists. The battery
+// pair is round 7's exception: the captain's own drawing, duplicates allowed,
+// no reorder and no push - the dragged side moves, the other keeps its count.
 //
 // Defaults are the captain-approved recommended values: RAM pressure 70/90,
 // root drive 80/90, swap reserve 20/10, VRAM coolant 1500/500 MiB free.
 // psi and hd pairs are the plugin's own alert ceilings (memory.js thresholds);
-// batt and vram pairs are display decisions stored beside them.
+// the batt pair resolves the RAM band's swap-reserve signal (round 7), and the
+// vram pair is a display decision stored beside them.
 
 var GAUGE_KEYS = ["psi", "hd", "batt", "vram"];
 

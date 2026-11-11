@@ -33,8 +33,8 @@ already alerting on — so one drive produces one toast, not two.
 ## Thresholds: you set the ceilings
 
 - **Amber 80%** and **red 90%** are the documented defaults, except System RAM,
-  whose recommended amber default is 70%: pressure is worth warning about
-  earlier than a drive filling up.
+  whose amber and red read in PSI (recommended amber 70): pressure is worth
+  warning about earlier than a drive filling up.
 - **Critical ships unset.** No critical band exists, no critical toast can fire,
   and the bar cannot glow for a ceiling you never chose. First run asks you for
   your ceilings; until the baseline log has enough samples the question says
@@ -53,22 +53,26 @@ already alerting on — so one drive produces one toast, not two.
 
 ## What "used" means
 
-- **System RAM is measured by what is actually available:**
-  `(MemTotal − MemAvailable) / MemTotal`, always shown beside the absolute
-  `MemAvailable` in GiB. `MemFree` is the flattering number; `MemAvailable` is
-  what the kernel thinks a large allocation can actually get.
-- **PSI memory is not the band.** It is the re-alert gate, the poll escalator,
-  and the evidence a later report re-anchors from. A held band re-fires when its
-  severity increases, when PSI memory crosses the stall floor, or when swap
-  crosses oomd's swap limit — because a machine sitting at its ceiling and a
-  machine stalling are not the same event.
+- **The RAM band is pressure plus the swap reserve** (round 7): the kernel's
+  Pressure Stall Information (`/proc/pressure/memory`, some avg10) against the
+  PSI pair, and the swap reserve's free percent against the reserve pair —
+  whichever band is more severe — and the toast names its signal, pressure or
+  swap. Percent-used never resolves a band: it stays a reading, logged and
+  handed to the agent beside the absolute `MemAvailable` in GiB (`MemFree` is
+  the flattering number; `MemAvailable` is what the kernel thinks a large
+  allocation can actually get).
+- **PSI is also the re-alert gate and the poll escalator.** A held band re-fires
+  when its severity increases, when PSI memory crosses the stall floor, or when
+  swap crosses oomd's swap limit — because a machine sitting at its ceiling and
+  a machine stalling are not the same event.
 - **Toasts are events, not states.** An alert fires on a crossing. A resource
   that merely sits in a band is carried by the badge, the detail window, and the
   log — so a machine that rests high does not re-toast forever, and a genuinely
   worse excursion still gets a toast.
 - **Swap and zram are in the RAM picture** (swap used%, zram fill, compression
-  ratio) and act as the RAM alert's escalator. Swap is not a fourth thresholded
-  control.
+  ratio). The swap reserve is one of the RAM band's two signals, and swap past
+  oomd's own limit re-fires a held band; swap is not a fourth resource with an
+  alert of its own.
 - **VRAM** shows total, used and free with absolute MiB beside every percent, the
   per-process breakdown `nvidia-smi` can see, and an explicit **desktop /
   compositor (unattributed)** row — clamped at zero — because `nvidia-smi` cannot
@@ -199,9 +203,10 @@ as free VRAM crosses its thresholds — and red never crosses amber on the RAM
 and root drive pairs: moving one slider through the other pushes it.
 There is no warning message; the push is the whole rule. The RAM pressure and
 root drive pairs are the plugin's real alert ceilings (the same numbers the
-detail window edits), and the reserve ticks and coolant thresholds are display
-pairs stored beside them in `~/.local/state/memory-monitor/settings.json`, so
-everything loads back on the next shell start.
+detail window edits), the reserve pair resolves the RAM band's swap signal, and
+the coolant thresholds stay a display pair — all stored in
+`~/.local/state/memory-monitor/settings.json`, so everything loads back on the
+next shell start.
 
 ## The detail window
 
