@@ -36,20 +36,28 @@ const Q = Quattro;
 // ---------------------------------------------------------------------------
 
 test("the defaults are the recommended values, per gauge", () => {
-  same(Q.GAUGE_DEFAULTS.psi, { amber: 70, red: 90 }, "RAM pressure");
+  same(Q.GAUGE_DEFAULTS.psi, { amber: 15, red: 28 }, "RAM pressure, round 8 ruling 2");
   same(Q.GAUGE_DEFAULTS.hd, { amber: 80, red: 90 }, "root drive");
-  same(Q.GAUGE_DEFAULTS.batt, { amber: 20, red: 10 }, "swap reserve");
+  same(Q.GAUGE_DEFAULTS.batt, { amber: 30, red: 14 }, "swap reserve, free GiB of the reserve, round 8 ruling 3");
   same(Q.GAUGE_DEFAULTS.vram, { amber: 1500, red: 500 }, "VRAM coolant, MiB free");
   same(Q.GAUGE_KEYS, ["psi", "hd", "batt", "vram"]);
 });
 
 test("the dash defaults and the plugin's ceiling defaults are one set of numbers", () => {
-  assert.equal(Q.GAUGE_DEFAULTS.psi.amber, Memory.DEFAULT_AMBER_RAM,
+  assert.equal(Q.GAUGE_DEFAULTS.psi.amber, Memory.defaultAmberFor("ram"),
     "the RAM pressure slider's default is memory.js's recommended RAM amber");
-  assert.equal(Q.GAUGE_DEFAULTS.psi.red, Memory.DEFAULT_RED);
+  assert.equal(Q.GAUGE_DEFAULTS.psi.red, Memory.defaultRedFor("ram"),
+    "the RAM pressure slider's red default is memory.js's recommended RAM red, 28 PSI");
   assert.equal(Q.GAUGE_DEFAULTS.hd.amber, Memory.DEFAULT_AMBER,
     "the root drive slider's default is the shared amber default");
-  assert.equal(Q.GAUGE_DEFAULTS.hd.red, Memory.DEFAULT_RED);
+  assert.equal(Q.GAUGE_DEFAULTS.hd.red, Memory.defaultRedFor("hd"));
+  // The swap pair is one set of numbers too: the dash speaks the reserve's free
+  // percent and memory.js speaks the swap's used percent, and the two must be
+  // the same ceiling written two ways (30% free is 70% used).
+  const swapDefault = Memory.reserveThresholds(null);
+  assert.equal(100 - Q.GAUGE_DEFAULTS.batt.amber, swapDefault.amber, "the dash amber is memory.js's swap amber");
+  assert.equal(100 - Q.GAUGE_DEFAULTS.batt.red, swapDefault.red, "the dash red is memory.js's swap red");
+  assert.equal(swapDefault.critical, null, "critical ships unset for swap too");
   for (const key of Q.GAUGE_KEYS) {
     const p = Q.gaugePair(key, null);
     assert.equal(p.amber, Q.GAUGE_DEFAULTS[key].amber, `${key} amber falls back to the recommended default`);
@@ -172,16 +180,23 @@ test("every adjust result satisfies the ceiling store's strict order, swept over
 // The drawn bands follow the pair live
 // ---------------------------------------------------------------------------
 
-test("psiZoneArcsFor at the locked 60/80 is the approved arc set", () => {
-  same(Q.psiZoneArcsFor(60, 80), Q.psiZoneArcs);
+test("psiZoneArcsFor at the recommended 15/28 is the arc set the 0-35 face draws", () => {
+  same(Q.psiZoneArcsFor(15, 28), Q.psiZoneArcs);
 });
 
-test("psiZoneArcsFor moves the drawn zones with the pair", () => {
-  same(Q.psiZoneArcsFor(70, 90), [
-    { from: 0.7, to: 0.9, kind: "amber" },
-    { from: 0.9, to: 1, kind: "red" },
+test("psiZoneArcsFor moves the drawn zones with the pair, off the 0-35 face", () => {
+  // Round 8 ruling 5: the arcs are the thresholds divided by the face's own
+  // maximum. Nothing rescales a PSI number to fit a 0-100 dial behind them.
+  same(Q.psiZoneArcsFor(20, 30), [
+    { from: 20 / 35, to: 30 / 35, kind: "amber" },
+    { from: 30 / 35, to: 1, kind: "red" },
   ]);
-  same(Q.psiZoneArcsFor(null, null), Q.psiZoneArcsFor(70, 90), "no pair is the recommended default");
+  same(Q.psiZoneArcsFor(null, null), Q.psiZoneArcsFor(15, 28), "no pair is the recommended default");
+  const past = Q.psiZoneArcsFor(20, 40);
+  same(past, [
+    { from: 20 / 35, to: 1, kind: "amber" },
+    { from: 1, to: 1, kind: "red" },
+  ], "a red ceiling past the face runs the amber to the top: the setting is not shrunk to fit the dial");
 });
 
 test("fuelZoneArcsFor maps used-percent ceilings onto the free-scale dial, extending the locked arcs", () => {

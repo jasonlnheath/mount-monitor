@@ -342,13 +342,19 @@ test("the settings copy says what each metric is and why we measure it, no amber
 });
 
 test("the hover popups are the simple reading, one line", () => {
-  const psi = Quattro.psiTipWith({ some_avg10: 12.8 }, 70, 90);
+  const psi = Quattro.psiTipWith({ some_avg10: 12.8 }, 15, 28);
   assert.equal(psi.header, "RAM PRESSURE");
   assert.equal(psi.rows.length, 1);
   assert.equal(psi.rows[0].text, "12.8 PSI, green, healthy.");
-  const batt = Quattro.battTipWith({ present: true, pct: 38 }, 20, 10);
+  const batt = Quattro.battTipWith({ present: true, pct: 38 }, 30, 14,
+    { swapTotalKb: 64 * 1024 * 1024, swapUsedKb: 40 * 1024 * 1024 });
   assert.equal(batt.rows.length, 1);
-  assert.equal(batt.rows[0].text, "38 percent remaining right now.");
+  // Round 8 ruling 4: the swap hover is the round-7.5 standard free format with
+  // the percent free up front, and the values popup's SWAP row says the same
+  // sentence about the same reserve.
+  assert.equal(batt.rows[0].label, "Now:", "the hover reads Now: like every other instrument hover");
+  assert.match(batt.rows[0].text, /^\d+% Free \(\d+\/\d+ GiB\)\.$/, "percent free first, gigabytes in parentheses");
+  assert.equal(batt.rows[0].text, "38% Free (24/64 GiB).");
   const fuel = Quattro.fuelTipWith({ pctFree: 77, availKb: 1501820186, sizeKb: 1950990074 }, 80, 90);
   assert.equal(fuel.rows.length, 1);
   assert.equal(fuel.rows[0].text, "77% Free (1538/1998 GB).",
@@ -357,7 +363,7 @@ test("the hover popups are the simple reading, one line", () => {
   assert.equal(coolant.rows.length, 1);
   assert.equal(coolant.rows[0].text, "7% Free (1.2/16.0 GiB).",
     "round 7.5 item 17: the standard free format");
-  assert.equal(Quattro.psiTipWith(null, 70, 90).rows[0].text, "no pressure reading yet.");
+  assert.equal(Quattro.psiTipWith(null, 15, 28).rows[0].text, "no pressure reading yet.");
   assert.equal(Quattro.battTipWith({ present: false, pct: 0 }, 20, 10).rows[0].text, "no swap is configured.");
   assert.equal(Quattro.fuelTipWith(null, 80, 90).rows[0].text, "no root reading yet.");
   assert.equal(Quattro.coolantTipWith(null, 500, 1500).rows[0].text, "no VRAM reading yet.");
@@ -390,9 +396,9 @@ test("the values popup carries the SWAP row in the standard free format", () => 
 test("the ram ceilings question speaks PSI", () => {
   const RAM = { type: "ram", pct: 62.4, memTotalKb: 65588588, memAvailableKb: 24672688, psiSomeAvg10: 12.34, swapPct: 15.4 };
   const text = Memory.ceilingsQuestion("ram", RAM, { oomdActive: false }, {}, null);
-  assert.match(text, /Your amber: 70 PSI \(default\)\. Your red: 90 PSI \(default\)\./);
+  assert.match(text, /Your amber: 15 PSI \(default\)\. Your red: 28 PSI \(default\)\./);
   assert.match(text, /Measured now: RAM PRESSURE 12\.3 PSI, swap 16% used/);
-  assert.match(text, /Recommended defaults until measured: amber 70 PSI, red 90 PSI, critical unset\./);
+  assert.match(text, /Recommended defaults until measured: amber 15 PSI, red 28 PSI, critical unset\./);
 });
 
 test("the ram resting level is measured in PSI from the log", () => {
@@ -407,8 +413,9 @@ test("the ram resting level is measured in PSI from the log", () => {
   assert.equal(rec.restingPct, 4);
   assert.ok(rec.amber > rec.restingPct, "a PSI recommendation still clears the resting level");
   // The PSI recommendation floors at the captain-approved defaults: a resting
-  // 4 is not a machine that wants an amber at 6.
-  same2([rec.amber, rec.red, rec.critical], [70, 90, 95]);
+  // 4 is not a machine that wants an amber at 6. Round 8 ruling 2 moved those
+  // floors to the measured pair, 15 and 28 PSI.
+  same2([rec.amber, rec.red, rec.critical], [15, 28, 33]);
 });
 
 // ---------------------------------------------------------------------------

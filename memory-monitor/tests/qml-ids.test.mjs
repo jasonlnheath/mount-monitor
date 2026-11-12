@@ -174,13 +174,25 @@ function runPollLoop(bands, horizonMs) {
     next[t.id] = t.triggeredOnStart ? 0 : t.interval;
   }
 
+  // The widget's watchBand() is the worst band any resource was last seen in,
+  // and an absent resource (band null) is not a band. The sim folds the same
+  // way unless a case overrides it to prove the ladder on its own.
+  const bandOf = v => (v === undefined || v === null ? 0 : v);
+  const watchBand = bands.watchBand === undefined
+    ? Math.max(bandOf(bands.ram), bandOf(bands.vram), bandOf(bands.hd))
+    : bands.watchBand;
+
   let samples = 0;
   while (true) {
     let soonest = null;
     for (const t of live) if (soonest === null || next[t.id] < next[soonest.id]) soonest = t;
     if (soonest === null || next[soonest.id] >= horizonMs) break;
     const clock = next[soonest.id];
-    fires[soonest.id]++;
+    // Every timer whose deadline is this one fires on it. schedulePolls re-arms
+    // all three together at every sample, so two timers memory.js put on the
+    // same interval fire together: the sim may not let one timer win every tie
+    // and leave another resource's own timer unproven.
+    for (const t of live) if (next[t.id] === clock) fires[t.id]++;
     samples++;
     // The sample re-arms every resource from what that resource was last seen
     // doing: the widget's schedulePolls, call for call. Setting a running QML
@@ -197,42 +209,107 @@ function runPollLoop(bands, horizonMs) {
         absent: band === null,
         psi: bands.psi === undefined ? {} : { some_avg10: bands.psi },
         psiFloor: Memory.PSI_STALL_FLOOR,
+        // Round 8 ruling 1: the widget's pollMs hands the window state and the
+        // worst band across the resources to the same call. The sim passes what
+        // the widget passes, so a schedule that forgets the watch lane fails here.
+        windowOpen: bands.windowOpen === true,
+        watchBand,
       });
       next[t.id] = clock + t.interval;
     }
   }
-  return fires;
+  return { fires, samples };
 }
 
 function samplePeriod(bands) {
-  const fires = runPollLoop(bands, 180000);
-  const total = Object.values(fires).reduce((a, b) => a + b, 0);
-  return 180000 / total;
+  const loop = runPollLoop(bands, 180000);
+  return 180000 / loop.samples;
 }
 
 test("offscreen: the poll loop runs, every resource's timer can drive it, and a red resource shortens the period", () => {
   const healthy = runPollLoop({ ram: 0, vram: 0, hd: 0 }, 180000);
-  const healthyTotal = Object.values(healthy).reduce((a, b) => a + b, 0);
-  assert.equal(healthyTotal >= 4, true, `the loop ran ${healthyTotal} times in 3 minutes of virtual clock; the poll is dead`);
-  assert.equal(healthy.ramTimer >= 1, true, "a healthy machine polls on RAM's nominal interval");
+  assert.equal(healthy.samples >= 4, true, `the loop ran ${healthy.samples} times in 3 minutes of virtual clock; the poll is dead`);
+  assert.equal(healthy.fires.ramTimer >= 1, true, "a healthy machine polls on RAM's nominal interval");
   assert.equal(samplePeriod({ ram: 0, vram: 0, hd: 0 }), Memory.POLL_NOMINAL_MS.ram, "the healthy period is the shortest nominal");
 
   // Each resource's own timer has to be able to drive the loop when that resource
   // is the one that earned the escalation, or the plan's "more often on the
   // resource that triggers a red alert" would be unreachable for VRAM and drives.
+  // Round 8 ruling 1 caps every one of those cases at the watch interval: an
+  // amber-or-worse resource IS the watch lane now.
   for (const [id, type] of Object.entries(TYPE_OF_TIMER)) {
     const bands = { ram: 0, vram: 0, hd: 0 };
     bands[type] = 2;
     const red = runPollLoop(bands, 180000);
-    assert.equal(red[id] >= 2, true, `${id} must fire when ${type} is at red, not just exist`);
-    assert.equal(samplePeriod(bands), Memory.POLL_ESCALATED_MS[type], `a red ${type} shortens the period to its escalated interval`);
+    assert.equal(red.fires[id] >= 2, true, `${id} must fire when ${type} is at red, not just exist`);
+    assert.equal(samplePeriod(bands), Memory.POLL_WATCH_MS,
+      `a red ${type} puts the whole loop at the round-8 watch interval`);
+  }
+
+  // The ladder on its own, with the watch lane held off: the round-7 rule that
+  // only the troubled resource speeds up, and that PSI stall outranks red, is
+  // still memory.js's answer and still what the watch lane caps.
+  const ladderOff = { windowOpen: false, watchBand: 0 };
+  for (const [id, type] of Object.entries(TYPE_OF_TIMER)) {
+    const bands = { ram: 0, vram: 0, hd: 0, ...ladderOff };
+    bands[type] = 2;
+    assert.equal(samplePeriod(bands), Memory.POLL_ESCALATED_MS[type],
+      `with no watch lane, a red ${type} shortens the period to its escalated interval`);
   }
 
   const stallBands = { ram: 2, vram: 0, hd: 0, psi: Memory.PSI_STALL_FLOOR + 5 };
   const stalling = runPollLoop(stallBands, 180000);
-  assert.equal(stalling.ramTimer >= 2, true, "a stalling machine keeps its RAM loop alive");
-  assert.equal(samplePeriod(stallBands), Memory.POLL_PSI_MS, "PSI above the stall floor escalates RAM past its red interval");
-  assert.equal(samplePeriod(stallBands) < samplePeriod({ ram: 0, vram: 0, hd: 0 }), true, "a stalling machine polls more often than a healthy one");
+  assert.equal(stalling.fires.ramTimer >= 2, true, "a stalling machine keeps its RAM loop alive");
+  assert.equal(samplePeriod(stallBands), Memory.POLL_WATCH_MS,
+    "a stalling machine is amber-or-worse, so the watch lane drives it");
+  assert.equal(samplePeriod({ ...stallBands, ...ladderOff }), Memory.POLL_PSI_MS,
+    "the PSI stall interval still outranks the red interval on the ladder itself");
+  assert.equal(samplePeriod(stallBands) < samplePeriod({ ram: 0, vram: 0, hd: 0 }), true,
+    "a stalling machine polls more often than a healthy one");
+});
+
+test("offscreen: the round-8 watch lane drives the loop at 2 seconds", () => {
+  const watchMs = Memory.POLL_WATCH_MS;
+  assert.equal(watchMs, 2000, "the captain's 2 seconds");
+
+  // Green everywhere, nothing open: cruising keeps the lazy nominal.
+  assert.equal(samplePeriod({ ram: 0, vram: 0, hd: 0 }), Memory.POLL_NOMINAL_MS.ram,
+    "passive cruising with everything green stays at the nominal interval");
+
+  // The window alone: an open plugin surface polls at 2s even with everything green.
+  assert.equal(samplePeriod({ ram: 0, vram: 0, hd: 0, windowOpen: true }), watchMs,
+    "an open window or popup polls at 2s");
+
+  // Amber alone: one resource at amber puts the whole loop at 2s. Only the
+  // fastest timer wins the race in the sim, but every sample reads every
+  // resource (startSample starts all six readers), so a resource whose timer is
+  // not the fastest is still sampled at the watch interval.
+  for (const [id, type] of Object.entries(TYPE_OF_TIMER)) {
+    const bands = { ram: 0, vram: 0, hd: 0 };
+    bands[type] = 1;
+    const amber = runPollLoop(bands, 60000);
+    const fires = amber.samples;
+    assert.equal(samplePeriod(bands), watchMs, `an amber ${type} is a watch: 2s`);
+    assert.equal(fires >= 20, true, `60s of virtual clock at the watch interval fires the loop ${fires} times`);
+    assert.equal(amber.fires[id] >= 1, true, `${id} drives the loop when ${type} is the amber resource`);
+  }
+
+  // An absent resource at a stale critical band is not a watch: the loop keeps
+  // the nominal interval rather than hammering for a mount that is gone.
+  assert.equal(samplePeriod({ ram: 0, vram: 0, hd: null, watchBand: 0 }), Memory.POLL_NOMINAL_MS.ram,
+    "a vanished drive does not hold the loop at 2s");
+
+  // The widget asks for the lane instead of implementing it: the window state and
+  // the worst band go to Memory.pollIntervalMs, and an opening window re-arms the
+  // timers at once rather than on the next sample.
+  const qml = repoFile("memory-monitor/MemoryMonitor.qml");
+  const pollMs = (qml.match(/function pollMs\([^)]*\)[^{]*\{([^]*?)\n  \}/) || [])[1] || "";
+  assert.match(pollMs, /Memory\.pollIntervalMs\(/, "pollMs goes to memory.js");
+  assert.match(pollMs, /windowOpen:\s*root\.anySurfaceOpen/, "the window state goes to the decider");
+  assert.match(pollMs, /watchBand:\s*root\.watchBand\(\)/, "the worst live band goes to the decider");
+  assert.match(qml, /function watchBand\(\): int/, "the widget reports the worst band any resource holds");
+  assert.match(qml, /onAnySurfaceOpenChanged:\s*\{[^]*schedulePolls\(\)/, 
+    "opening a surface re-arms the timers at once: the interval the window asks for starts now");
 });
 
 

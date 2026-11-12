@@ -191,10 +191,22 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // Polling. Adaptive per resource: nominal when healthy, escalated on red or
-  // critical, faster still when PSI is stalling. A vanished mount stays at the
-  // nominal interval.
+  // Polling. The lax nominal intervals are for normal passive use with every
+  // resource green and no window open: a red or critical band drops to the
+  // escalated interval, a stalling PSI reading further, and round 8 ruling 1's
+  // watch lane - any monitored resource amber or worse, or a Quattro Dash window
+  // open - to 2 seconds. A vanished mount stays at the nominal interval.
   // ---------------------------------------------------------------------------
+
+  // The worst band across everything this widget monitors, watch-lane material.
+  // The shared sample reads all three resources anyway (startSample starts every
+  // reader), so one resource going amber shortens every timer, not just its own.
+  function watchBand(): int {
+    var worst = ramReading === null ? 0 : ramReading.band;
+    if (vramReading !== null && vramReading.band > worst) worst = vramReading.band;
+    if (worstHdBand() > worst) worst = worstHdBand();
+    return worst;
+  }
 
   function pollMs(type, band, absent): int {
     var override = Memory.normalizeNumber(setting("pollMs", -1), -1);
@@ -202,6 +214,8 @@ BarWidget {
       absent: absent,
       psi: psi,
       psiFloor: Memory.PSI_STALL_FLOOR,
+      windowOpen: root.anySurfaceOpen,
+      watchBand: root.watchBand(),
     });
     return override > 0 ? override : value;
   }
@@ -236,6 +250,13 @@ BarWidget {
   property string meminfoText: ""
   property string psiText: ""
   property string swapsText: ""
+  // Round 8 ruling 3's second half, the swap climb telltale's own memory: the
+  // last few swap readings this widget took, oldest first, each { atMs, usedKb }.
+  // It is the same /proc/swaps total the RAM reading already carries, remembered
+  // a few cycles longer, and nothing else - no second measurement, no second
+  // reader. A widget generation starts empty, so an offline gap is a gap and
+  // never reads as a jump.
+  property var swapSamples: ([])
   property string zramText: ""
   property string findmntText: ""
   property string gpuText: ""
@@ -313,6 +334,8 @@ BarWidget {
     swaps = Memory.parseSwaps(swapsText);
     zram = Memory.parseZramctl(zramText);
     var swap = Memory.swapTotals(swaps);
+    root.recordSwapSample(swap);
+    var climb = root.swapClimbBand();
     var z = Memory.zramTotals(zram);
     var ram = Memory.ramReading(meminfo);
     if (ram !== null) {
@@ -334,7 +357,7 @@ BarWidget {
       ram.latched = latchedOf("ram");
       // Which signal holds the band, so the panel's release note speaks the
       // right unit (PSI for pressure, percent used for the reserve).
-      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt")).signal;
+      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt"), climb).signal;
     }
     ramReading = ram;
 
@@ -425,7 +448,7 @@ BarWidget {
       var ram = JSON.parse(JSON.stringify(ramReading));
       ram.band = bandOf("ram");
       ram.latched = latchedOf("ram");
-      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt")).signal;
+      ram.signal = Memory.resolveRamBand(ram, thresholds("ram"), bandOf("ram"), gaugePairFor("batt"), root.swapClimbBand()).signal;
       ramReading = ram;
     }
     if (vramReading !== null) {
@@ -451,7 +474,7 @@ BarWidget {
       // Round 7 item 8: the ram store watches PRESSURE (PSI) and the swap
       // reserve. The held band is the more severe of the two signals' bands,
       // each hysteresized against the same previous band in its own unit.
-      result = Memory.resolveRamBand(ramReading, ceiling, previous, gaugePairFor("batt"));
+      result = Memory.resolveRamBand(ramReading, ceiling, previous, gaugePairFor("batt"), root.swapClimbBand());
     } else {
       result = Memory.resolveBand(pct, ceiling, previous, type);
     }
@@ -488,7 +511,7 @@ BarWidget {
     if (type === "ram" && ramReading !== null) {
       signalPct = result.signal === "swap" ? ramReading.swapPct : ramReading.psiSomeAvg10;
     }
-    queueAlert(entry, held, type, key, result.latched, result.signal, signalPct);
+    queueAlert(entry, held, type, key, result.latched, result.signal, signalPct, result.rate);
   }
 
   // ---------------------------------------------------------------------------
@@ -496,7 +519,7 @@ BarWidget {
   // daemon drops a silenced amber without keeping a record of dropping it.
   // ---------------------------------------------------------------------------
 
-  function alertEvent(entry, band, type, key, latched, signal, signalPct): var {
+  function alertEvent(entry, band, type, key, latched, signal, signalPct, rate): var {
     var base = entry === null || entry === undefined ? {} : entry;
     return {
       kind: "band",
@@ -511,6 +534,10 @@ BarWidget {
       // Round 7 item 8: which ram signal produced the band, so the toast can
       // say pressure or swap. Absent for hd and vram.
       signal: signal === undefined ? undefined : signal,
+      // Round 8 ruling 3: a swap band the climb produced says so, so the toast
+      // and the prompt never quote a low percent as if it were a crossed line.
+      // Absent for every other alert, like signal.
+      rate: rate === undefined ? undefined : rate === true,
       target: base.target,
       device: base.device,
       fstype: base.fstype,
@@ -525,10 +552,10 @@ BarWidget {
     };
   }
 
-  function queueAlert(entry, band, type, key, latched, signal, signalPct): void {
+  function queueAlert(entry, band, type, key, latched, signal, signalPct, rate): void {
     if (!isWriter) return;
     if (band === 0) return;
-    var alert = alertEvent(entry, band, type, key, latched, signal, signalPct);
+    var alert = alertEvent(entry, band, type, key, latched, signal, signalPct, rate);
 
     // Mount Monitor already toasts the drives it watches, with its own words,
     // its own thresholds and its own click target. One toast per crossing.
@@ -842,6 +869,24 @@ BarWidget {
     return worst;
   }
 
+  // The climb telltale's history, and the verdict memory.js reads off it. The
+  // widget keeps the samples; memory.js owns the GiB floor a step must clear,
+  // how stale a gap may be, how many intervals a rate needs, and what a climb
+  // is worth (amber, never red).
+  function recordSwapSample(swap): void {
+    if (swap === null || swap === undefined) return;
+    if (swap.swapTotalKb === null || swap.swapTotalKb === undefined) return;
+    if (swap.swapUsedKb === null || swap.swapUsedKb === undefined) return;
+    var next = JSON.parse(JSON.stringify(root.swapSamples));
+    next.push({ atMs: Date.now(), usedKb: swap.swapUsedKb });
+    while (next.length > Memory.SWAP_CLIMB_STEPS + 2) next.shift();
+    root.swapSamples = next;
+  }
+
+  function swapClimbBand(): int {
+    return Memory.swapClimbBand(root.swapSamples);
+  }
+
   // ---------------------------------------------------------------------------
   // State. Written only on change; a scan that exited non-zero records nothing;
   // deleting the state directory re-runs first run.
@@ -1101,6 +1146,9 @@ BarWidget {
   // ---------------------------------------------------------------------------
   // The baseline log. Absolute numbers, one row per sample, one writer per
   // sample, appended without a shell and rotated by a window, not a truncate.
+  // Round 8 ruling 1 samples every 2 seconds while anything is amber or a window
+  // is open; Memory.logDue keeps the log's resting window at its round-7 rate
+  // and writes at once for an alert row or a row that carries a changed fact.
   // ---------------------------------------------------------------------------
 
   function appendLog(): void {
@@ -1116,6 +1164,8 @@ BarWidget {
       arm: arm,
       alerts: pendingAlertEvents,
     });
+    if (!Memory.logDue(record, root.lastLoggedRecord)) return;
+    root.lastLoggedRecord = record;
     pendingAlertEvents = [];
     var line = Memory.logLine(record);
     logBytesWritten += line.length + 1;
@@ -1182,6 +1232,7 @@ BarWidget {
   property var pendingAlertEvents: []
   property var unseenAlerts: []
   property int logBytesWritten: 0
+  property var lastLoggedRecord: null
   property string logAppendPending: ""
   property bool stateDirDone: false
   property bool reconcileDone: false
@@ -1769,7 +1820,15 @@ BarWidget {
   // panels' opened state registers and releases it with the bar's coordinator.
   readonly property bool detailOpen: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool anySurfaceOpen: opened || detailOpen
-  onAnySurfaceOpenChanged: syncPopout()
+  onAnySurfaceOpenChanged: {
+    syncPopout()
+    // Round 8 ruling 1: opening a Quattro Dash window is a watch state, and a
+    // watch doctrine that only took hold on the next sample would leave the dash
+    // showing a reading up to a minute old while the captain is looking at it.
+    // Setting a running Timer's interval restarts its countdown, so an open
+    // window is live on the next 2-second tick rather than the next nominal one.
+    root.schedulePolls()
+  }
 
   function syncPopout(): void {
     if (!bar || typeof bar.requestPopout !== "function") return;
