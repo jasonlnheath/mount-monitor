@@ -218,7 +218,8 @@ clean zero. The visible rows stay terse - subject, count, culprit name, never
 a raw PID - while the click payload carries the full detail. An empty column
 reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
-code sends the same fixed prompt the toasts send to your default agent (inline
+code sends its fixed prompt to your default agent (a drive code's is the same
+prompt its toast sends; a system fault has no toast; inline
 when `agentInline` is set) with the dashboard's own pre-computed diagnosis
 appended as a fenced JSON block (code, severity, cause, top consumers,
 recommendation - for a system fault: subject, cause and the exact detail,
@@ -286,9 +287,9 @@ this machine's event-driven block watcher.
 The five round-9 system reads (the bar probe, the kernel fault delta, the GPU
 wedge grep, the unit show, the IO pressure file) ride this same sample cycle —
 no second timer system, no poll cadence of their own. They are cheap reads:
-process liveness, unit properties, a journaled delta and a pressure file, and
-their only persistent decision state is the kernel log cursor, which a shell
-restart re-baselines.
+process liveness, unit properties, a journaled delta and a pressure file. Their
+decision state is session-only — the kernel log cursor, the layer climb memory
+and the disk amber run — and a shell restart re-baselines all of it.
 
 ## Install
 
