@@ -63,22 +63,36 @@ var DEVICE_PATH_MAX = 256;
 var DEFAULT_AMBER = 80;
 var DEFAULT_RED = 90;
 var DEFAULT_CRITICAL = null;
-// The QuattroDash threshold settings' recommended RAM amber (the captain's
-// 2026-11-07 round-1 ruling: make the defaults the recommended values). System
-// RAM is worth warning about earlier than a drive filling up, so its amber
-// default sits lower; red stays DEFAULT_RED for every kind and critical stays
-// unset until the user sets it.
-var DEFAULT_AMBER_RAM = 70;
+// The QuattroDash threshold settings' recommended RAM lines. The captain's
+// 2026-11-07 round-1 ruling made the defaults the recommended values, and his
+// round-8 re-measurement on the rig moved both of the System RAM pair: 8-15 PSI
+// sustained is heavy but playable (gaming with the local model server loaded),
+// and 28 PSI is the observed wall (2 GiB available, swap at 25-26G). System RAM
+// is worth warning about earlier than a drive filling up, so its pair sits
+// lower, and both of its numbers are pressure on the kernel's own PSI scale,
+// not percents of RAM. Red stays DEFAULT_RED for every other kind and critical
+// stays unset until the user sets it.
+var DEFAULT_AMBER_RAM = 15;
+var DEFAULT_RED_RAM = 28;
 
 // ---------------------------------------------------------------------------
 // Polling. Nominal intervals, and the escalated interval a red or critical band
 // drops to. A vanished mount is polled at the nominal interval, never at the
 // escalated one. A PSI stall above the floor shortens the RAM poll further.
+//
+// Round 8 ruling 1 (the captain's 2026-11-12 poll doctrine) puts a watch lane
+// over that ladder: 2 seconds whenever the plugin is watching something
+// amber-or-worse, or a Quattro Dash window is open. The lax nominal intervals
+// apply only in normal passive use with every resource green and no window
+// open. The ladder stays the floor the watch lane may not loosen: whatever the
+// plugin's own doctrine asks for, a resource never polls slower than the
+// escalator would for the band it is actually in.
 // ---------------------------------------------------------------------------
 
 var POLL_NOMINAL_MS = { hd: 60000, vram: 60000, ram: 30000 };
 var POLL_ESCALATED_MS = { hd: 20000, vram: 20000, ram: 10000 };
 var POLL_PSI_MS = 5000;
+var POLL_WATCH_MS = 2000;
 
 // ---------------------------------------------------------------------------
 // Hysteresis. Provisional in this build and re-anchored from the baseline log by
@@ -147,6 +161,14 @@ var SETTINGS_FILE_NAME = "settings.json";
 var LOG_FILE_NAME = "baseline.log";
 var LOG_MAX_BYTES = 4 * 1024 * 1024;
 var LOG_MAX_LINES = 20000;
+
+// Round 8 ruling 1 moved the *sample* cadence to 2 seconds whenever anything is
+// amber or a window is open. The baseline log is not that trace: it is the
+// resting window the ceilings question, the recommendation, and the climb
+// calibration read, and a row every 2 seconds erases three days of it. A row is
+// due when the round-7 resting cadence comes round, when a fact the row carries
+// changes, or when the row holds alert events, which are never held back.
+var LOG_ROW_MIN_MS = 30000;
 
 var DND_STATE_PATH = ".local/state/omarchy/notifications.json";
 
@@ -482,6 +504,12 @@ function defaultAmberFor(kind) {
   return kind === "ram" ? DEFAULT_AMBER_RAM : DEFAULT_AMBER;
 }
 
+// Round 8 ruling 2 moved the System RAM red as well, so the red default is no
+// longer one number for every kind: the ram store answers in PSI.
+function defaultRedFor(kind) {
+  return kind === "ram" ? DEFAULT_RED_RAM : DEFAULT_RED;
+}
+
 function normalizeMounts(value) {
   const list = recoverListOr(value, ["/"]);
   const out = [];
@@ -528,13 +556,18 @@ function normalizeThresholds(value) {
     // An amber the plugin itself wrote (provenance null or "default") yields
     // to the current default, so a recommended-default change lands on installs
     // whose file still carries the old number the plugin put there. A value the
-    // user or an outside writer set keeps its value and its provenance. Red
-    // keeps the plain rule: its default has never changed.
+    // user or an outside writer set keeps its value and its provenance. Round 8
+    // moved the System RAM red default too (90 PSI was never a measured
+    // pressure ceiling; 28 is the observed wall), so the same provenance rule
+    // has to cover red for that kind: a red the plugin wrote picks up the new
+    // line, a red the user typed keeps his number. Red's default has never moved
+    // for any other kind, so those keep the plain rule.
     const pluginWrote = raw.amberSetBy === null || raw.amberSetBy === "default";
+    const redPluginWrote = raw.redSetBy === null || raw.redSetBy === "default";
     out[kind] = {
       amber: parsed.amber === null || pluginWrote ? defaultAmberFor(kind) : parsed.amber,
       amberSetBy: who("amberSetBy", parsed.amber !== null),
-      red: parsed.red === null ? DEFAULT_RED : parsed.red,
+      red: parsed.red === null || (kind === "ram" && redPluginWrote) ? defaultRedFor(kind) : parsed.red,
       redSetBy: who("redSetBy", parsed.red !== null),
       critical: parsed.critical,
       criticalSetBy: who("criticalSetBy", parsed.critical !== null),
@@ -1126,6 +1159,48 @@ function swapEscalates(reading, oomd) {
   return swapPct >= oomdSwapLimit(oomd);
 }
 
+// Round 8 ruling 3's second half. The ruling named the two ceilings (past 45G
+// used amber on this rig, 55G red) and named "climbing fast" as the other way
+// amber is reached, but it named no rate, so the rate is this plugin's own
+// provisional calibration, written down here the way PSI_STALL_FLOOR was so the
+// rig can re-anchor it: a jump of at least 2 GiB between two samples no further
+// apart than 90 seconds, confirmed on two consecutive intervals, reads as an
+// amber swap telltale on its own. Amber only, never red: a red line stays a
+// ceiling the user set, and a rate on its own is a storm, not a wall. The swap
+// numbers are this kernel's own GiB history, so the rate says the same thing on
+// a machine whose reserve is 8 GiB as on one whose reserve is 126 GiB.
+var SWAP_CLIMB_MIN_KB = 2 * 1024 * 1024;
+var SWAP_CLIMB_MAX_GAP_MS = 90000;
+var SWAP_CLIMB_STEPS = 2;
+
+// `samples` is the widget's own recent swap history, oldest first, each entry
+// { atMs, usedKb }. Fewer than SWAP_CLIMB_STEPS + 1 samples can say nothing, and
+// a sample gap the widget did not take (a shell restart, a skipped poll) is a
+// gap, not a climb: the history restarts instead of reading as a jump.
+function swapClimbBand(samples, opts) {
+  const o = opts || {};
+  const oMin = asNumber(o.climbMinKb);
+  const oGap = asNumber(o.climbMaxGapMs);
+  const oSteps = asNumber(o.climbSteps);
+  const minKb = oMin === null ? SWAP_CLIMB_MIN_KB : oMin;
+  const maxGap = oGap === null ? SWAP_CLIMB_MAX_GAP_MS : oGap;
+  const steps = oSteps === null ? SWAP_CLIMB_STEPS : oSteps;
+  const list = [];
+  const raw = asList(samples) || [];
+  for (const entry of raw) {
+    if (entry && asNumber(entry.atMs) !== null && asNumber(entry.usedKb) !== null) list.push(entry);
+  }
+  if (list.length < steps + 1) return 0;
+  for (let step = 0; step < steps; step++) {
+    const i = list.length - 1 - step;
+    const gap = asNumber(list[i].atMs) - asNumber(list[i - 1].atMs);
+    const jump = asNumber(list[i].usedKb) - asNumber(list[i - 1].usedKb);
+    if (gap <= 0 || gap > maxGap) return 0;
+    if (jump < minKb) return 0;
+  }
+  return 1;
+}
+
 // ---------------------------------------------------------------------------
 // nvidia-smi. One `--query-gpu` call and one `--query-compute-apps` call per VRAM
 // poll (measured 22 ms per call on the rig). First card only, named honestly in
@@ -1298,9 +1373,10 @@ function bandForPct(pct, thresholds) {
 }
 
 // Round 7 (the captain): the RAM band is PRESSURE, judged on PSI memory some
-// avg10 (the same 0-100 scale the kernel reports and the RAM PRESSURE dial
-// draws) against the same threshold store the psi gauge pair edits. The
-// percent-used reading stays a reading; it never resolves a band again.
+// avg10 (the kernel's own 0-100 scale, which the RAM PRESSURE dial now shows
+// 0 to 35 of, round 8 ruling 5) against the same threshold store the psi gauge
+// pair edits. The percent-used reading stays a reading; it never resolves a band
+// again.
 function psiBandFor(psi, thresholds) {
   return bandForPct(psi, thresholds);
 }
@@ -1313,14 +1389,19 @@ function reserveThresholds(battPair) {
   const pair = battPair || {};
   const amber = asNumber(pair.amber);
   const red = asNumber(pair.red);
+  // The same free-reserve defaults quattro.js's GAUGE_DEFAULTS.batt carries
+  // (round 8 ruling 3: percent of swap USED, 70 and 86, which is 30 and 14
+  // free), written in this module's own numbers because the two modules never
+  // import each other. tests/round8.test.mjs pins the pair against the dash's.
   return {
-    amber: amber === null ? 100 - 20 : 100 - amber,
-    red: red === null ? 100 - 10 : 100 - red,
+    amber: amber === null ? 100 - 30 : 100 - amber,
+    red: red === null ? 100 - 14 : 100 - red,
     critical: null,
   };
 }
 
-// The badge band of the ram resource: the worse of pressure and reserve.
+// The badge band of the ram resource: the worse of pressure, reserve, and a
+// swap that is climbing fast enough to be the story on its own.
 function ramCombinedBand(psiBand, reserveBand) {
   return Math.max(asNumber(psiBand) || 0, asNumber(reserveBand) || 0);
 }
@@ -1346,26 +1427,41 @@ function hysteresisPp(type) {
 // threshold cannot fire the same alert twice, and cannot clear itself on the
 // way out.
 // The ram store's held band (round 7 item 8): the more severe of the pressure
-// band and the swap-reserve band, each resolved with its own hysteresis in its
+// band, the swap-reserve band, and (round 8 ruling 3) a swap reserve that is
+// climbing fast, each threshold signal resolved with its own hysteresis in its
 // own unit against the same previous band. The returned `signal` names which
-// signal produced the band, so the toast says pressure or swap.
+// signal produced the band, so the toast says pressure or swap, and `rate` says
+// when the swap band is the climb's doing rather than a line it crossed.
 // The swap signal rides the review's one production path: swapPct is the USED
 // percent, which is exactly the used-equivalent the generic resolveBand
-// machinery judges against the inverted pair (amber 80 used / red 90 used for
-// the 20/10 free pair). A swap reserve 85 percent used is 15 percent free -
-// under the amber line.
-function resolveRamBand(reading, thresholds, previousBand, battPair) {
+// machinery judges against the inverted pair (70 used / 86 used for the 30/14
+// free pair, round 8 ruling 3). A swap reserve 85 percent used is 15 percent
+// free - past the amber line.
+function resolveRamBand(reading, thresholds, previousBand, battPair, climbBand) {
   const r = reading || {};
   const psiResult = resolveBand(r.psiSomeAvg10, thresholds, previousBand, "ram");
   // No swap configured contributes no band: it never reads as a healthy zero.
   const swapResult = asNumber(r.swapPct) === null
     ? { band: 0, latched: false }
     : resolveBand(r.swapPct, reserveThresholds(battPair), previousBand, "swap");
+  // A climb is amber or nothing (SWAP_CLIMB_STEPS' own doctrine), and it joins
+  // the reserve band rather than replacing it, so a swap already past its amber
+  // line reads the same whether or not it is still moving.
+  const climb = asNumber(climbBand) === null ? 0 : Math.min(1, Math.max(0, asNumber(climbBand)));
+  const swapBand = ramCombinedBand(swapResult.band, climb);
+  // Which side produced the combined band. The signal the toast speaks, and the
+  // rate claim, have to agree with that: a pressure band at the wall is not the
+  // climb's doing even while the reserve is moving, and a reserve band the climb
+  // alone produced never names a line it did not cross.
+  const fromSwap = swapBand > psiResult.band;
   return {
-    band: ramCombinedBand(psiResult.band, swapResult.band),
+    band: ramCombinedBand(psiResult.band, swapBand),
     latched: psiResult.latched === true || swapResult.latched === true,
     changed: psiResult.band !== asNumber(previousBand) || swapResult.band !== asNumber(previousBand),
-    signal: psiResult.band >= swapResult.band ? "psi" : "swap",
+    signal: fromSwap ? "swap" : "psi",
+    // The band is the rate's doing, not a line the reserve crossed: the toast
+    // has to say so rather than quote a low percent as if it were the alarm.
+    rate: fromSwap && climb === 1 && swapResult.band === 0,
   };
 }
 
@@ -1517,10 +1613,21 @@ function shouldFireAlert(opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Adaptive polling. Nominal when healthy, escalated on red or critical, faster
-// still when PSI is stalling. A vanished mount is polled at the nominal interval
-// and never at the escalated one.
+// Adaptive polling. The lax nominal intervals apply in normal passive use with
+// every resource green and no window open; a red or critical band drops to the
+// escalated interval, a stalling PSI reading further, and the round-8 watch lane
+// (amber or worse, or a window open) to 2 seconds. A vanished mount is polled at
+// the nominal interval and never at the escalated one.
 // ---------------------------------------------------------------------------
+
+// Round 8 ruling 1's watch state: the plugin is watching when a Quattro Dash
+// window is open (the cluster or the detail window), or when any monitored
+// resource is amber or worse. A resource the machine does not have is not a
+// monitored resource, so it never answers to the watch state.
+function watchActive(opts) {
+  const o = opts || {};
+  return normalizeBool(o.windowOpen, false) || (asNumber(o.watchBand) || 0) >= 1;
+}
 
 function pollIntervalMs(type, band, opts) {
   const o = opts || {};
@@ -1530,9 +1637,15 @@ function pollIntervalMs(type, band, opts) {
   const b = asNumber(band) || 0;
   // RingKit's rule, kept in step: the escalation is band-driven, and the PSI
   // floor is a further escalation on top of it, never a substitute for a band.
-  if (b < 2) return nominal;
-  if (type === "ram" && psiStalling(o.psi, o.psiFloor)) return POLL_PSI_MS;
-  return escalated;
+  // The ladder is also the floor the watch lane may not loosen, so a caller that
+  // reports no watch state reads it exactly as it did before and RingKit's
+  // contract holds either way. Round 8 ruling 1 puts the 2-second watch lane
+  // over the ladder: nothing the plugin is watching waits out a 30 or 60 second
+  // interval while it is amber or being looked at.
+  const ladder = b < 2
+    ? nominal
+    : (type === "ram" && psiStalling(o.psi, o.psiFloor) ? POLL_PSI_MS : escalated);
+  return watchActive(o) ? Math.min(ladder, POLL_WATCH_MS) : ladder;
 }
 
 // ---------------------------------------------------------------------------
@@ -1569,12 +1682,17 @@ function typeWord(type, band) {
 }
 
 // The RAM toast names its SIGNAL (round 7: RAM never warns on percent-used).
-// Pressure reads in PSI on the kernel's own 0-100 scale; the reserve reads in
-// percent free. Every other type keeps the spec's own usage sentence.
+// Pressure reads in PSI on the kernel's own scale; the reserve reads in percent
+// free. A reserve band the rate produced says "climbing fast" and quotes the
+// percent as where it is now, not as a line it crossed. Every other type keeps
+// the spec's own usage sentence.
 function ramSignalLine(opts) {
   const o = opts || {};
   const signal = sanitizeText(o.signal, 8) === "swap" ? "swap" : "psi";
   const pct = readingPct(o.pct);
+  if (signal === "swap" && normalizeBool(o.rate, false)) {
+    return "Swap reserve is climbing fast, " + pct + " percent used right now.";
+  }
   if (signal === "swap") return "Swap reserve is " + pct + " percent used.";
   return "System RAM pressure has reached " + pct + " PSI.";
 }
@@ -2002,7 +2120,13 @@ function agentPrompt(alert, reading, oomd, logPath) {
   // own number (PSI for pressure, percent used for the reserve), never the
   // MemAvailable percent wearing a wrong unit.
   const sig = sanitizeText(a.signal, 8);
-  const readingText = kind === "ram" && sig === "swap" ? pct + " percent used"
+  // Round 8 ruling 3: a reserve band the climb produced names the rate as the
+  // finding, so the prompt never quotes a percent nobody set a line at. The
+  // toast says the same thing the same way (ramSignalLine), and the skill's
+  // wording follows it.
+  const climbing = normalizeBool(a.rate, false);
+  const readingText = kind === "ram" && sig === "swap"
+    ? pct + " percent used" + (climbing ? ", climbing fast" : "")
     : (kind === "ram" ? pct + " PSI" : pct + "%");
   const fixed = [];
   fixed.push("Quattro Dash reports that " + kindLabel(kind) + " has crossed a ceiling you set.");
@@ -2085,7 +2209,7 @@ function onboardingPrompt(reading, oomd, thresholds, logPath, resting) {
     fixed.push("Give a recommended amber, red and critical for each of Hard Drive, VRAM and System RAM (PSI for System RAM), derived from that resting distribution");
   }
   fixed.push("and say what each line means on this machine. Say plainly when a chosen line sits inside the resting band.");
-  fixed.push("Then ask the user to set them. Amber defaults to " + DEFAULT_AMBER + "% (System RAM to " + DEFAULT_AMBER_RAM + " PSI) and red to " + DEFAULT_RED + "% if he does not");
+  fixed.push("Then ask the user to set them. Amber defaults to " + DEFAULT_AMBER + "% (System RAM to " + DEFAULT_AMBER_RAM + " PSI) and red to " + DEFAULT_RED + "% (System RAM to " + DEFAULT_RED_RAM + " PSI) if he does not");
   fixed.push("touch them; critical stays unset until he sets it, and until he does there is no critical band.");
   fixed.push("Never set a ceiling yourself, and never write over one the user has set.");
   fixed.push("Say out loud that swap is not a fourth threshold: crossing the kernel's swap limit raises the System RAM alert.");
@@ -2390,7 +2514,7 @@ function ceilingsQuestion(type, reading, oomd, thresholds, resting) {
   const sitting = restingPctFor(resting, type);
   const rec = recommendCeilings(type, resting);
   if (rec.provisional) {
-    lines.push("Recommended defaults until measured: amber " + defaultAmberFor(type) + unit + ", red " + DEFAULT_RED + unit + ", critical unset.");
+    lines.push("Recommended defaults until measured: amber " + defaultAmberFor(type) + unit + ", red " + defaultRedFor(type) + unit + ", critical unset.");
   } else {
     lines.push("Recommended from this machine: amber " + rec.amber + unit + ", red " + rec.red + unit + ", critical " + rec.critical + unit + ".");
   }
@@ -2506,12 +2630,13 @@ function kernelCeilingText(oomd) {
 function recommendCeilings(type, resting) {
   const sitting = restingPctFor(resting, type);
   if (type === "ram") {
+    const redDefault = DEFAULT_RED_RAM;
     if (sitting === null) {
-      return { amber: DEFAULT_AMBER_RAM, red: DEFAULT_RED, critical: DEFAULT_RED + 5, restingPct: null, provisional: true };
+      return { amber: DEFAULT_AMBER_RAM, red: redDefault, critical: redDefault + 5, restingPct: null, provisional: true };
     }
     const base = Math.round(sitting);
     const amber = Math.min(97, base < DEFAULT_AMBER_RAM ? DEFAULT_AMBER_RAM : base + 2);
-    const red = Math.min(98, base < DEFAULT_RED ? DEFAULT_RED : base + 7);
+    const red = Math.min(98, base < redDefault ? redDefault : base + 7);
     const critical = Math.min(99, Math.max(red + 5, base + 10));
     return { amber, red, critical, restingPct: sitting, provisional: false };
   }
@@ -2613,6 +2738,13 @@ function logRecord(opts) {
       type: sanitizeText(event.type, 16),
       band: asNumber(event.band),
       pct: asNumber(event.pct),
+      // Round 7 item 8 and round 8 ruling 3, in the log row too: a logged
+      // ram / amber / 20 is unreadable a week later, because 20 percent used is
+      // what a climb READ, not what it crossed. The signal and the rate are what
+      // the alert meant, and they are what the climb calibration is re-anchored
+      // from. Tri-state like the event's own fields: absent for hd and vram.
+      signal: asString(event.signal) === "" ? undefined : sanitizeText(event.signal, 8),
+      rate: event.rate === undefined ? undefined : normalizeBool(event.rate, false),
       latched: normalizeBool(event.latched, false),
       delivered: ["shown", "silenced-dnd", "unknown"].indexOf(event.delivered) >= 0 ? event.delivered : "unknown",
       reason: sanitizeText(event.reason, 256),
@@ -2624,6 +2756,58 @@ function logRecord(opts) {
 
 function logLine(record) {
   return JSON.stringify(record);
+}
+
+function rowTimeMs(value) {
+  const text = asString(value);
+  if (text.length === 0) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function roundRow(value) {
+  const n = asNumber(value);
+  return n === null ? null : Math.round(n);
+}
+
+// What a row means, with the raw counters rounded off. Byte-for-byte jitter in
+// usedKb or a PSI hundredth is not a fact about the machine; a band, a whole
+// percent, a latch, a ceiling, or a device that appeared is.
+function logSignature(record) {
+  const r = record || {};
+  const parts = [];
+  (asList(r.hd) || []).forEach(e => {
+    const x = e || {};
+    parts.push(["hd", x.key, x.band, roundRow(x.pct), x.latched ? 1 : 0, x.ro ? 1 : 0, x.absent ? 1 : 0].join("|"));
+  });
+  const ram = r.ram || {};
+  const vram = r.vram || {};
+  const oomd = r.oomd || {};
+  parts.push(["ram", ram.band, roundRow(ram.pct), roundRow(ram.swapPct), roundRow(ram.psiSomeAvg10),
+    roundRow(ram.psiFullAvg10), ram.latched ? 1 : 0].join("|"));
+  parts.push(["vram", vram.band, roundRow(vram.pct), roundRow(vram.pct === null ? vram.usedMib : null),
+    vram.latched ? 1 : 0].join("|"));
+  parts.push(["oomd", oomd.active ? 1 : 0, oomd.psiLimitPct, oomd.psiLimitDurationMs, oomd.swapLimitPct].join("|"));
+  parts.push(["ceilings", JSON.stringify(r.ceilings || {})].join("|"));
+  parts.push(["guard", r.guard === undefined ? "-" : (r.guard ? 1 : 0),
+    r.arm === null || r.arm === undefined ? "-" : JSON.stringify(r.arm)].join("|"));
+  return parts.join("\n");
+}
+
+// Does this sample earn a row? An alert row always does; a resting row does when
+// the resting cadence comes round; and a row that would lose something the
+// window cannot reconstruct does immediately, however close it falls to the last.
+function logDue(record, previous, opts) {
+  const o = opts || {};
+  if (record === null || record === undefined) return false;
+  if (previous === null || previous === undefined) return true;
+  if ((asList(record.alerts) || []).length > 0) return true;
+  const min = asNumber(o.minMs) === null ? LOG_ROW_MIN_MS : asNumber(o.minMs);
+  const at = rowTimeMs(record.at);
+  const before = rowTimeMs(previous.at);
+  if (at === null || before === null) return true;
+  if (at - before >= min) return true;
+  return logSignature(record) !== logSignature(previous);
 }
 
 // Append without a shell: `dd oflag=append conv=notrunc` takes the line on
@@ -2806,13 +2990,16 @@ function alertsYouDidNotSeeText(events) {
   for (const event of silenced) {
     const type = sanitizeText(event.type, 16);
     // A ram event's number is its signal's own reading: PSI for pressure,
-    // percent used for the reserve. Every other type is a percent.
+    // percent used for the reserve. Every other type is a percent. A climb event
+    // says so here too, because 20% used is not what an amber meant on that row.
     const unit = type === "ram"
       ? (sanitizeText(event.signal, 8) === "swap" ? "% used" : " PSI")
       : "%";
+    const climbing = type === "ram" && sanitizeText(event.signal, 8) === "swap" && normalizeBool(event.rate, false);
     lines.push(
       (asString(event.at) || "") + "  " + kindLabel(type) +
-      "  " + readingPct(event.pct) + unit + "  " + (BAND_NAMES[asNumber(event.band) || 0] || "")
+      "  " + readingPct(event.pct) + unit + (climbing ? ", climbing fast" : "") +
+      "  " + (BAND_NAMES[asNumber(event.band) || 0] || "")
     );
   }
   return lines.join("\n");

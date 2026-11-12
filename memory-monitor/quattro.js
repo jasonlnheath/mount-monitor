@@ -105,8 +105,24 @@ var PAL = {
 var LED_COUNT = 10;
 var LED_GREEN_AT = 25;
 var LED_YELLOW_AT = 10;
-var PSI_AMBER_AT = 60;
-var PSI_RED_AT = 80;
+// The RAM PRESSURE dial's face (round 8 ruling 5, the captain's 2026-11-12
+// re-measurement): the face runs 0 to 35 PSI and every numeral on it is a real
+// PSI number off that face. The old face was the kernel's whole 0-100 scale, so
+// the useful part of the band - 8 to 15 playable, 28 the observed wall - lived
+// in the bottom quarter of the dial and 28 sat down by 25. Nothing rescales
+// behind the drawing here: a threshold of 28 lands at 28/35 of the sweep.
+// The kernel's own scale is still 0-100, and a ceiling set above the face stays
+// the number it is in the settings row and in the alert, with its zone pinned to
+// the top of the face instead of smuggled back onto a hidden 100.
+var PSI_SCALE_MAX = 35;
+var PSI_TICK_EVERY = 1;
+var PSI_LABEL_EVERY = 5;
+
+// The drawn zones' fallback pair. The dash always draws the live pair; these
+// are the no-pair answer, and they mirror GAUGE_DEFAULTS.psi (round 8 ruling 2:
+// amber 15 PSI, red 28 PSI), pinned against it in tests/round8.test.mjs.
+var PSI_AMBER_AT = 15;
+var PSI_RED_AT = 28;
 var FUEL_RED_BELOW = 10;
 // The coolant light's approach zone, a fixed MiB margin above the floor: amber
 // when free VRAM falls under the floor plus this much. The captain's
@@ -114,13 +130,19 @@ var FUEL_RED_BELOW = 10;
 // red=500 MiB free, so the margin is 1000 over the 500 default floor.
 var VRAM_AMBER_MARGIN_MIB = 1000;
 
-var psiLabels = [
-  { f: 0, t: "0" },
-  { f: 0.25, t: "25" },
-  { f: 0.5, t: "50" },
-  { f: 0.75, t: "75" },
-  { f: 1, t: "100", color: "redHi" },
-];
+// The face's numerals, read off PSI_SCALE_MAX: 0 5 10 15 20 25 30 35, the top
+// numeral red like the red end of the zone arc it sits at. psiScaleLabels owns
+// the scale so the numerals, the ticks and the zones can never drift onto
+// different scales of their own.
+function psiScaleLabels() {
+  const out = [];
+  for (let i = 0; i <= PSI_SCALE_MAX; i += PSI_LABEL_EVERY) {
+    out.push({ f: i / PSI_SCALE_MAX, t: String(i), color: i === PSI_SCALE_MAX ? "redHi" : undefined });
+  }
+  return out;
+}
+
+var psiLabels = psiScaleLabels();
 var fuelLabels = [
   { f: 0, t: "E", color: "redHi" },
   { f: 0.25, t: "¼" },
@@ -140,18 +162,26 @@ var fuelLabels = [
 // pair is round 7's exception: the captain's own drawing, duplicates allowed,
 // no reorder and no push - the dragged side moves, the other keeps its count.
 //
-// Defaults are the captain-approved recommended values: RAM pressure 70/90,
-// root drive 80/90, swap reserve 20/10, VRAM coolant 1500/500 MiB free.
-// psi and hd pairs are the plugin's own alert ceilings (memory.js thresholds);
-// the batt pair resolves the RAM band's swap-reserve signal (round 7), and the
-// vram pair is a display decision stored beside them.
+// Defaults are the captain-approved recommended values: RAM pressure 15/28 PSI
+// and root drive 80/90 percent (both are the plugin's own alert ceilings), swap
+// reserve 30/14 percent free - which is 70 and 86 percent of the swap USED,
+// the portable pair round 8 ruling 3 ships - and VRAM coolant 1500/500 MiB
+// free. psi and hd pairs are memory.js's threshold store itself; the batt pair
+// resolves the RAM band's swap-reserve signal (round 7) and is shown in GiB on
+// a machine that has swap (ruling 4); the vram pair is a display decision
+// stored beside them.
+//
+// The gauge slider ranges (psi 1-99, drive 1-99, coolant 1-8192 MiB free, and
+// the swap pair's GiB view) are what a drag can reach; the stored pair keeps
+// its range either way, so a value the captain typed by hand is never pulled
+// onto a slider.
 
 var GAUGE_KEYS = ["psi", "hd", "batt", "vram"];
 
 var GAUGE_DEFAULTS = {
-  psi: { amber: 70, red: 90 },
+  psi: { amber: 15, red: 28 },
   hd: { amber: 80, red: 90 },
-  batt: { amber: 20, red: 10 },
+  batt: { amber: 30, red: 14 },
   vram: { amber: 1500, red: 500 },
 };
 
@@ -249,10 +279,19 @@ function adjustGaugePair(key, which, value, current) {
 // Live dial zones from a pair. The drive gauge needle reads percent FREE, so
 // its used-percent thresholds flip ends when they land on the dial; at the
 // defaults the red zone is the locked one and the amber band extends it.
+// How wide the dial's face is for this gauge: the PSI meter's face is its own
+// 0-35 scale, everything else is a percent of its resource. It is the one
+// number the numerals, the ticks, the zone arcs and the needle all divide by,
+// which is what makes a hidden 0-100 rescaling impossible.
+function dialScaleFor(key) {
+  return key === "psi" ? PSI_SCALE_MAX : 100;
+}
+
 function zoneArcsFor(key, amber, red) {
   const p = gaugePair(key, { amber: amber, red: red });
-  const a = Math.max(0, Math.min(1, p.amber / 100));
-  const r = Math.max(0, Math.min(1, p.red / 100));
+  const scale = dialScaleFor(key);
+  const a = Math.max(0, Math.min(1, p.amber / scale));
+  const r = Math.max(0, Math.min(1, p.red / scale));
   if (gaugeRedAbove(key)) {
     return [
       { from: a, to: r, kind: "amber" },
@@ -538,15 +577,27 @@ function needleAngleDeg(frac) {
   return DIAL.a0 + DIAL.sweep * Math.max(0, Math.min(1, v));
 }
 
-function dialTicks() {
+function dialTicksFor(max, every, majorEvery, midEvery) {
   const out = [];
-  for (let i = 0; i <= 40; i += 1) {
-    const f = i / 40;
-    const major = i % 10 === 0;
-    const mid = i % 5 === 0 && !major;
-    out.push({ f: f, major: major, mid: mid });
+  for (let i = 0; i <= max; i += every) {
+    const major = i % majorEvery === 0;
+    const mid = midEvery > 0 && i % midEvery === 0 && !major;
+    out.push({ f: i / max, major: major, mid: mid });
   }
   return out;
+}
+
+// The drive gauge's face: 40 intervals, a labelled major every 10 and a mid at
+// every 5 - its own 0-100 percent scale.
+function dialTicks() {
+  return dialTicksFor(40, 1, 10, 5);
+}
+
+// The PSI gauge's face (round 8 ruling 5): a tick for every PSI of the 0-35
+// scale, a labelled major every 5. The tick at 28 is where the red line is,
+// because the tick IS 28.
+function psiTicks() {
+  return dialTicksFor(PSI_SCALE_MAX, PSI_TICK_EVERY, PSI_LABEL_EVERY, 0);
 }
 
 // --- readings to needles and bands -------------------------------------------
@@ -580,7 +631,7 @@ function psiZone(psi) {
 function psiNeedleFrac(psi) {
   const v = asNumber(psi);
   if (v === null) return null;
-  return Math.max(0, Math.min(1, v / 100));
+  return Math.max(0, Math.min(1, v / PSI_SCALE_MAX));
 }
 
 function fuelNeedleFrac(pctFree) {
@@ -704,16 +755,28 @@ function psiTipWith(psi, amber, red) {
   };
 }
 
-function battTipWith(reserve, amber, red) {
+function battTipWith(reserve, amber, red, swapTotals) {
   const r = reserve || { present: false, pct: 0 };
   const pct = asNumber(r.pct);
-  const now = r.present === true && pct !== null
-    ? String(Math.round(pct)) + " percent remaining right now."
-    : "no swap is configured.";
+  const t = swapTotals || {};
+  const totalKb = asNumber(t.swapTotalKb);
+  const usedKb = asNumber(t.swapUsedKb);
+  // Round 8 ruling 4: the swap hover reads the round-7.5 standard free format,
+  // the percent free up front and the absolute pair behind it - the same line
+  // the values popup's SWAP row carries, so the gauge and the row say the same
+  // thing about the same reserve. A machine with no swap says so, never a 0%.
+  const line = r.present === true && pct !== null
+    ? (totalKb !== null && totalKb > 0 && usedKb !== null
+      ? freeLine(pct, gibTrim((totalKb - usedKb) / 1024), gibTrim(totalKb / 1024), "GiB")
+      // A caller that cannot name this machine's swap total says the percent free
+      // it does know, in the same free-ness vocabulary, rather than inventing
+      // gigabytes it was never given or falling back to a second phrasing.
+      : Math.round(pct) + "% Free")
+    : null;
   return {
     header: INSTRUMENTS.batt,
     rows: [
-      { label: "Reserve:", text: now, cls: "now" },
+      { label: "Now:", text: line === null ? "no swap is configured." : line + ".", cls: "now" },
     ],
   };
 }
@@ -779,8 +842,139 @@ var SETTINGS = {
 // scale is huge (the pair rides under GAUGE_MIB_MAX), so a one-MiB drag is
 // invisible noise; 50 MiB is the smallest move the captain can feel. The PSI
 // and drive sliders stay at 1 - their whole range is 99.
-function sliderStep(key) {
-  return key === "vram" ? 50 : 1;
+// Round 8 ruling 4: on a machine that has swap, the swap pair drags in GiB, and
+// 5 GiB is its minimum step - a swap reserve is worth gigabytes, and a one-MiB
+// drag on a 64 GiB reserve is noise too. With no swap configured the pair keeps
+// the percent slider it has always had, because there is no total to price a
+// gigabyte against.
+function sliderStep(key, swapTotals) {
+  if (key === "vram") return 50;
+  if (key === "batt" && swapGibRow(swapTotals)) return SWAP_STEP_GIB;
+  return 1;
+}
+
+// --- the gigabyte view of the swap reserve pair (round 8 ruling 4) ----------
+//
+// What the row SHOWS and what a drag SENDS are gigabytes, priced against this
+// machine's own measured swap total. What stays STORED is a percent of swap:
+// the portable unit round 8 ruling 3 says the defaults ship in (70 and 86
+// percent used, which is 30 and 14 percent free), and the unit memory.js's
+// whole band machinery reads - the pair inverts into the used-percent thresholds
+// reserveThresholds judges. The two directions live here and nowhere else, and
+// both round to the row's own 5 GiB step, so the number the row shows a dragged
+// line at is the number the row shows back.
+var SWAP_STEP_GIB = 5;
+
+function swapTotalGib(swapTotals) {
+  const total = asNumber(swapTotals && swapTotals.swapTotalKb) || 0;
+  return total > 0 ? total / (1024 * 1024) : 0;
+}
+
+function gibSnap(value, step, max) {
+  const v = asNumber(value);
+  if (v === null) return null;
+  const snapped = Math.round(v / step) * step;
+  return Math.max(step, Math.min(max === null ? snapped : max, snapped));
+}
+
+// Whether this machine's swap is big enough for the gigabyte row ruling 4 asks
+// for. A 5 GiB step needs two ordered handles, so the row needs at least two
+// steps of swap; smaller, the row shows the percent it really stores rather than
+// snapping both handles onto the same number and offering a setting the store
+// would then refuse.
+function swapGibRow(swapTotals) {
+  return swapTotalGib(swapTotals) >= 2 * SWAP_STEP_GIB;
+}
+
+// Where a free-reserve line sits in gigabytes of the total, on the row's step.
+function reservePctToGib(pctFree, totalGib, step) {
+  const pct = asNumber(pctFree);
+  const total = asNumber(totalGib);
+  if (pct === null || total === null || total <= 0) return null;
+  return gibSnap(total * (100 - pct) / 100, step, total);
+}
+
+// The stored free percent a dragged gigabyte line lands on.
+function gibToReservePct(gib, totalGib) {
+  const v = asNumber(gib);
+  const total = asNumber(totalGib);
+  if (v === null || total === null || total <= 0) return null;
+  const used = Math.round((v / total) * 100);
+  const free = 100 - used;
+  return Math.max(GAUGE_PCT_MIN, Math.min(GAUGE_PCT_MAX, free));
+}
+
+// The row's whole control surface for one gauge, in the units the row shows:
+// { unit, suffix, min, max, step, amber, red }. Only the swap pair on a machine
+// with swap changes units (GiB on a 5 GiB step); every other row keeps the
+// numbers it has always dragged, and now says what unit they are, because a row
+// that shows "1500 / 500" with no unit is a row the captain has to guess at. A
+// stored line outside the drag range keeps its value in the row while its handle
+// sits at the end of the track it cannot fit on.
+function gaugeViewFor(key, pair, swapTotals) {
+  const p = gaugePair(key, pair);
+  const total = swapTotalGib(swapTotals);
+  if (key === "batt" && swapGibRow(swapTotals)) {
+    const max = Math.max(SWAP_STEP_GIB, Math.floor(total / SWAP_STEP_GIB) * SWAP_STEP_GIB);
+    // The pair stays ordered on the track: the amber handle cannot be dragged
+    // past the last step below red, and red cannot sit at or under amber. A
+    // stored pair that snaps onto the same number is a setting the store would
+    // refuse, so the row keeps it steppable instead of offering it.
+    const amberMax = Math.max(SWAP_STEP_GIB, max - SWAP_STEP_GIB);
+    const amber = Math.min(reservePctToGib(p.amber, total, SWAP_STEP_GIB), amberMax);
+    const red = Math.max(reservePctToGib(p.red, total, SWAP_STEP_GIB), amber + SWAP_STEP_GIB);
+    return {
+      unit: "GiB",
+      suffix: " GiB",
+      min: SWAP_STEP_GIB,
+      max: max,
+      step: SWAP_STEP_GIB,
+      amber: amber,
+      red: Math.min(max, red),
+    };
+  }
+  const range = gaugeRange(key);
+  // The PSI row speaks PSI, and its track spans the face the dial shows (0 to
+  // 35) - the band of pressure this rig actually lives in - widened to whatever
+  // line is already stored, so a ceiling above the face (round 7 shipped 90, and
+  // the detail window allows up to 99) is never silently lowered by a drag that
+  // could not reach it. A line off the face keeps its number in the row and in
+  // the alert, with its zone pinned to the top of the dial. The coolant row says
+  // MiB because its numbers always were MiB.
+  const psi = key === "psi";
+  const vram = key === "vram";
+  const max = psi ? Math.max(range.min, Math.min(range.max, Math.max(PSI_SCALE_MAX, p.amber, p.red))) : range.max;
+  return {
+    unit: psi ? "PSI" : (vram ? "MiB" : "percent"),
+    suffix: psi ? " PSI" : (vram ? " MiB" : ""),
+    min: range.min,
+    max: max,
+    step: sliderStep(key, swapTotals),
+    amber: p.amber,
+    red: p.red,
+  };
+}
+
+// The number to hand the monitor's setter for a value the row dragged.
+function gaugeViewToStored(key, value, swapTotals) {
+  if (key !== "batt" || !swapGibRow(swapTotals)) return value;
+  const total = swapTotalGib(swapTotals);
+  const pct = gibToReservePct(value, total);
+  return pct === null ? value : pct;
+}
+
+// The settings row's pair read-out in the units the row shows it in:
+// "AMBER 45 GiB   RED 55 GiB" on a machine with swap, "AMBER 15   RED 28" on the
+// PSI row. The row renders the string and never assembles one: the words, the
+// labels and the spacing are this module's, the same law every other sentence on
+// the dash obeys.
+function settingsPairText(view) {
+  const v = view || {};
+  const suffix = v.suffix === undefined || v.suffix === null ? "" : String(v.suffix);
+  const amber = asNumber(v.amber);
+  const red = asNumber(v.red);
+  if (amber === null || red === null) return "";
+  return SETTINGS.amberLabel + " " + amber + suffix + "   " + SETTINGS.redLabel + " " + red + suffix;
 }
 
 // Round 7.5 item 17: the one standard free format for swap, VRAM and disk.
