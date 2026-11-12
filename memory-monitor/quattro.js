@@ -1021,7 +1021,9 @@ function codesEmptyText() {
 
 // Stable hash subjects, the drive "hd|<key>" precedent. A system fault keeps
 // its code for as long as the condition is present, and re-derives the same
-// code on every restart.
+// code on every restart. LAYER is the one per-resource family: a climbing
+// unit mints "sys|layer:<unit>", so each unit keeps its own digits, and the
+// bare family subject stays for the unreadable-systemd row.
 var SYS_SUBJECTS = {
   bar: "sys|bar",
   kernel: "sys|kernel",
@@ -1029,6 +1031,10 @@ var SYS_SUBJECTS = {
   layer: "sys|layer",
   disk: "sys|disk",
 };
+
+function layerSubject(unit) {
+  return SYS_SUBJECTS.layer + ":" + String(unit);
+}
 
 // The layer unit watch list: a small built-in list of the background units
 // this rig and Omarchy run. Absent units drop out of the readings; the list
@@ -1210,8 +1216,7 @@ function parseIoPsi(text) {
 
 // --- round 9: one system code entry, the drive entry's exact shape ----------
 
-function sysCode(kind, band, issue, status, fix, detail) {
-  const subject = SYS_SUBJECTS[kind];
+function sysCode(kind, subject, band, issue, status, fix, detail) {
   const id = memIdSys(subject);
   // The hash input is the subject itself, the drive "hd|<key>" precedent: the
   // stable subject string IS what codeFor hashes, "sys|bar", not a re-prefix
@@ -1272,16 +1277,16 @@ var SYS_FIX = {
 function barSysCode(probe, exitCode) {
   const p = probe || { readable: false, uptimeSec: null, ages: [] };
   if (!p.readable) {
-    return sysCode("bar", 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+    return sysCode("bar", SYS_SUBJECTS.bar, 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
       { alive: null, ageSec: null, uptimeSec: null });
   }
   const toolMissing = exitCode !== 0 && exitCode !== 1;
   if (p.ages.length === 0 && toolMissing) {
-    return sysCode("bar", 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+    return sysCode("bar", SYS_SUBJECTS.bar, 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
       { alive: null, ageSec: null, uptimeSec: p.uptimeSec });
   }
   if (p.ages.length === 0) {
-    return sysCode("bar", 2, "Bar shell is not running.", SYS_STATUS.severe, SYS_FIX.severe,
+    return sysCode("bar", SYS_SUBJECTS.bar, 2, "Bar shell is not running.", SYS_STATUS.severe, SYS_FIX.severe,
       { alive: false, ageSec: null, uptimeSec: p.uptimeSec });
   }
   // The youngest quickshell is the one whose age matters: a young process is
@@ -1292,7 +1297,7 @@ function barSysCode(probe, exitCode) {
   const restarted = age < BAR_RESTART_WINDOW_SEC && sinceBoot > BAR_BOOT_MARGIN_SEC;
   if (!restarted) return null;
   const minutes = Math.max(1, Math.round(age / 60));
-  return sysCode("bar", 1,
+  return sysCode("bar", SYS_SUBJECTS.bar, 1,
     "Bar shell restarted " + minutes + (minutes === 1 ? " minute" : " minutes") + " ago.",
     SYS_STATUS.moderate, SYS_FIX.moderate,
     { alive: true, ageSec: Math.round(age), uptimeSec: Math.round(p.uptimeSec) });
@@ -1308,7 +1313,7 @@ function kernelSysCode(lines, readable, prevCursor) {
   if (!readable) {
     return {
       cursor: prevCursor === null || prevCursor === undefined ? null : prevCursor,
-      entry: sysCode("kernel", 1, "Kernel log unreadable, faults unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+      entry: sysCode("kernel", SYS_SUBJECTS.kernel, 1, "Kernel log unreadable, faults unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
         { newLines: null, culprit: null, lines: [] }),
     };
   }
@@ -1340,7 +1345,7 @@ function kernelSysCode(lines, readable, prevCursor) {
   const recent = fresh.slice(-SYS_DETAIL_MAX_LINES).map(l => l.message);
   return {
     cursor: maxEpoch,
-    entry: sysCode("kernel", 1,
+    entry: sysCode("kernel", SYS_SUBJECTS.kernel, 1,
       "Kernel faults: " + fresh.length + " new. Culprit: " + culprit + ".",
       SYS_STATUS.moderate, SYS_FIX.moderate,
       { newLines: fresh.length, culprit: culprit, lines: recent }),
@@ -1351,10 +1356,13 @@ function kernelSysCode(lines, readable, prevCursor) {
 //
 // The big red one. Present for the whole boot once the signature appears (the
 // journal is this boot's, so a reboot clears it the way the copy says). The
-// saturated count names the cap honestly.
-function gpuSysCode(journalText, readable) {
-  if (!readable) {
-    return sysCode("gpu", 1, "Kernel log unreadable, GPU state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+// saturated count names the cap honestly. journalctl --grep exits 1 when
+// nothing matches: that is a readable, clean log (no fingerprint, no code),
+// the same line the bar probe draws for ps - exit 1 is no match, not a
+// missing tool. Only an exit past that is an unreadable log.
+function gpuSysCode(journalText, exitCode) {
+  if (exitCode !== 0 && exitCode !== 1) {
+    return sysCode("gpu", SYS_SUBJECTS.gpu, 1, "Kernel log unreadable, GPU state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
       { wedgeLines: null, lines: [] });
   }
   const all = parseJournalLines(journalText);
@@ -1367,7 +1375,7 @@ function gpuSysCode(journalText, readable) {
   if (wedge.length === 0) return null;
   const saturated = wedge.length >= GPU_WEDGE_MAX_LINES;
   const count = saturated ? GPU_WEDGE_MAX_LINES + "+" : String(wedge.length);
-  return sysCode("gpu", 2,
+  return sysCode("gpu", SYS_SUBJECTS.gpu, 2,
     "GPU driver wedged: " + count + " NVRM faults in the log.",
     "severe, the driver is wedged. only a reboot clears it.",
     SYS_FIX.severe + " a reboot clears it.",
@@ -1381,7 +1389,9 @@ function gpuSysCode(journalText, readable) {
 // } }. A count that jumped two or more in one interval is climbing; a count
 // that climbed one on each of two consecutive looks is climbing; one restart
 // alone is not. A count that resets (the unit reactivated) moves the baseline
-// quietly.
+// quietly. Every climbing unit is its own entry minted from its own
+// sys|layer:<unit> subject, the drive "hd|<key>" precedent: two units never
+// share one code, and each row names its unit.
 function layerSysCode(units, readable, prev) {
   const memory = prev && typeof prev === "object" ? prev : { seen: {}, climbing: {} };
   const nextSeen = Object.assign({}, memory.seen || {});
@@ -1389,12 +1399,11 @@ function layerSysCode(units, readable, prev) {
   if (!readable) {
     return {
       next: { seen: nextSeen, climbing: nextClimbing },
-      entry: sysCode("layer", 1, "Layer units unknown, systemd unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
-        { unit: null, restarts: null, climbedBy: null }),
+      entries: [sysCode("layer", SYS_SUBJECTS.layer, 1, "Layer units unknown, systemd unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
+        { unit: null, restarts: null, climbedBy: null })],
     };
   }
-  let worst = null;
-  const details = [];
+  const entries = [];
   for (const u of units === null || units === undefined ? [] : units) {
     if (!u || !u.found || u.restarts === null || u.restarts === undefined) continue;
     const last = nextSeen[u.id];
@@ -1404,22 +1413,17 @@ function layerSysCode(units, readable, prev) {
     const climbing = delta >= 2 || (delta >= 1 && nextClimbing[u.id] === true);
     nextClimbing[u.id] = delta >= 1;
     if (!climbing) continue;
-    details.push({
-      unit: u.id,
-      restarts: u.restarts,
-      climbedBy: delta,
-      restartPolicy: u.restartPolicy === "" ? null : u.restartPolicy,
-    });
-    if (worst === null || u.restarts > worst.restarts) worst = details[details.length - 1];
+    entries.push(sysCode("layer", layerSubject(u.id), 1,
+      "Layer unit " + u.id + " keeps restarting.",
+      SYS_STATUS.moderate, SYS_FIX.moderate,
+      {
+        unit: u.id,
+        restarts: u.restarts,
+        climbedBy: delta,
+        restartPolicy: u.restartPolicy === "" ? null : u.restartPolicy,
+      }));
   }
-  if (worst === null) return { next: { seen: nextSeen, climbing: nextClimbing }, entry: null };
-  const issue = details.length === 1
-    ? "Layer unit " + worst.unit + " keeps restarting."
-    : "Layer restart loop: " + details.length + " units climbing. Worst: " + worst.unit + ".";
-  return {
-    next: { seen: nextSeen, climbing: nextClimbing },
-    entry: sysCode("layer", 1, issue, SYS_STATUS.moderate, SYS_FIX.moderate, worst),
-  };
+  return { next: { seen: nextSeen, climbing: nextClimbing }, entries };
 }
 
 // --- DISK: IO pressure sustained past a bar ---------------------------------
@@ -1435,7 +1439,7 @@ function diskSysCode(psi, readable, prev) {
   if (!readable) {
     return {
       next: memory,
-      entry: sysCode("disk", 1, "IO pressure unknown, pressure file unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 1, "IO pressure unknown, pressure file unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
         { someAvg60: null, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: null }),
     };
   }
@@ -1444,14 +1448,14 @@ function diskSysCode(psi, readable, prev) {
   if (v === null) {
     return {
       next: memory,
-      entry: sysCode("disk", 1, "IO pressure unknown, pressure file unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 1, "IO pressure unknown, pressure file unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
         { someAvg60: null, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: null }),
     };
   }
   if (v >= DISK_RED_AT) {
     return {
       next: { amberRuns: 0 },
-      entry: sysCode("disk", 2,
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 2,
         "Disk stalls: IO pressure " + v.toFixed(1) + " over the red bar.",
         SYS_STATUS.severe, SYS_FIX.severe,
         { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: memory.amberRuns }),
@@ -1462,7 +1466,7 @@ function diskSysCode(psi, readable, prev) {
     if (runs < DISK_SUSTAIN_POLLS) return { next: { amberRuns: runs }, entry: null };
     return {
       next: { amberRuns: runs },
-      entry: sysCode("disk", 1,
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 1,
         "Disk stalls: IO pressure " + v.toFixed(1) + " held " + runs + " polls.",
         SYS_STATUS.moderate, SYS_FIX.moderate,
         { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: runs }),

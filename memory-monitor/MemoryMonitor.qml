@@ -250,7 +250,7 @@ BarWidget {
   property string kernelJournalText: ""
   property bool kernelJournalOk: false
   property string wedgeJournalText: ""
-  property bool wedgeJournalOk: false
+  property int wedgeJournalExit: -1
   property string unitShowText: ""
   property bool unitShowOk: false
   property string ioPsiText: ""
@@ -351,12 +351,13 @@ BarWidget {
     var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit);
     var kernel = Quattro.kernelSysCode(Quattro.parseJournalLines(kernelJournalText), kernelJournalOk, sysKernelCursor);
     sysKernelCursor = kernel.cursor;
-    var gpu = Quattro.gpuSysCode(wedgeJournalText, wedgeJournalOk);
+    var gpu = Quattro.gpuSysCode(wedgeJournalText, wedgeJournalExit);
     var layer = Quattro.layerSysCode(Quattro.parseUnitShow(unitShowText), unitShowOk, sysLayerPrev);
     sysLayerPrev = layer.next;
     var disk = Quattro.diskSysCode(Quattro.parseIoPsi(ioPsiText), ioPsiOk, sysDiskPrev);
     sysDiskPrev = disk.next;
-    sysCodes = [bar, kernel.entry, gpu, layer.entry, disk.entry].filter(function (c) { return c !== null && c !== undefined; });
+    sysCodes = [bar, kernel.entry, gpu].concat(layer.entries, [disk.entry])
+      .filter(function (c) { return c !== null && c !== undefined; });
   }
 
   function buildReadings(): void {
@@ -1410,8 +1411,8 @@ BarWidget {
     }
     stderr: StdioCollector { onStreamFinished: void this.text }
     onExited: function(exitCode, exitStatus) {
-      root.wedgeJournalOk = exitCode === 0;
-      if (exitCode !== 0) console.warn("memory-monitor: journalctl wedge grep unreadable, exit", exitCode)
+      root.wedgeJournalExit = exitCode;
+      if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: journalctl wedge grep unreadable, exit", exitCode)
       root.markDone("wedge");
     }
   }
