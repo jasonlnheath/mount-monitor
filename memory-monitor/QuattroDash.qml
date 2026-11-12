@@ -150,10 +150,14 @@ Panel {
   readonly property color coolantTint: coolantZone === 2 ? Quattro.PAL.redHot
     : (coolantZone === 1 ? Quattro.PAL.amber : Quattro.PAL.faceSym)
 
-  // Round 2 doctrine: DRIVE codes only. RAM high is the pressure gauge and
-  // the reserve battery, never an engine code; VRAM high lights the coolant
-  // light only.
-  readonly property var codes: Quattro.codesFromReadings(devices)
+  // Round 2 doctrine: DRIVE codes only from the readings. RAM high is the
+  // pressure gauge and the reserve battery, never an engine code; VRAM high
+  // lights the coolant light only. Round 9: the codes family extends to
+  // system health - the monitor decodes the five boolean system reads
+  // (bar, kernel, GPU wedge, layer units, disk PSI) into code entries on the
+  // same taxonomy, and allCodes merges the two families into the ONE column,
+  // most critical at the top.
+  readonly property var codes: Quattro.allCodes(Quattro.codesFromReadings(devices), mon("sysCodes", null))
 
   // Codes stay dimmed once their issue was dispatched (mockup .code.sent).
   property var sentCodes: ({})
@@ -173,7 +177,9 @@ Panel {
   // launches an agent of its own: it asks the monitor to put it through the
   // arm's gate and launch, and a refused click says so.
   function dispatchCode(code) {
-    var diagnosis = Quattro.diagnosisJson(code, hdRows)
+    var diagnosis = code.alert !== undefined && code.alert.type === "sys"
+      ? Quattro.systemDiagnosisJson(code)
+      : Quattro.diagnosisJson(code, hdRows)
     if (Memory.isArmNotice(code.alert)) {
       var decision = callMonitor("dispatchCriticalCode", [code.alert, diagnosis], null)
       if (decision === null || decision.started !== true) {
@@ -185,9 +191,10 @@ Panel {
       return
     }
     var reading = callMonitor("readingFor", [code.alert.type, code.alert], null)
-    var prompt = Memory.promptWithDiagnosis(
-      Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", "")),
-      diagnosis)
+    var base = code.alert.type === "sys"
+      ? Memory.systemAgentPrompt(code.alert)
+      : Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", ""))
+    var prompt = Memory.promptWithDiagnosis(base, diagnosis)
     var argv = Memory.normalizeBool(callMonitor("setting", ["agentInline", false], false), false)
       ? Memory.agentArgvWithInline(prompt, callMonitor("agentCommandArgv", [], null))
       : Memory.agentArgv(prompt, callMonitor("agentCommandArgv", [], null))
