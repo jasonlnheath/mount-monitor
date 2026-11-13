@@ -490,13 +490,17 @@ BarWidget {
     var seen = [];
     var nextLatched = JSON.parse(JSON.stringify(latchedMap));
 
+    var quiet = root.calibQuiet();
+    var releaseEdge = root.calibWasQuiet && !quiet;
+    root.calibWasQuiet = quiet;
+
     if (ramReading !== null) {
       seen.push("ram");
-      applyBand("ram", "ram", ramReading.pct, thresholds("ram"), nextLatched, ramReading);
+      applyBand("ram", "ram", ramReading.pct, thresholds("ram"), nextLatched, ramReading, quiet, releaseEdge);
     }
     if (vramReading !== null) {
       seen.push("vram");
-      applyBand("vram", "vram", vramReading.pct, thresholds("vram"), nextLatched, vramReading);
+      applyBand("vram", "vram", vramReading.pct, thresholds("vram"), nextLatched, vramReading, quiet, releaseEdge);
     }
 
     var wanted = watchedMounts();
@@ -505,7 +509,7 @@ BarWidget {
       var device = hdDevices[i];
       seen.push(device.key);
       targets[device.key] = device.targets === undefined ? [] : Array.from(device.targets, t => String(t));
-      applyBand(device.key, "hd", device.pct, thresholds("hd"), nextLatched, device);
+      applyBand(device.key, "hd", device.pct, thresholds("hd"), nextLatched, device, quiet, releaseEdge);
     }
     deviceTargets = targets;
 
@@ -559,7 +563,7 @@ BarWidget {
     hdDevices = rows;
   }
 
-  function applyBand(key, type, pct, ceiling, latchedTarget, entry): void {
+  function applyBand(key, type, pct, ceiling, latchedTarget, entry, quiet, releaseEdge): void {
     var previous = bandOf(key);
     var result;
     if (type === "ram") {
@@ -599,9 +603,7 @@ BarWidget {
     // the window fires late but never vanishes, while the usual aftermath
     // (already back to green) stays silent. The round-8 guard arm rides this
     // same held lane.
-    var quiet = root.calibQuiet();
-    var catchUp = root.calibWasQuiet && !quiet && held > 0;
-    root.calibWasQuiet = quiet;
+    var catchUp = releaseEdge && held > 0;
     if (quiet) fire = false;
     primed = true;
     if (isWriter && (held !== previous || firstSample)) saveState();
