@@ -76,7 +76,8 @@ two plugins, two jobs, one shared `ringkit.js`.
 
 ## Tests
 
-`bash tests/run.sh` — `node --test tests/` over the fixtures in
+`bash tests/run.sh` — `node --test tests/*.test.mjs` (the files named, not the
+directory, so node 22 runs it too) over the fixtures in
 `tests/fixtures/` (`findmnt` rows, `lsblk -P` rows, real `udevadm monitor` lines)
 plus live `findmnt` and `lsblk` checks that skip when the mount or the tool is
 absent, a live check in `tests/click.test.mjs` that runs the notification
