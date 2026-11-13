@@ -16,11 +16,12 @@ import "quattro.js" as Quattro
 // liquid telltale quattro.js owns, centered, tinted green / amber / red by
 // the free-VRAM thresholds (floor 500 MiB unset, amber 1000 MiB above it);
 // hovering it shows VRAM used / free of total. Then the codes area: ONE column
-// under one check-engine head, DRIVE codes only - RAM high is the pressure
-// gauge and the reserve battery, never a code, and VRAM high lights the
-// coolant light only. Clicking a code sends the plugin's agent prompt with
-// the dash's own pre-computed diagnosis appended as a fenced JSON block, so
-// Hermes explains from the dashboard's numbers.
+// under one check-engine head where DRIVE codes and the round-9 system fault
+// codes merge into one list (allCodes) - RAM high is the pressure gauge and
+// the reserve battery, never a code, and VRAM high lights the coolant light
+// only. Clicking a code sends the plugin's agent prompt with the dash's own
+// pre-computed diagnosis appended as a fenced JSON block, so Hermes explains
+// from the dashboard's numbers.
 //
 // Round 3 (preview build): the plugin answers to "Quattro Dash". The popup
 // opens with the native hero header - the name in the native title size and
@@ -190,10 +191,11 @@ Panel {
       showToast(Quattro.dispatchToast(code.code, true))
       return
     }
-    var reading = callMonitor("readingFor", [code.alert.type, code.alert], null)
     var base = code.alert.type === "sys"
       ? Memory.systemAgentPrompt(code.alert)
-      : Memory.agentPrompt(code.alert, reading, mon("oomd", null), mon("baselinePath", ""))
+      : Memory.agentPrompt(code.alert,
+          callMonitor("readingFor", [code.alert.type, code.alert], null),
+          mon("oomd", null), mon("baselinePath", ""))
     var prompt = Memory.promptWithDiagnosis(base, diagnosis)
     var argv = Memory.normalizeBool(callMonitor("setting", ["agentInline", false], false), false)
       ? Memory.agentArgvWithInline(prompt, callMonitor("agentCommandArgv", [], null))
@@ -203,9 +205,9 @@ Panel {
     showToast(Quattro.dispatchToast(code.code, code.sev === "r"))
   }
 
-  // The codes area head tints by the most severe DRIVE code showing; a
-  // column with no drive codes is the unlit emblem, whatever RAM and VRAM
-  // are doing.
+  // The codes area head tints by the most severe code showing, drive or
+  // system; an empty column is the unlit emblem, whatever RAM and VRAM are
+  // doing.
   readonly property color codesHeadTint: Quattro.codesHeadToken(codes) === "red" ? Quattro.PAL.redHot
     : (Quattro.codesHeadToken(codes) === "amber" ? Quattro.PAL.amber : Quattro.PAL.faceSym)
 

@@ -675,7 +675,6 @@ BarWidget {
   function readingFor(type, event): var {
     if (type === "ram") return ramReading;
     if (type === "vram") return vramReading;
-    if (type === "sys") return event === undefined || event === null ? null : event.detail;
     return Memory.hdRowFor(hdRows, event ? event.key : (activeAlert ? activeAlert.key : ""));
   }
 
