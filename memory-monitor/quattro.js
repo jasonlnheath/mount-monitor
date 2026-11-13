@@ -1288,7 +1288,7 @@ function journalDeltaArgs(cursor) {
 }
 
 function gpuWedgeArgs() {
-  return ["journalctl", "-k", "--output=short-unix", "--no-pager",
+  return ["journalctl", "-k", "-b", "--output=short-unix", "--no-pager",
     "-n", String(GPU_WEDGE_MAX_LINES), "--grep", GPU_WEDGE_WORDS.join("|")];
 }
 

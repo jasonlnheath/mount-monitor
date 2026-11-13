@@ -695,7 +695,7 @@ test("GPU: an unreadable journal is the unknown row, and the grep argv carries t
   const code = Quattro.gpuSysCode("", 2);
   assert.equal(code.band, 1);
   assert.equal(code.issue, "Kernel log unreadable, GPU state unknown.");
-  same(Quattro.gpuWedgeArgs(), ["journalctl", "-k", "--output=short-unix", "--no-pager",
+  same(Quattro.gpuWedgeArgs(), ["journalctl", "-k", "-b", "--output=short-unix", "--no-pager",
     "-n", String(Quattro.GPU_WEDGE_MAX_LINES), "--grep", "GspRmAlloc|NV_ERR_STATE_IN_USE"]);
 });
 
