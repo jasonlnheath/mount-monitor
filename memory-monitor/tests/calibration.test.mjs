@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Memory, Quattro, repoFile, same } from "./load.mjs";
@@ -82,11 +82,25 @@ test("calibPlan clamps tiny and huge machines into honest ladders", () => {
   assert.equal(huge.ok, true);
   assert.equal(huge.totalMib <= Quattro.CALIB_GRADE_CAP_MIB, true, "the cumulative top never exceeds the per-target cap");
 
+  // A well-populated small machine: 0.8x MemAvailable would climb past the
+  // ceiling physical RAM allows (3120 MiB of ladder under a 3072 MiB MemoryMax),
+  // so the cumulative targets clamp below the ceiling's own bound.
+  const populated = { MemTotal: 4 * MIB, MemAvailable: 3900 * 1024, SwapTotal: 0, SwapFree: 0 };
+  const idleSmall = Quattro.calibPlan(populated);
+  assert.equal(idleSmall.ok, true);
+  assert.ok(idleSmall.grades.length > 0, "the clamped ladder still climbs");
+  assert.ok(
+    idleSmall.totalMib <=
+      Math.floor((populated.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024) - Quattro.CALIB_CEILING_MARGIN_MIB,
+    "the ladder tops out with its margin to spare under the physical bound",
+  );
+
   // The ceiling is the kernel wall: above the ladder, below physical RAM.
   for (const { meminfo, plan } of [
     { meminfo: RIG, plan: Quattro.calibPlan(RIG) },
     { meminfo: { MemTotal: 4 * MIB, MemAvailable: 1500 * 1024, SwapTotal: 0, SwapFree: 0 }, plan: small },
     { meminfo: { MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB }, plan: huge },
+    { meminfo: populated, plan: idleSmall },
   ]) {
     const physicalMib = Math.floor((meminfo.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024);
     assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
@@ -421,7 +435,7 @@ test("calibUnitArgv assembles the bounded transient unit", () => {
   assert.ok(py > 0, "python3 is invoked directly");
   assert.equal(argv[py + 1], "/opt/plugin/calibrate.py");
   const planAt = argv.indexOf("--plan");
-  same(JSON.parse(argv[planAt + 1]), plan, "the helper reads the same plan the tests pin");
+  same(JSON.parse(argv[planAt + 1]), plan.grades, "the helper receives the plan's grades, the array its own parser requires");
   for (const part of argv) {
     assert.equal(/[;&|`$<>]/.test(String(part)), false, `no shell metacharacter in ${JSON.stringify(part)}`);
   }
@@ -514,7 +528,7 @@ test("the curve and proposal line builders speak used percent and obey the langu
 });
 
 test("the refusal copy names every honest way a start can refuse", () => {
-  for (const key of ["headroom", "systemd", "python", "running", "instance", "exists"]) {
+  for (const key of ["headroom", "systemd", "python", "running", "instance"]) {
     assert.equal(typeof Quattro.CALIB.refused[key], "string", `refused.${key} has words`);
     assert.ok(Quattro.CALIB.refused[key].length > 10);
   }
@@ -565,4 +579,68 @@ test("the helper really allocates the plan it is given, and writes only stdout",
   });
   assert.equal(bad.status, 3, "a bad plan exits 3 and never allocates");
   assert.equal(bad.stdout.trim(), "", "a refused plan never printed progress");
+});
+
+test("the runner-to-helper seam composes: the unit argv's own --plan payload runs in the real helper", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // A plan of calibPlan's own shape, sized to run for real: the seam must
+  // compose on the payload the runner actually builds, not on a hand-made one.
+  const plan = {
+    ok: true,
+    grades: [
+      { mib: 16, secs: 1 },
+      { mib: 16, secs: 1 },
+    ],
+    totalMib: 32,
+    capSec: 2,
+    ceilingMib: 544,
+    swapMaxKiB: 0,
+  };
+  const argv = Quattro.calibUnitArgv(HELPER, plan);
+  const payload = argv[argv.indexOf("--plan") + 1];
+  same(JSON.parse(payload), plan.grades, "the runner sends the grades array, the helper's documented plan");
+
+  // Handshake, end to end: execute the exact command the unit runs, from its
+  // python3 token on. A payload the helper's parser rejects exits 3 with no
+  // grade lines, so the assertions below are the seam's proof of life.
+  const py = argv.indexOf("python3");
+  const run = spawnSync(argv[py], argv.slice(py + 1), { encoding: "utf8", timeout: 30000 });
+  assert.equal(run.status, 0, `the helper accepts the runner's own payload (stderr: ${run.stderr})`);
+  const events = run.stdout.split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l));
+  assert.equal(events.length, 3, "one grade line per grade, plus the done line");
+  assert.equal(events[0].event, "grade");
+  assert.equal(events[0].grade, 0);
+  assert.equal(events[0].mib, 16);
+  assert.equal(events[1].event, "grade");
+  assert.equal(events[1].cumMib, 32, "the ladder retains: the second grade holds both");
+  assert.equal(events[2].event, "done");
+  assert.equal(events[2].cumMib, 32);
+
+  // Cancel: SIGTERM is what `systemctl stop` delivers to the unit's cgroup. A
+  // live run must die by python's default disposition, in seconds, mid-grade.
+  const longPlan = Object.assign({}, plan, { grades: [{ mib: 16, secs: 60 }], totalMib: 16, capSec: 60 });
+  const longArgv = Quattro.calibUnitArgv(HELPER, longPlan);
+  const longPy = longArgv.indexOf("python3");
+  const child = spawn(longArgv[longPy], longArgv.slice(longPy + 1), { stdio: ["ignore", "pipe", "pipe"] });
+  let childErr = "";
+  child.stderr.on("data", (chunk) => { childErr += chunk; });
+  await new Promise((resolve, reject) => {
+    child.stdout.once("data", () => resolve());
+    child.once("exit", (code) => reject(new Error(`the helper exited ${code} before its first grade line (stderr: ${childErr.trim()})`)));
+  });
+  const killAt = Date.now();
+  let killTimer = null;
+  const outcome = await new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.kill("SIGTERM");
+    killTimer = setTimeout(() => resolve(null), 5000);
+  });
+  clearTimeout(killTimer);
+  assert.ok(outcome, "a SIGTERM'd run dies rather than hanging");
+  assert.equal(outcome.signal, "SIGTERM", "cancel is the default disposition, never trapped or masked");
+  assert.ok(Date.now() - killAt < 3000, "cancel lands in seconds against a live grade");
 });

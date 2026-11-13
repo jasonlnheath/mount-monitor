@@ -2129,8 +2129,13 @@ function calibPlan(meminfo) {
     return { ok: false, why: "headroom" };
   }
   const availMib = Math.floor(availKb / 1024);
+  const physicalMib = Math.floor((totalKb - CALIB_CEILING_RESERVE_KB) / 1024);
+  const targetCap = Math.min(CALIB_GRADE_CAP_MIB, physicalMib - CALIB_CEILING_MARGIN_MIB);
+  if (targetCap < CALIB_GRADE_FLOOR_MIB) {
+    return { ok: false, why: "headroom" };
+  }
   const clampTarget = (v) =>
-    Math.max(CALIB_GRADE_FLOOR_MIB, Math.min(CALIB_GRADE_CAP_MIB, Math.round(v)));
+    Math.max(CALIB_GRADE_FLOOR_MIB, Math.min(targetCap, Math.round(v)));
   let prev = 0;
   const grades = [];
   for (const frac of CALIB_GRADE_FRACS) {
@@ -2140,7 +2145,6 @@ function calibPlan(meminfo) {
     if (delta > 0) grades.push({ mib: delta, secs: CALIB_GRADE_SECS });
   }
   const totalMib = prev;
-  const physicalMib = Math.floor((totalKb - CALIB_CEILING_RESERVE_KB) / 1024);
   return {
     ok: true,
     grades: grades,
@@ -2148,8 +2152,6 @@ function calibPlan(meminfo) {
     capSec: CALIB_CAP_SEC,
     ceilingMib: Math.min(totalMib + CALIB_CEILING_MARGIN_MIB, physicalMib),
     swapMaxKiB: swapKb === null ? 0 : Math.floor(swapKb / 2),
-    wallPsi: CALIB_PSI_WALL,
-    wallSwapKbPerMin: CALIB_SWAP_WALL_KB_PER_MIN,
   };
 }
 
@@ -2194,7 +2196,7 @@ function calibUnitArgv(helperPath, plan) {
     "python3",
     asString(helperPath) || "",
     "--plan",
-    JSON.stringify(p),
+    JSON.stringify(asList(p.grades) || []),
   ];
 }
 
@@ -2533,7 +2535,6 @@ var CALIB = {
     python: "python3 is unavailable, so the stressor cannot run. Calibration refused.",
     running: "A calibration is already running.",
     instance: "The primary instance runs the calibration.",
-    exists: "A calibration unit already exists. Cancel it first.",
   },
 };
 

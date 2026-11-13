@@ -312,8 +312,6 @@ BarWidget {
   property real calibEndedAtMs: 0
   property bool calibWasQuiet: false
   property bool calibOrphanChecked: false
-  property bool calibStopRequested: false
-  property bool calibPendingProposal: false
 
   readonly property var readNames: ["meminfo", "psi", "swaps", "zram", "findmnt", "gpu", "apps", "bar", "kernel", "wedge", "units", "iopsi"]
 
@@ -604,6 +602,7 @@ BarWidget {
     var quiet = root.calibQuiet();
     var catchUp = root.calibWasQuiet && !quiet && held > 0;
     root.calibWasQuiet = quiet;
+    if (quiet) fire = false;
     primed = true;
     if (isWriter && (held !== previous || firstSample)) saveState();
     if (!fire && !catchUp) return;
@@ -1294,8 +1293,6 @@ BarWidget {
     if (!root.isWriter) return Quattro.CALIB.refused.instance;
     var plan = Quattro.calibPlan(Memory.parseMeminfo(meminfoText));
     if (!plan.ok) return Quattro.CALIB.refused.headroom;
-    root.calibStopRequested = false;
-    root.calibPendingProposal = false;
     root.calib = {
       phase: "preflight",
       startedAtMs: 0,
@@ -1347,7 +1344,6 @@ BarWidget {
 
   function cancelCalibration(): var {
     if (!root.calibActive()) return null;
-    root.calibStopRequested = true;
     root.calibEndedAtMs = Date.now();
     root.calib = null;
     calibCapTimer.stop();
@@ -1443,8 +1439,6 @@ BarWidget {
   // data - the proposal stands on it, with APPLY.
   function calibInternalAbort(why, grade): void {
     if (root.calib === null || root.calib.phase !== "running") return;
-    root.calibStopRequested = true;
-    root.calibPendingProposal = true;
     root.calibEndedAtMs = Date.now();
     root.calib = Object.assign({}, root.calib, {
       phase: "running",
@@ -1460,7 +1454,6 @@ BarWidget {
   // so the curve is dismissed, never proposed.
   function calibExternalAbort(reason): void {
     if (root.calib === null || root.calib.phase !== "running") return;
-    root.calibStopRequested = true;
     root.calibEndedAtMs = Date.now();
     root.calib = Object.assign({}, root.calib, {
       phase: "aborted",
@@ -1485,8 +1478,7 @@ BarWidget {
     // is real data. The helper's own exit 2 says its allocator refused - the
     // ceiling caught it; anything else is an early death, honest either way
     // about not knowing which.
-    var propose = root.calibPendingProposal || root.calib.internal || exitCode === 0;
-    root.calibPendingProposal = false;
+    var propose = root.calib.internal || exitCode === 0;
     if (propose) {
       var records = root.calibBuildRecords();
       var proposal = Quattro.calibProposalFor(records, root.calib.plan, root.calibStoredPairs());
@@ -1507,7 +1499,6 @@ BarWidget {
 
   function dismissCalibration(): void {
     root.calib = null;
-    root.calibPendingProposal = false;
   }
 
   // APPLY: the proposed values land through the exact paths a slider drag

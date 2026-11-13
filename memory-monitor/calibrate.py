@@ -3,10 +3,10 @@
 
 Reads a grade plan from --plan (JSON: [{"mib": <MiB>, "secs": <seconds>}, ...]),
 allocates that much ANONYMOUS memory one grade at a time, retains the whole
-ladder, touches pages spread across each grade window (never in one burst - an
-unthrottled fault-in would spike PSI mid-grade and smear every measurement the
-dash is trying to take), prints one JSON progress line per grade on stdout, and
-exits.
+ladder, prints one JSON progress line at the start of each grade on stdout
+(the dash bins its samples by these lines), touches pages spread across the
+grade window (never in one burst - an unthrottled fault-in would spike PSI
+mid-grade and smear every measurement the dash is trying to take), and exits.
 
 It writes NOTHING, ever: no files, no logs, no temp dirs, no child processes. The
 dash's tests pin that law by reading this source. Exit codes: 0 finished,
@@ -78,6 +78,17 @@ def main():
             emit({"event": "error", "why": "allocator refused grade %d" % index})
             sys.exit(2)
 
+        ladder.append(buf)
+        held_mib += mib
+
+        emit({
+            "event": "grade",
+            "grade": index,
+            "mib": mib,
+            "cumMib": held_mib,
+            "at": round(time.monotonic() - start, 2),
+        })
+
         # Touch the new pages spread across the first half of the grade window:
         # the point of a graded ladder is a slope the dash can read, not a
         # wall of page faults at the top of each step.
@@ -91,16 +102,6 @@ def main():
             touched += step
             if touched < pages:
                 time.sleep(SLICE_MS / 1000.0)
-        ladder.append(buf)
-        held_mib += mib
-
-        emit({
-            "event": "grade",
-            "grade": index,
-            "mib": mib,
-            "cumMib": held_mib,
-            "at": round(time.monotonic() - start, 2),
-        })
 
         # Hold through the rest of the grade window in small slices, so the
         # grade's end lands near its planned mark without a long unsleepable
