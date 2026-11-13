@@ -350,6 +350,56 @@ process liveness, unit properties, a journaled delta and a pressure file. Their
 decision state is session-only — the kernel log cursor, the layer climb memory
 and the disk amber run — and a shell restart re-baselines all of it.
 
+## Stress calibration (round 10)
+
+The settings section has a button under RESET TO DEFAULTS: **RUN STRESS
+CALIBRATION** — the twin function. Reset says use the fleet's numbers; this
+says measure this machine. It exists so a new install gets honest bands in
+minutes, and a hardware change gets a re-tune, without anyone guessing.
+
+What a run does: about three minutes of graded MEMORY-ONLY pressure (four
+steps of roughly forty seconds, each step holding its allocation — the ladder
+climbs toward 80 percent of MemAvailable, capped at 8 GiB whatever the
+machine has) while the dash records this machine's own stall curve grade by
+category: memory PSI, swap used and its rate, dirty pages. No files are
+written anywhere; the stressor (`calibrate.py`, shipped beside the widget)
+allocates and touches anonymous memory and nothing else.
+
+The rails, none optional: the stressor runs as a transient systemd **user
+unit** (`quattrodash-calib`) whose `MemoryMax` is the kernel wall above the
+ladder and clamped below physical RAM, whose `MemorySwapMax` bounds the
+reserve exposure at half the reserve, whose `RuntimeMaxSec` kills it at the
+cap even if the shell dies, and whose `TimeoutStopSec` makes CANCEL land in
+seconds. The stressor never runs unbounded: if `systemd-run` or `python3` is
+missing, calibration refuses. Under 1 GiB of MemAvailable it refuses too —
+close something and try again.
+
+The run auto-aborts the moment wall signs appear: memory PSI sustained at the
+wall class, or swap climbing at storm rate (twice the climb telltale's own
+line). A wall abort stops the ladder early and still proposes — the partial
+curve is real data. The watchdog cap, a surprise exit and a cancel dismiss
+instead: they say nothing about where this machine's wall is.
+
+While a run is live — and through the settle window after it — the dash holds
+the alert lanes a deliberate stress could trip: the KERNEL and DISK codes stay
+quiet (a calibration causes those two; it can cause none of BAR, GPU and
+LAYER, so a genuine fault there still shows), RAM/swap band toasts are held
+until quiet releases, the critical guard does not arm, and baseline log rows
+written inside the window carry a `calib` mark so the round-8 evidence reads
+can exclude the excursion. The gauges keep showing the honest live bands
+throughout; nothing is hidden, only the paging is held.
+
+The proposal screen shows the measured curve beside the proposed numbers: RAM
+amber/red as fractions (0.35 / 0.65) of the wall's sustained PSI, the swap
+reserve pair scaled between the knee and the wall in percent used, and — when
+the machine shrugged off the whole ladder — the fleet defaults as the honest
+floor. APPLY and KEEP DEFAULTS are equal citizens; APPLY writes through the
+same paths a slider drag uses, so ordering rules and a user-set critical
+ceiling are enforced unchanged (a critical that blocks the proposed red blocks
+the apply and says so). Root drive and VRAM are never proposed — a memory-only
+run measures pressure and the reserve. Only the writer instance starts a run;
+a fixed unit name means one calibration per machine, enforced by systemd.
+
 ## Install
 
 ```bash
