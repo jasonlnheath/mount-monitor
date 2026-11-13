@@ -169,9 +169,11 @@ Panel {
     sentCodes = next
   }
 
-  // The click path is the plugin's own typed argv: the SAME fixed prompt the
-  // toasts send, built by memory.js, with the dash's own pre-computed
-  // diagnosis (quattro.js, round 2 item 8) appended as a fenced JSON block.
+  // The click path is the plugin's own typed argv: a fixed prompt memory.js
+  // builds (a drive code's is the same prompt its toast sends; a system
+  // fault's is systemAgentPrompt - it has no toast), with the dash's own
+  // pre-computed diagnosis (quattro.js: round 2 for drive codes, round 9 for
+  // system faults) appended as a fenced JSON block.
   // One paragraph in one argv element, run detached, with the same
   // agentInline setting every other click path honors. No shell, no sentence
   // built here. A critical-band code is a critical dispatch, so it never
