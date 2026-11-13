@@ -2791,6 +2791,11 @@ function logRecord(opts) {
       at: asString(event.at) || null,
     })),
   };
+  // Round 10: a row written inside the calibration's quiet window says so. The
+  // key is absent otherwise - every existing row stays byte-identical - so the
+  // round-8 evidence reads can exclude a deliberate three-minute red excursion
+  // without ever needing to know this feature exists.
+  if (normalizeBool(o.calib, false)) record.calib = true;
   return record;
 }
 

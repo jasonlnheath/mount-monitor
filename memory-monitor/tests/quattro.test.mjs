@@ -1610,9 +1610,12 @@ test("round 9 wiring: the widget reads through quattro.js argv builders and ride
   assert.equal(QML.includes("Quattro.diskSysCode("), true);
   // The kernel cursor is the only state a poll carries between polls.
   assert.match(QML, /property var sysKernelCursor: null/);
-  // No Timer may exist that round 9 did not already know about.
+  // No Timer may exist that round 9 did not already know about. Round 10 adds
+  // one, knowingly: calibCapTimer, the widget's own hard watchdog under the
+  // calibration unit's RuntimeMaxSec. It starts and stops with a run and is
+  // never a second sampling timer.
   const timers = [...QML.matchAll(/Timer \{\n\s*id: (\w+)/g)].map(m => m[1]);
-  assert.deepEqual(timers, ["gaugeSaveTimer", "noticeWatchdog", "ramTimer", "vramTimer", "hdTimer", "readWatchdog", "alertWatchdog", "armWatchdog", "healthTimer"],
+  assert.deepEqual(timers, ["gaugeSaveTimer", "noticeWatchdog", "ramTimer", "vramTimer", "hdTimer", "readWatchdog", "calibCapTimer", "alertWatchdog", "armWatchdog", "healthTimer"],
     "round 9 adds no timer of its own");
 });
 

@@ -163,6 +163,38 @@ Panel {
   // Codes stay dimmed once their issue was dispatched (mockup .code.sent).
   property var sentCodes: ({})
 
+  // ---- Round 10: the stress-calibration panel. The dash renders Quattro.CALIB
+  //      copy and the monitor's state and calls into the monitor; it decides
+  //      nothing about the run. The confirm step is the dash's own UI state
+  //      (the monitor only ever sees a start or a dismissal); everything else
+  //      is the monitor's truth, read fresh every frame.
+  readonly property var calib: callMonitor("calibState", [], null)
+  readonly property bool calibActive: calib !== null && (calib.phase === "preflight" || calib.phase === "running")
+  readonly property bool calibProposing: calib !== null && calib.phase === "proposing"
+  readonly property bool calibAborted: calib !== null && calib.phase === "aborted"
+  property bool calibConfirmOpen: false
+  // The confirm card re-renders its elapsed line once a second while it shows;
+  // a dead-off timer is cheaper than a calendar in a binding.
+  property real calibNow: 0
+
+  Connections {
+    target: monitor
+    function onCalibRefusalChanged() {
+      if (monitor.calibRefusal === "" || monitor.calibRefusal === null) return;
+      root.showToast(monitor.calibRefusal, true)
+      monitor.calibRefusal = ""
+    }
+  }
+
+  Timer {
+    id: calibClock
+    interval: 1000
+    repeat: true
+    running: root.calibActive
+    triggeredOnStart: true
+    onTriggered: root.calibNow = Date.now()
+  }
+
   function markSent(code) {
     var next = JSON.parse(JSON.stringify(sentCodes))
     next[code] = true
@@ -998,6 +1030,399 @@ Panel {
           }
         }
 
+        // ---- The stress-calibration panel (round 10): the reset's twin, one
+        //      row down. Reset says use the fleet's numbers, this says measure
+        //      mine. The button dims while a run is live, so cancel stays the
+        //      only action that matters; the cards below are pure render over
+        //      Quattro.CALIB copy and the monitor's state.
+        Rectangle {
+          visible: content.settingsOpen
+          Layout.alignment: Qt.AlignHCenter
+          width: 190
+          height: 24
+          radius: 8
+          color: !root.calibActive && calibArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+          border.width: 1
+          border.color: root.calibActive ? Quattro.PAL.line : Quattro.PAL.line
+          opacity: root.calibActive ? 0.4 : 1
+
+          Text {
+            anchors.centerIn: parent
+            text: Quattro.SETTINGS.calibrate
+            color: root.fg
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1
+          }
+
+          MouseArea {
+            id: calibArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: !root.calibActive ? Qt.PointingHandCursor : Qt.ArrowCursor
+            enabled: !root.calibActive
+            onClicked: root.calibConfirmOpen = true
+          }
+        }
+
+        ColumnLayout {
+          visible: content.settingsOpen && root.calibConfirmOpen && root.calib === null
+          Layout.fillWidth: true
+          spacing: 6
+
+          Text {
+            text: Quattro.CALIB.confirm.heading
+            color: Quattro.PAL.amber
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.5
+          }
+
+          Text {
+            text: Quattro.CALIB.confirm.body
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+          }
+
+          RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: 10
+
+            Rectangle {
+              width: 120
+              height: 22
+              radius: 8
+              color: calibStartArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+              border.width: 1
+              border.color: Quattro.PAL.amber
+
+              Text {
+                anchors.centerIn: parent
+                text: Quattro.CALIB.confirm.start
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: calibStartArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.calibConfirmOpen = false
+                  var refused = callMonitor("startCalibration", [], null)
+                  if (refused !== null && refused !== undefined) root.showToast(refused, true)
+                }
+              }
+            }
+
+            Rectangle {
+              width: 120
+              height: 22
+              radius: 8
+              color: calibNoArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+              border.width: 1
+              border.color: Quattro.PAL.line
+
+              Text {
+                anchors.centerIn: parent
+                text: Quattro.CALIB.confirm.dontRun
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: calibNoArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.calibConfirmOpen = false
+              }
+            }
+          }
+        }
+
+        ColumnLayout {
+          visible: content.settingsOpen && root.calibActive
+          Layout.fillWidth: true
+          spacing: 4
+
+          RowLayout {
+            Layout.fillWidth: true
+
+            Text {
+              text: Quattro.CALIB.running.heading
+              color: Quattro.PAL.amber
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1.5
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Text {
+              text: {
+                if (root.calib === null) return ""
+                var total = root.calib.plan && root.calib.plan.grades ? root.calib.plan.grades.length : 0
+                return Quattro.CALIB.gradeLabel(root.calib.grade, total)
+              }
+              color: root.fg
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+          }
+
+          Text {
+            visible: root.calib !== null && root.calib.live !== null
+            text: {
+              if (root.calib === null || root.calib.live === null) return ""
+              var live = root.calib.live
+              var parts = []
+              parts.push("PSI " + (live.psiSome10 === null ? "-" : Number(live.psiSome10).toFixed(1)))
+              parts.push("SWAP " + (live.swapPct === null ? "-" : Math.round(live.swapPct) + "%"))
+              parts.push("DIRTY " + (live.dirtyKb === null ? "-" : Math.round(live.dirtyKb / 1024) + " MB"))
+              return parts.join("   ")
+            }
+            color: root.fg
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            text: {
+              if (root.calib === null || root.calib.startedAtMs <= 0) return Quattro.CALIB.running.cancelNote
+              var elapsed = Math.max(0, Math.floor((root.calibNow - root.calib.startedAtMs) / 1000))
+              return elapsed + "s / " + root.calib.plan.capSec + "s   " + Quattro.CALIB.running.cancelNote
+            }
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          Rectangle {
+            Layout.alignment: Qt.AlignHCenter
+            width: 190
+            height: 22
+            radius: 8
+            color: calibCancelArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+            border.width: 1
+            border.color: Quattro.PAL.redHot
+
+            Text {
+              anchors.centerIn: parent
+              text: Quattro.CALIB.running.cancel
+              color: root.fg
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1
+            }
+
+            MouseArea {
+              id: calibCancelArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                var msg = callMonitor("cancelCalibration", [], null)
+                if (msg !== null && msg !== undefined) root.showToast(msg, false)
+              }
+            }
+          }
+        }
+
+        ColumnLayout {
+          visible: content.settingsOpen && (root.calibProposing || root.calibAborted)
+          Layout.fillWidth: true
+          spacing: 6
+
+          Text {
+            text: {
+              if (root.calibAborted) return Quattro.CALIB.title + " STOPPED"
+              return root.calib !== null && root.calib.internal
+                ? Quattro.CALIB.propose.heading + " (WALL FOUND)" : Quattro.CALIB.propose.heading
+            }
+            color: root.calibAborted ? Quattro.PAL.redHot : Quattro.PAL.amber
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.5
+          }
+
+          Text {
+            visible: root.calib !== null && root.calib.reason !== ""
+            text: root.calib !== null ? root.calib.reason : ""
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+          }
+
+          ColumnLayout {
+            visible: root.calibProposing && root.calib !== null && root.calib.records !== null
+            Layout.fillWidth: true
+            spacing: 2
+
+            Repeater {
+              model: root.calibProposing && root.calib !== null && root.calib.records !== null ? root.calib.records : []
+
+              Text {
+                required property var modelData
+                text: Quattro.calibCurveLine(modelData)
+                color: root.dim
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Repeater {
+              model: {
+                if (!root.calibProposing || root.calib === null || root.calib.proposal === null) return []
+                return Quattro.calibProposalLines(root.calib.proposal, {
+                  psi: root.pairFor("psi"),
+                  batt: root.pairFor("batt"),
+                })
+              }
+
+              Text {
+                required property string modelData
+                text: modelData
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+              }
+            }
+          }
+
+          Text {
+            visible: root.calibProposing
+            text: root.calib !== null && root.calib.blocked
+              ? Quattro.CALIB.propose.blockedNote : Quattro.CALIB.propose.note
+            color: root.dim
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+          }
+
+          RowLayout {
+            visible: root.calibProposing
+            Layout.alignment: Qt.AlignHCenter
+            spacing: 10
+
+            Rectangle {
+              width: 120
+              height: 22
+              radius: 8
+              color: calibApplyArea.containsMouse && !(root.calib !== null && root.calib.blocked) ? Quattro.PAL.hoverBg : Quattro.PAL.face
+              border.width: 1
+              border.color: Quattro.PAL.amber
+              opacity: root.calib !== null && root.calib.blocked ? 0.4 : 1
+
+              Text {
+                anchors.centerIn: parent
+                text: Quattro.CALIB.propose.apply
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: calibApplyArea
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: !(root.calib !== null && root.calib.blocked)
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                  var refused = callMonitor("applyCalibration", [], null)
+                  if (refused !== null && refused !== undefined) root.showToast(refused, true)
+                  else root.showToast(Quattro.CALIB.done.applied, false)
+                }
+              }
+            }
+
+            Rectangle {
+              width: 140
+              height: 22
+              radius: 8
+              color: calibKeepArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+              border.width: 1
+              border.color: Quattro.PAL.line
+
+              Text {
+                anchors.centerIn: parent
+                text: Quattro.CALIB.propose.keep
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: calibKeepArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  callMonitor("dismissCalibration", [], null)
+                  root.showToast(Quattro.CALIB.done.kept, false)
+                }
+              }
+            }
+          }
+
+          Rectangle {
+            visible: root.calibAborted
+            Layout.alignment: Qt.AlignHCenter
+            width: 120
+            height: 22
+            radius: 8
+            color: calibDismissArea.containsMouse ? Quattro.PAL.hoverBg : Quattro.PAL.face
+            border.width: 1
+            border.color: Quattro.PAL.line
+
+            Text {
+              anchors.centerIn: parent
+              text: "DISMISS"
+              color: root.fg
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1
+            }
+
+            MouseArea {
+              id: calibDismissArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                callMonitor("dismissCalibration", [], null)
+              }
+            }
+          }
+        }
+
       }
 
         // ---- The values-only popup (the captain's popup ruling): the same
@@ -1620,9 +2045,19 @@ Panel {
   property bool toastBad: false
 
   function showToast(t, bad) {
-    toastMark = t.mark
-    toastCode = t.code
-    toastText = t.text
+    // Round 10's calibration copy (refusals, cancelled, applied, kept) speaks
+    // plain sentences, while the round-9 dispatch toasts carry mark/code/text
+    // objects. Both must render: a bare string is the whole toast text, with
+    // the same check/cross mark the object path picks by severity.
+    if (typeof t === "string") {
+      toastMark = bad === true ? "✗" : "✓"
+      toastCode = ""
+      toastText = t
+    } else {
+      toastMark = t.mark
+      toastCode = t.code
+      toastText = t.text
+    }
     toastBad = bad === true
     toastTimer.restart()
   }

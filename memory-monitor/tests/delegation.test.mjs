@@ -437,3 +437,51 @@ test("the gauge slider quantizes drags to its step", () => {
   assert.match(dash, /property int step/, "the slider carries a step");
   assert.match(dash, /sliderStep\(/, "the slider reads the step from quattro.js");
 });
+
+// --- Round 10: the stress calibration. The widget RUNS what quattro.js
+// decides; the dash only renders and calls. The unit name never appears in any
+// QML file: the runner's identity is the kernel's, so a second builder can
+// never fork the name the cancel and orphan paths stop.
+
+test("the monitor builds the calibration runner through quattro.js and never names the unit itself", () => {
+  const monitor = repoFile("memory-monitor/MemoryMonitor.qml");
+  for (const call of [
+    "Quattro.calibPlan(",
+    "Quattro.calibUnitArgv(",
+    "Quattro.calibStopArgv(",
+    "Quattro.calibProbeArgv(",
+    "Quattro.calibPreflightArgvs(",
+    "Quattro.calibBattToStored(",
+    "Quattro.calibAbortFor(",
+    "Quattro.calibQuietFor(",
+    "Quattro.sysCodesQuiet(",
+    "Quattro.calibProposalFor(",
+    "Quattro.calibSampleRecord(",
+  ]) {
+    assert.match(monitor, new RegExp(call.replace("(", "\\(")), `MemoryMonitor.qml must decide the calibration through ${call}`);
+  }
+  assert.doesNotMatch(monitor, /quattrodash-calib/, "the unit name lives in quattro.js alone");
+  assert.doesNotMatch(monitor, /"systemd-run"/, "the runner argv is never assembled in QML");
+});
+
+test("the dash renders calibration state and calls the monitor, carrying no calibration math", () => {
+  const dash = repoFile("memory-monitor/QuattroDash.qml");
+  for (const call of [
+    "startCalibration",
+    "cancelCalibration",
+    "applyCalibration",
+    "dismissCalibration",
+    "calibState",
+  ]) {
+    assert.match(dash, new RegExp(`callMonitor\\("${call}"`), `the dash must reach the monitor for ${call}`);
+  }
+  assert.doesNotMatch(dash, /Quattro\.calib(Plan|UnitArgv|StopArgv|ProbeArgv|PreflightArgvs|AbortFor|QuietFor|ProposalFor|SampleRecord|BattToStored)\(/,
+    "the dash reads CALIB copy and renders through the line builders, and decides nothing");
+  assert.doesNotMatch(dash, /quattrodash-calib|systemd-run/, "the dash never touches the runner");
+});
+
+test("the calibration holds the alert lanes and stamps its log rows, through the kernel's predicates", () => {
+  const monitor = repoFile("memory-monitor/MemoryMonitor.qml");
+  assert.match(monitor, /calibQuietFor\(/, "the quiet predicate is the kernel's, not a QML boolean");
+  assert.match(monitor, /Memory\.POLL_WATCH_MS/, "the watch-lane clamp pins the kernel's own 2 s constant");
+});
