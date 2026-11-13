@@ -1,6 +1,8 @@
 // Thresholds are ceilings the user sets, not presets the plugin hands out.
 // Amber and red ship as defaults; critical ships UNSET, and until the user sets
 // it there is no critical band and no critical alert can fire.
+// Round 8 ruling 2: the System RAM pair ships in PSI at 15 and 28, the bands the
+// captain measured on the rig. Drive and VRAM keep 80 and 90 percent.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Memory, qtList, same } from "./load.mjs";
@@ -8,27 +10,31 @@ import { Memory, qtList, same } from "./load.mjs";
 test("amber and red ship as defaults, critical ships unset", () => {
   const t = Memory.normalizeThresholds(undefined);
   for (const kind of ["hd", "vram", "ram"]) {
-    assert.equal(t[kind].amber, kind === "ram" ? 70 : 80, `${kind} amber default`);
-    assert.equal(t[kind].red, 90, `${kind} red default`);
+    assert.equal(t[kind].amber, kind === "ram" ? Memory.DEFAULT_AMBER_RAM : 80, `${kind} amber default`);
+    assert.equal(t[kind].red, kind === "ram" ? Memory.DEFAULT_RED_RAM : 90, `${kind} red default`);
     assert.equal(t[kind].critical, null, `${kind} critical ships unset`);
     assert.equal(t[kind].criticalSetBy, null);
   }
+  assert.equal(Memory.defaultAmberFor("ram"), 15, "round 8 ruling 2: amber at 15 PSI");
+  assert.equal(Memory.defaultRedFor("ram"), 28, "round 8 ruling 2: red at 28 PSI");
+  assert.equal(Memory.defaultRedFor("hd"), 90, "the drive and VRAM red default never moved");
 });
 
 // The plugin writes its own defaults into the settings file. When the
-// recommended default moves (the captain's 2026-11-07 ruling moved RAM amber
-// to 70), a file entry the plugin itself wrote yields; a value the user or an
-// outside writer set keeps its value and its provenance.
+// recommended default moves (round 7 moved RAM amber to 70, round 8 ruling 2
+// moved the System RAM pair to 15 and 28 PSI), a file entry the plugin itself
+// wrote yields; a value the user or an outside writer set keeps its value and
+// its provenance.
 test("a plugin-written amber yields when the recommended default moves, a user amber never does", () => {
-  const pluginWrote = Memory.normalizeThresholds({ ram: { amber: 80, amberSetBy: null } });
-  assert.equal(pluginWrote.ram.amber, 70, "the old plugin-written 80 yields to the recommended 70");
+  const pluginWrote = Memory.normalizeThresholds({ ram: { amber: 70, amberSetBy: null } });
+  assert.equal(pluginWrote.ram.amber, 15, "the round-7 plugin-written 70 yields to the recommended 15");
   assert.equal(pluginWrote.ram.amberSetBy, null);
 
-  const markedDefault = Memory.normalizeThresholds({ ram: { amber: 80, amberSetBy: "default" } });
-  assert.equal(markedDefault.ram.amber, 70);
+  const markedDefault = Memory.normalizeThresholds({ ram: { amber: 70, amberSetBy: "default" } });
+  assert.equal(markedDefault.ram.amber, 15);
 
-  const userSet = Memory.normalizeThresholds({ ram: { amber: 80, amberSetBy: "user" } });
-  assert.equal(userSet.ram.amber, 80, "a ceiling the user set is never re-defaulted");
+  const userSet = Memory.normalizeThresholds({ ram: { amber: 70, amberSetBy: "user" } });
+  assert.equal(userSet.ram.amber, 70, "a ceiling the user set is never re-defaulted");
 
   const outsideWriter = Memory.normalizeThresholds({ ram: { amber: 85 } });
   assert.equal(outsideWriter.ram.amber, 85, "no provenance key means an outside writer, kept");
@@ -37,11 +43,39 @@ test("a plugin-written amber yields when the recommended default moves, a user a
   assert.equal(hdUntouched.hd.amber, 80, "hd's recommended default never changed");
 });
 
+// Round 8 moved the System RAM RED default too (90 PSI percent-used language to
+// 28 PSI), and the red pair member has the same provenance law as amber: a
+// plugin-written or unset red yields to 28, a red the captain set keeps its
+// number. This is the live-file migration: the settings.json this rig carries
+// holds a user-set 25, and a user-set 25 is not round 8's to overwrite.
+test("a plugin-written or unset red yields to 28 PSI, a user-set red never does", () => {
+  const unset = Memory.normalizeThresholds(undefined);
+  assert.equal(unset.ram.red, 28, "an unset red is the documented default, not the old 90");
+  assert.equal(unset.ram.redSetBy, null);
+
+  const pluginWrote = Memory.normalizeThresholds({ ram: { red: 90, redSetBy: null } });
+  assert.equal(pluginWrote.ram.red, 28, "a red the plugin wrote for the old default yields");
+  assert.equal(pluginWrote.ram.redSetBy, null, "and stays labelled a default");
+
+  const markedDefault = Memory.normalizeThresholds({ ram: { red: 90, redSetBy: "default" } });
+  assert.equal(markedDefault.ram.red, 28);
+
+  const captainSet = Memory.normalizeThresholds({ ram: { red: 25, redSetBy: "user" } });
+  assert.equal(captainSet.ram.red, 25, "the rig's user-set 25 PSI survives round 8");
+  assert.equal(captainSet.ram.redSetBy, "user");
+
+  const outsideWriter = Memory.normalizeThresholds({ ram: { red: 31 } });
+  assert.equal(outsideWriter.ram.red, 31, "no provenance key means an outside writer, kept");
+
+  const hdRedUntouched = Memory.normalizeThresholds({ hd: { red: 90, redSetBy: null } });
+  assert.equal(hdRedUntouched.hd.red, 90, "the drive red default never moved");
+});
+
 test("a default is recorded as a default, a typed value as the user's", () => {
-  const t = Memory.normalizeThresholds({ ram: { amber: 70, critical: 97 } });
-  assert.equal(t.ram.amber, 70);
+  const t = Memory.normalizeThresholds({ ram: { amber: 20, critical: 97 } });
+  assert.equal(t.ram.amber, 20);
   assert.equal(t.ram.amberSetBy, "user");
-  assert.equal(t.ram.red, 90, "untouched red keeps the documented default");
+  assert.equal(t.ram.red, 28, "untouched red keeps the documented default");
   assert.equal(t.ram.redSetBy, null, "and is labelled as a default, not as his");
   assert.equal(t.ram.critical, 97);
   assert.equal(t.ram.criticalSetBy, "user");
@@ -86,19 +120,19 @@ test("setCeiling writes only the field the user touched", () => {
 });
 
 test("a rejected ceiling leaves the settings alone and reports the error", () => {
-  const start = { thresholds: Memory.normalizeThresholds({ ram: { critical: 97 } }) };
+  const start = { thresholds: Memory.normalizeThresholds({ ram: { red: 90, critical: 97 } }) };
   const after = Memory.setCeiling(start, "ram", "critical", 85);
-  assert.equal(after.ok, false);
+  assert.equal(after.ok, false, "85 PSI sits below a red of 90 PSI");
   assert.equal(after.thresholds, null);
   assert.equal(start.thresholds.ram.critical, 97, "the old ceiling is still there");
 });
 
 test("a ceiling the user set is never relabelled as a default", () => {
-  const set = Memory.setCeiling({ thresholds: Memory.normalizeThresholds(undefined) }, "ram", "red", 88);
+  const set = Memory.setCeiling({ thresholds: Memory.normalizeThresholds(undefined) }, "ram", "red", 30);
   assert.equal(set.ok, true);
   assert.equal(set.thresholds.ram.redSetBy, "user");
   assert.equal(Memory.ceilingText("ram", set).includes("(you set it)"), true);
-  assert.equal(Memory.ceilingText("ram", set).includes("amber 70 PSI (default)"), true,
+  assert.equal(Memory.ceilingText("ram", set).includes("amber 15 PSI (default)"), true,
     "the ram store reads in PSI, the unit the ceilings question asks in");
 });
 

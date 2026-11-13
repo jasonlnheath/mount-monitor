@@ -32,17 +32,20 @@ test("the ceiling question reports the reading before it asks anything", () => {
   const lines = text.split("\n");
   assert.match(lines[0], /^Quattro Dash - System RAM ceilings$/);
   assert.match(lines[1], /^Measured now: RAM PRESSURE 0\.2 PSI, swap 15% used, .* free of .*$/);
-  assert.match(lines[2], /Your amber: 70 PSI \(default\)\. Your red: 90 PSI \(default\)\./);
+  assert.match(lines[2], /Your amber: 15 PSI \(default\)\. Your red: 28 PSI \(default\)\./);
   assert.match(lines[3], /^Your critical: not set - you have no ceiling, and no critical alert can fire\.$/);
   assert.match(lines[4], /^The kernel's ceiling: oomd at PSI 50% for 20s, or swap at 90%, watching \/user\.slice/);
-  assert.match(lines[5], /^Recommended from this machine: amber 77 PSI, red 90 PSI, critical 95 PSI\.$/);
+  assert.match(lines[5], /^Recommended from this machine: amber 77 PSI, red 82 PSI, critical 87 PSI\.$/);
   assert.match(lines[6], /^This machine rests at 75 PSI, which is inside your amber line\.$/);
 });
 
 test("a ceiling the user set is reported as his, with its number", () => {
-  const settings = Memory.setCeiling(Memory.setCeiling({}, "ram", "critical", 96), "ram", "amber", 70);
+  // Round 8 ruling 2 puts the System RAM red default at 28 PSI, so an amber of
+  // 20 PSI is the ceiling this fixture can legitimately type: an amber above the
+  // red line is a rejected edit, not a silent reordering.
+  const settings = Memory.setCeiling(Memory.setCeiling({}, "ram", "critical", 96), "ram", "amber", 20);
   const text = Memory.ceilingsQuestion("ram", RAM, OOMD, settings.thresholds, { ram: 75 });
-  assert.match(text, /Your amber: 70 PSI \(you set it\)/);
+  assert.match(text, /Your amber: 20 PSI \(you set it\)/);
   assert.match(text, /Your critical: 96 PSI \(you set it\)\./);
   assert.equal(text.includes("not set - you have no ceiling"), false);
 });
@@ -79,13 +82,13 @@ test("the resting claim is measured from the log, and withheld until the log hol
 
 test("an unmeasured machine is recommended the documented defaults, never 'from this machine'", () => {
   const unmeasured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, null);
-  assert.match(unmeasured, /Recommended defaults until measured: amber 70 PSI, red 90 PSI, critical unset\./);
+  assert.match(unmeasured, /Recommended defaults until measured: amber 15 PSI, red 28 PSI, critical unset\./);
   assert.equal(unmeasured.includes("from this machine"), false, "an unmeasured machine claims no provenance");
   const rec = Memory.recommendCeilings("ram", null);
   assert.ok(rec.amber < rec.red, "the provisional pair is never amber above red");
 
   const measured = Memory.ceilingsQuestion("ram", RAM, OOMD, {}, { ram: 75 });
-  assert.match(measured, /^Recommended from this machine: amber 77 PSI, red 90 PSI, critical 95 PSI\.$/m);
+  assert.match(measured, /^Recommended from this machine: amber 77 PSI, red 82 PSI, critical 87 PSI\.$/m);
   assert.equal(measured.includes("Recommended defaults until measured"), false);
 });
 
@@ -151,8 +154,8 @@ test("settings survive the round trip, and garbage does not become a ceiling", (
   assert.equal(settings.arms[0].pid, 7);
 
   const garbage = Memory.normalizeSettings({ thresholds: { ram: { amber: "hot", red: null, critical: 500 } } });
-  assert.equal(garbage.thresholds.ram.amber, 70);
-  assert.equal(garbage.thresholds.ram.red, 90);
+  assert.equal(garbage.thresholds.ram.amber, 15, "garbage amber falls back to the documented PSI default");
+  assert.equal(garbage.thresholds.ram.red, 28, "garbage red falls back to the documented PSI default");
   assert.equal(garbage.thresholds.ram.critical, null, "a garbage critical stays unset rather than becoming a ceiling");
 });
 

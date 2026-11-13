@@ -111,7 +111,10 @@ Quattro Dash's suite is `bash memory-monitor/tests/run.sh`: the same shape of
 tests over `memory-monitor/memory.js` (parsers against fixtures, character-pinned
 toast copy per kind, thresholds and hysteresis, the guard budget gate and arm
 lifecycle, the baseline log, onboarding, the multi-instance gate, the install
-layout, the delegation guards, the round-7 and 7.5 pins, and an offscreen
+layout, the delegation guards, the round-7 and 7.5 pins, the round-8 pins
+(`tests/round8.test.mjs`: the 2-second watch lane, the 15/28 PSI defaults, the
+portable 70/86 swap ceilings priced in gigabytes, the rate toast and prompt copy,
+the 0-35 pressure face), and an offscreen
 `qml6` pixel probe that loads `QuattroSymbol.qml` in a real Qt runtime and
 skips where `qml6` is absent) and over `memory-monitor/quattro.js` (the
 QuattroDash LED, PSI/fuel and coolant bands, the gauge threshold slider model
@@ -301,6 +304,50 @@ RingKit conformance check that runs
   ceiling nobody chose. Quattro Dash never writes a system limit (`MemoryHigh`,
   `MemoryMax`, a unit drop-in, a sysctl) — the kernel's oomd ceilings are read and
   displayed as a second, different number.
+- **Round 8's rig numbers live in the kernels, and `tests/round8.test.mjs` is the
+  guard.** Polling is 2 seconds (`POLL_WATCH_MS`) whenever any monitored resource
+  is amber or worse *or* a Quattro Dash window is open — the lax nominal intervals
+  are only for passive cruising that is green and closed. `memory.js`
+  `pollIntervalMs` owns the ladder and the cap; the widget only supplies
+  `windowOpen: anySurfaceOpen` and `watchBand()`, and re-arms the timers when a
+  surface opens so the shorter interval starts now. A vanished resource stays
+  nominal. Faster sampling does not mean a faster log: `memory.js logDue` keeps
+  the baseline log's row rate at the resting cadence (`LOG_ROW_MIN_MS`, the old
+  30 s RAM interval) and writes at once only for an alert row or a changed fact
+  (a band or latch, a whole percent, a full PSI point, a ceiling, a drive that
+  appeared), because a row every 2 seconds would cut the days-long window the
+  ceilings question, the recommendation and the climb calibration read. System
+  RAM's default ceilings are 15 PSI amber and 28 PSI red
+  (`DEFAULT_AMBER_RAM` / `DEFAULT_RED_RAM`): a plugin-written or unset red yields
+  to 28, a user-set red never does. The swap reserve's ceilings stay
+  **percent-of-swap-used** (70 / 86, `reserveThresholds`) so they travel between
+  machines, and `quattro.js gaugeViewFor` / `gaugeViewToStored` / `swapGibRow` are
+  the only place they become gigabytes on the settings row (5 GiB step, and a
+  machine with too little swap to hold two ordered handles keeps its percent
+  sliders). The pressure dial's face is 0-35 with a tick per PSI
+  (`PSI_SCALE_MAX`, `psiTicks`, `dialScaleFor`, `psiNeedleFrac`) and its sliders
+  drag that face: never a 0-100 dial wearing PSI numbers. A fast swap climb is
+  memory.js's decision (`swapClimbBand`, `SWAP_CLIMB_*`) folded into the held RAM
+  band by `resolveRamBand`'s fifth argument, amber-only, and its `rate` flag —
+  true only when the swap side produced the band — is the only thing that lets a
+  toast, a prompt or the `memory-health` skill say *climbing fast*: a rate alert
+  never quotes a ceiling it did not cross. Keep the three wordings in step.
+- **Round 8's toast emblem is a square asset because the daemon crop-FILLS a
+  sender's picture** (inbox ruling 6). The logo is not drawn by the plugin:
+  `memory.js TOAST_ICONS` hands the shell's notification daemon
+  `-i icons/mil-<tint>.png`, and the shell's `Toast.qml` marks any file a sender
+  supplied `photo: best === sent`, then crop-fills it (`Image.PreserveAspectCrop`,
+  `sourceSize: 40,40`) into its square `Style.space(40)` slot. An asset wider than
+  tall is scaled to cover and the overflow is cut outwards from the middle: the
+  round-7 128x86 assets lost 19 of the 59 px the daemon rendered, which is the
+  clipped left and right the captain screenshotted. The three emblems in
+  `memory-monitor/icons/` are therefore square canvases with the `mil` artwork
+  inset, rendered by `QuattroSymbol` from `quattro.js`'s own path (the same
+  artwork the bar badge and the dash hero draw), so cover and fit are one
+  transform at any toast width. `tests/round8.test.mjs` pins squareness, the ink
+  inset on all four sides, the artwork's own aspect and each tint; re-render all
+  three together, and never hand the daemon an asset whose ink touches a canvas
+  edge.
 
 ## Release
 

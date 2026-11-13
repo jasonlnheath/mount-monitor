@@ -427,6 +427,10 @@ Panel {
                 anchors.fill: parent
                 zones: Quattro.psiZoneArcsFor(root.psiPair.amber, root.psiPair.red)
                 labels: Quattro.psiLabels
+                // Round 8 ruling 5: the PSI face has its own ticks, one per PSI
+                // of its own 0-35 scale, labelled every 5. The drive gauge keeps
+                // the shared 0-100 graduation it has always drawn.
+                ticks: Quattro.psiTicks()
                 needle: root.psiNeedle
                 faceSymbol: "thermometer"
               }
@@ -492,7 +496,7 @@ Panel {
               border.color: Quattro.PAL.line
 
               function tip() {
-                return Quattro.battTipWith(root.reserve, root.battPair.amber, root.battPair.red)
+                return Quattro.battTipWith(root.reserve, root.battPair.amber, root.battPair.red, root.swapTotals)
               }
 
               ColumnLayout {
@@ -1197,12 +1201,14 @@ Panel {
 
     property var zones: []
     property var labels: []
+    property var ticks: Quattro.dialTicks()
     property var needle: null
     property string faceSymbol: ""
 
     onNeedleChanged: face.requestPaint()
     onZonesChanged: face.requestPaint()
     onLabelsChanged: face.requestPaint()
+    onTicksChanged: face.requestPaint()
     onWidthChanged: face.requestPaint()
     onHeightChanged: face.requestPaint()
     Component.onCompleted: face.requestPaint()
@@ -1262,7 +1268,7 @@ Panel {
           ctx.globalAlpha = 1
         }
 
-        var ticks = Quattro.dialTicks()
+        var ticks = dial.ticks
         for (var t = 0; t < ticks.length; t++) {
           var tick = ticks[t]
           var deg = D.a0 + D.sweep * tick.f
@@ -1436,6 +1442,9 @@ Panel {
     property string label: ""
     // Round 7.5 item 21: drags quantize to this step. The VRAM rows pass
     // Quattro.sliderStep("vram") (50 MiB); the PSI and drive rows stay at 1.
+    // Round 8 ruling 4: the swap row passes 5 GiB on a machine that has swap,
+    // in GiB, and the step arrives from the same gaugeViewFor that sized the
+    // track, so a drag can never land between two numbers the row can show.
     property int step: 1
     signal moved(real newValue)
 
@@ -1521,7 +1530,16 @@ Panel {
 
     property string gaugeKey: ""
     readonly property var pair: root.pairFor(gaugeKey)
-    readonly property var range: Quattro.gaugeRange(gaugeKey)
+    // Round 8 ruling 4: the row shows a ceiling pair in the units the captain
+    // sets it in. The swap reserve on a machine that has swap reads gigabytes on
+    // a 5 GiB minimum step; every other row keeps the numbers it has always
+    // dragged and now says which unit they are, and the PSI row's track spans the
+    // 0-35 face ruling 5 gives the dial unless a line already stored sits above
+    // it. Which pair is which, what the track spans, and what a dragged line
+    // means in the unit the store keeps are all decided in quattro.js
+    // (gaugeViewFor / gaugeViewToStored): a row that converted its own units would
+    // be a row whose gigabytes and the values popup's gigabytes could disagree.
+    readonly property var view: Quattro.gaugeViewFor(gaugeKey, gaugeRow.pair, root.swapTotals)
 
     spacing: 3
 
@@ -1540,7 +1558,7 @@ Panel {
       Item { Layout.fillWidth: true }
 
       Text {
-        text: Quattro.SETTINGS.amberLabel + " " + gaugeRow.pair.amber + "   " + Quattro.SETTINGS.redLabel + " " + gaugeRow.pair.red
+        text: Quattro.settingsPairText(gaugeRow.view)
         color: root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
@@ -1553,28 +1571,28 @@ Panel {
 
       GaugeSlider {
         Layout.fillWidth: true
-        value: gaugeRow.pair.amber
-        min: gaugeRow.range.min
-        max: gaugeRow.range.max
-        step: Quattro.sliderStep(gaugeRow.gaugeKey)
+        value: gaugeRow.view.amber
+        min: gaugeRow.view.min
+        max: gaugeRow.view.max
+        step: gaugeRow.view.step
         tint: Quattro.PAL.amber
         label: Quattro.SETTINGS.amberLabel
         onMoved: function(v) {
-          var refused = callMonitor("setGaugePair", [gaugeRow.gaugeKey, "amber", v], null)
+          var refused = callMonitor("setGaugePair", [gaugeRow.gaugeKey, "amber", Quattro.gaugeViewToStored(gaugeRow.gaugeKey, v, root.swapTotals)], null)
           if (refused !== null && refused !== undefined) root.showToast(refused, true)
         }
       }
 
       GaugeSlider {
         Layout.fillWidth: true
-        value: gaugeRow.pair.red
-        min: gaugeRow.range.min
-        max: gaugeRow.range.max
-        step: Quattro.sliderStep(gaugeRow.gaugeKey)
+        value: gaugeRow.view.red
+        min: gaugeRow.view.min
+        max: gaugeRow.view.max
+        step: gaugeRow.view.step
         tint: Quattro.PAL.redHot
         label: Quattro.SETTINGS.redLabel
         onMoved: function(v) {
-          var refused = callMonitor("setGaugePair", [gaugeRow.gaugeKey, "red", v], null)
+          var refused = callMonitor("setGaugePair", [gaugeRow.gaugeKey, "red", Quattro.gaugeViewToStored(gaugeRow.gaugeKey, v, root.swapTotals)], null)
           if (refused !== null && refused !== undefined) root.showToast(refused, true)
         }
       }

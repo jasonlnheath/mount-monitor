@@ -32,9 +32,13 @@ already alerting on — so one drive produces one toast, not two.
 
 ## Thresholds: you set the ceilings
 
-- **Amber 80%** and **red 90%** are the documented defaults, except System RAM,
-  whose amber and red read in PSI (recommended amber 70): pressure is worth
-  warning about earlier than a drive filling up.
+- **Amber 80%** and **red 90%** are the documented drive and VRAM defaults.
+  System RAM reads in PSI, and its defaults are the round 8 rig numbers:
+  **amber 15 PSI** and **red 28 PSI** — the rig played comfortably at a sustained
+  8-15 and hit its wall at 28, so pressure is worth warning about far earlier than
+  a drive filling up. The swap reserve defaults to **70%** and **86%** of the swap
+  used (30% and 14% of it left), the same pair any machine can carry, and the dash
+  prices it in your own gigabytes.
 - **Critical ships unset.** No critical band exists, no critical toast can fire,
   and the bar cannot glow for a ceiling you never chose. First run asks you for
   your ceilings; until the baseline log has enough samples the question says
@@ -55,24 +59,33 @@ already alerting on — so one drive produces one toast, not two.
 
 - **The RAM band is pressure plus the swap reserve** (round 7): the kernel's
   Pressure Stall Information (`/proc/pressure/memory`, some avg10) against the
-  PSI pair, and the swap reserve's free percent against the reserve pair —
+  PSI pair, and the swap reserve's used percent against the reserve pair —
   whichever band is more severe — and the toast names its signal, pressure or
-  swap. Percent-used never resolves a band: it stays a reading, logged and
+  swap. **A reserve that is climbing fast is a band of its own** (round 8): two
+  consecutive samples at least 2 GiB apart, no more than 90 s between them, reads
+  amber with no ceiling crossed, because the direction is the finding. A climb is
+  never red, it never rewrites a ceiling, and its toast says *climbing fast*
+  instead of quoting a percent nobody set a line at.
+  Percent-used never resolves a band: it stays a reading, logged and
   handed to the agent beside the absolute `MemAvailable` in GiB (`MemFree` is
   the flattering number; `MemAvailable` is what the kernel thinks a large
   allocation can actually get).
-- **PSI is also the re-alert gate and the poll escalator.** A held band re-fires
+- **PSI is also the re-alert gate.** A held band re-fires
   when its severity increases, when PSI memory crosses the stall floor, or when
   swap crosses oomd's swap limit — because a machine sitting at its ceiling and
-  a machine stalling are not the same event.
+  a machine stalling are not the same event. Polling is not the escalator's job
+  any more: round 8's watch lane (§Adaptive polling) shortens the whole loop.
 - **Toasts are events, not states.** An alert fires on a crossing. A resource
   that merely sits in a band is carried by the badge, the detail window, and the
   log — so a machine that rests high does not re-toast forever, and a genuinely
   worse excursion still gets a toast.
 - **Swap and zram are in the RAM picture** (swap used%, zram fill, compression
-  ratio). The swap reserve is one of the RAM band's two signals, and swap past
-  oomd's own limit re-fires a held band; swap is not a fourth resource with an
-  alert of its own.
+  ratio). The swap reserve is one of the RAM band's signals, a fast climb is
+  another, and swap past oomd's own limit re-fires a held band; swap is not a
+  fourth resource with an alert of its own. The reserve ceilings are stored as
+  percents and **shown as gigabytes with a 5 GB step** (on a 64 GB swap that is
+  your 45 GB and 55 GB), and the gauge hover reads
+  `Now: 61% Free (39/64 GiB)`.
 - **VRAM** shows total, used and free with absolute MiB beside every percent, the
   per-process breakdown `nvidia-smi` can see, and an explicit **desktop /
   compositor (unattributed)** row — clamped at zero — because `nvidia-smi` cannot
@@ -86,29 +99,46 @@ A toast on every amber, red and critical alert event, in the spec's own words:
 ```
 Quattro Dash
 Caution: Amber Alert
-System RAM pressure has reached 72 PSI.
+System RAM pressure has reached 16 PSI.
+Click to address with agent, otherwise ignore.
+```
+
+```
+Quattro Dash
+Caution: Amber Alert
+Swap reserve is climbing fast, 20 percent used right now.
 Click to address with agent, otherwise ignore.
 ```
 
 ```
 Quattro Dash
 WARNING: RED ALERT
-Swap reserve is 92 percent used.
+Swap reserve is 88 percent used.
 Click to open an agent to actively monitor/guard against OOM, otherwise ignore.
 ```
 
 ```
 Quattro Dash
 CRITICAL ALERT!
-System RAM pressure has reached 98 PSI.
+System RAM pressure has reached 33 PSI.
 Agent has been notified and is guarding against OOM.
 ```
 
 A ram toast names its signal's own number: PSI for a pressure band, the used
-percent for the swap reserve. Drives and VRAM keep the percent-used wording,
+percent for the swap reserve — and when the band is a fast climb rather than a
+ceiling it crossed, it says **climbing fast** instead of quoting a low percent as
+if it were an alarm line. Drives and VRAM keep the percent-used wording,
 and the percentage is the **live reading, rounded up**, not the threshold: a
 mount at 97% is not told "reached 95%". Every toast wears the check-engine
-emblem logo, tinted plain, amber or red by the band.
+emblem logo, tinted plain, amber or red by the band. The logo is a file handed to
+the notification daemon (`-i icons/mil-<tint>.png`), and Omarchy's toast paints a
+sender's file as a **picture**: it crop-fills it into a square slot, so an asset
+wider than tall loses its left and right to the cut. The three emblems in
+`icons/` are therefore square, rendered from `quattro.js`'s own `mil` artwork by
+the same `QuattroSymbol` the bar and the dash draw, with the emblem inset inside
+the canvas so cover and fit are the same transform and nothing is cut at any
+toast width (`tests/round8.test.mjs` pins the square canvas, the inset and the
+tint).
 
 - **Amber** is normal urgency. If Do Not Disturb is on, the notification service
   silences it — and Quattro Dash records it, in the log and in the detail
@@ -152,12 +182,15 @@ check-engine emblem again, tinted by the machine's one tier, beside the
 "Quattro Dash" title and its ALL-CAPS tier phrase naming the worst thing the
 dash knows. Below it, two round meters drawn at
 exactly the same size (RAM PRESSURE reading the kernel's Pressure Stall
-Information from `/proc/pressure/memory`, some avg10, amber from 70, red at
-90; ROOT DRIVE as a fuel gauge where F is 100 percent free, the amber zone
+Information from `/proc/pressure/memory`, some avg10, on a face scaled 0 to 35
+PSI with a tick for every PSI and true numbers at 0, 5, 10, 15, 20, 25, 30 and
+35 - no hidden rescale from a 0-100 dial, so 28 PSI sits 28/35 of the sweep,
+near the top, with the red zone running to the top of the face; amber from 15
+and red at 28 by default; ROOT DRIVE as a fuel gauge where F is 100 percent free, the amber zone
 from 20 down to 10 percent free, the red zone below 10 percent free), a SWAP
 RESERVE battery telltale with a
-ten-segment LED bar (green at 20 percent or more, amber from 10, red below
-10, pulsing when red, no swap configured reads as the empty state), and BELOW
+ten-segment LED bar (the recommended pair colors the bars at 30 percent of the
+reserve left and 14 percent left, pulsing when red, no swap configured reads as the empty state), and BELOW
 the battery, centered, the VRAM instrument: a square the size of the SWAP
 RESERVE square carrying the STANDARD ISO coolant warning light (the
 thermometer-in-liquid telltale) over a reservoir bar that drains right to
@@ -171,7 +204,9 @@ the unlit monochrome glyph, and a missing reading reads unlit with no needle.
 The three percent-gauge bands start at the settings row's recommended
 defaults, the coolant light follows the VRAM floor until its sliders are
 touched, and the row moves them all live.
-Hovering the instrument reads the standard free format. Under the cluster, the
+Hovering the instrument reads the standard free format, and hovering the reserve
+tells the same story the values popup's SWAP row tells: `Now: 61% Free
+(39/64 GiB).` Under the cluster, the
 codes area: ONE column under one check-engine head, always most critical at
 the top, rows stretched across the full card so each code carries its reading
 and its status. The doctrine is round 2's: RAM monitoring is PRESSURE + SWAP
@@ -215,8 +250,7 @@ calibrated curves, codes watch discrete faults):
 A system read that cannot be taken (the journal unreadable, systemd
 unreadable, no pressure file) renders the honest unknown row, never a fake
 clean zero. The visible rows stay terse - subject, count, culprit name, never
-a raw PID - while the click payload carries the full detail. An empty column
-reads "ENGINE CLEAR" under
+a raw PID - while the click payload carries the full detail. An empty column reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
 code sends its fixed prompt to your default agent (a drive code's is the same
 prompt its toast sends; a system fault has no toast; inline
@@ -242,7 +276,11 @@ each with its two-sentence paragraph in the row (what the metric is, why we
 measure it), and a reset button that writes back the recommended defaults
 without closing the popup: the state watcher skips this widget's own write,
 so the reset cannot bounce the card shut mid-click. The VRAM sliders move in
-50 MiB steps. The pairs move the drawn
+50 MiB steps, the swap reserve sliders in **5 GiB** on a machine that has swap,
+priced against its own measured swap total (and shown as the percent they really
+store when the swap is too small for two ordered 5 GiB handles, or when there is
+no swap at all), and the RAM pressure sliders drag across the dial's own 0-35
+face. The pairs move the drawn
 bands live — the RAM and ROOT DRIVE dials redraw their zones, and the battery
 under SWAP RESERVE recolors its bars: each bar takes its color from its own
 center percentage against the drawn pair, two red bars at 20, three at 30,
@@ -251,7 +289,9 @@ as free VRAM crosses its thresholds — and red never crosses amber on the RAM
 and root drive pairs: moving one slider through the other pushes it.
 There is no warning message; the push is the whole rule. The RAM pressure and
 root drive pairs are the plugin's real alert ceilings (the same numbers the
-detail window edits), the reserve pair resolves the RAM band's swap signal, and
+detail window edits), the reserve pair resolves the RAM band's swap signal —
+stored as percents of the swap used, so the ceiling you set here is the ceiling
+the next machine can carry — and
 the coolant thresholds stay a display pair — all stored in
 `~/.local/state/memory-monitor/settings.json`, so everything loads back on the
 next shell start.
@@ -269,20 +309,39 @@ unavailable measurement reads as unavailable — never as 0%.
 
 ## The baseline log
 
-Every sample is appended to `~/.local/state/memory-monitor/baseline.log`,
-size-capped and rotated, with **absolute numbers** — kB, MiB, bytes — not only
-percentages, plus the band decisions, hysteresis state, poll interval, arm
-records, and every alert event with its delivery verdict (`shown`,
-`silenced-dnd`, `unknown`). A percent-only log cannot answer "how fast did it
-climb". Logging never blocks monitoring: a failed append is reported and
-monitoring continues.
+Samples are appended to `~/.local/state/memory-monitor/baseline.log`, size-capped
+and rotated, with **absolute numbers** — kB, MiB, bytes — not only percentages,
+plus the band decisions, hysteresis state, poll interval, arm records, and every
+alert event with its delivery verdict (`shown`, `silenced-dnd`, `unknown`). A
+percent-only log cannot answer "how fast did it climb". Logging never blocks
+monitoring: a failed append is reported and monitoring continues.
+
+Not every sample writes a row, and that is what keeps the log a **window of days**
+rather than an hour of trace: a row is due when the resting cadence comes round
+(30 s, `Memory.LOG_ROW_MIN_MS`), or at once when the row has something to say —
+an alert event, a band change or latch, a whole percent of a watched resource, a
+PSI move of a full point, a drive that appeared or went, a ceiling the user
+moved, the guard state. Round 8's 2-second watch lane is where the climb is
+*caught*; the kilobyte-and-hundredth wobble between two of its samples is not a
+fact about the machine, and a row each 2 seconds would erase the resting
+distribution the ceilings question and the recommendation read.
 
 ## Adaptive polling
 
-Nominal: drives 60 s, RAM 30 s, VRAM 60 s. Escalated for any resource at red or
-critical, and further while PSI memory is stalling. Restored when a descent
-holds. Quattro Dash runs no `udevadm monitor` of its own — Mount Monitor's is
-this machine's event-driven block watcher.
+**Round 8's watch lane comes first: any monitored resource at amber or worse, or
+a Quattro Dash window open, polls everything every 2 seconds.** A resource
+already at red or critical is amber-or-worse, so it is watched too. The lax
+nominal intervals — drives 60 s, RAM 30 s, VRAM 60 s — are what normal passive
+cruising gets: everything green and nothing open. The older escalator (red or
+critical at 10-20 s, 5 s while PSI memory is stalling) still decides the ladder a
+watch only caps, so a `pollMs` override or a vanished mount still behaves, and a
+resource that is gone never holds the loop at 2 s. Opening or closing a surface
+re-arms the timers at once instead of waiting for the next sample. Quattro Dash
+runs no `udevadm monitor` of its own — Mount Monitor's is
+this machine's event-driven block watcher. Faster sampling does not make the log
+faster: `Memory.logDue` decides which of those samples earns a row (§The baseline
+log), so a watched stretch at 2 seconds still leaves the log's window the length
+it was.
 
 The five round-9 system reads (the bar probe, the kernel fault delta, the GPU
 wedge grep, the unit show, the IO pressure file) ride this same sample cycle —
@@ -325,7 +384,7 @@ On the widget's entry in `shell.json`:
 | `mounts` | Mount Monitor's `mounts` list | The HD watch list, used only when no Mount Monitor widget is present. An empty list means no drive rows, not garbage. |
 | `agentCommand` | `["omarchy", "agent", "prompt"]` | The agent an amber or red click opens. |
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
-| `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical polls at it too. |
+| `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical, and round 8's 2-second watch lane, poll at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
 | `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. The light follows it until the dash's gauge settings row sets the coolant thresholds. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
@@ -348,7 +407,13 @@ state for BAR and LAYER), the RingKit ↔ `mounts.js bandFor` conformance check,
 the
 hostile-label regression, the multi-instance one-alert/one-log-row/one-arm
 check, the install-layout check, an `install.sh` syntax check, a `SKILL.md`
-check, and `qmllint` on the QML. There is no CI in
+check, and `qmllint` on the QML. `tests/round8.test.mjs` pins the captain's
+third-test-drive rulings (the 2-second watch lane, 15/28 PSI, the 70%/86% swap
+ceilings shown in gigabytes on a 5 GB step, the `Now: XX% Free (x/y GiB)` hover,
+the 0-35 pressure face with true tick numbers, and the square-canvas toast
+emblem the notification daemon cannot crop) and guards that the QML asks for
+every one of those decisions instead of carrying its own copy of them;
+`tests/qml-ids.test.mjs` drives the declared poll timers on a virtual clock. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 

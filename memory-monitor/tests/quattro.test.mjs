@@ -192,10 +192,13 @@ test("polar matches the mockup's angle convention", () => {
   assert.equal(Math.abs(top.y - 14) < 0.5, true);
 });
 
-test("the PSI dial carries the amber 60-80 and red 80-100 zones; the fuel dial the red 0-10 zone", () => {
+test("the PSI dial carries the amber 15-28 and red 28-35 zones on its own 0-35 face", () => {
+  // Round 8 ruling 5: the face is 0 to 35 PSI and the arcs are the thresholds
+  // read off that face - 15/35 and 28/35 - with no hidden rescale behind them.
+  // Red at 28 lands at 0.8 of the sweep, near the top, which is the ruling.
   same(Quattro.psiZoneArcs, [
-    { from: 0.60, to: 0.80, kind: "amber" },
-    { from: 0.80, to: 1.0, kind: "red" },
+    { from: 15 / 35, to: 28 / 35, kind: "amber" },
+    { from: 28 / 35, to: 1.0, kind: "red" },
   ]);
   same(Quattro.fuelZoneArcs, [
     { from: 0.0, to: 0.10, kind: "red" },
@@ -216,10 +219,31 @@ test("the dial tick ring is the mockup's 41 ticks with majors every tenth", () =
   assert.equal(Math.abs(ticks[40].f - 1) < 1e-9, true);
 });
 
-test("the dial labels are the mockup's", () => {
-  same(Quattro.psiLabels.map(l => l.t), ["0", "25", "50", "75", "100"]);
+test("the PSI dial has its own tick row: one per PSI, labelled every 5", () => {
+  const ticks = Quattro.psiTicks();
+  assert.equal(ticks.length, 36, "0 through 35 is 36 ticks, one per PSI unit");
+  assert.equal(ticks.filter(t => t.major).length, 8, "majors at 0, 5, 10, 15, 20, 25, 30, 35");
+  assert.equal(ticks[0].major, true);
+  assert.equal(ticks[1].major, false);
+  assert.equal(ticks[5].major, true, "5 PSI is a labelled major tick");
+  assert.equal(ticks[35].major, true, "35 is the top of the face and it is labelled");
+  assert.equal(Math.abs(ticks[0].f) < 1e-9, true);
+  assert.equal(Math.abs(ticks[35].f - 1) < 1e-9, true, "the face tops out at 35, not at 100");
+  assert.equal(ticks[28].f, 28 / 35, "a tick carries its own position on the face");
+  assert.equal(Quattro.dialScaleFor("psi"), 35, "the PSI gauge's own scale");
+  assert.equal(Quattro.dialScaleFor("hd"), 100, "the drive gauge keeps its percent face");
+  assert.equal(Quattro.dialScaleFor("batt"), 100);
+  assert.equal(Quattro.dialScaleFor("vram"), 100, "the MiB gauges map their own span to the sweep");
+});
+
+test("the dial labels are true PSI numbers on the 0-35 face", () => {
+  // Round 8 ruling 5: "the gauge top is 35 with actual numbers - not a 0-100
+  // gauge rescaled". Every numeral is a PSI number off that face.
+  same(Quattro.psiLabels.map(l => l.t), ["0", "5", "10", "15", "20", "25", "30", "35"]);
+  same(Quattro.psiLabels.map(l => l.f), [0, 5 / 35, 10 / 35, 15 / 35, 20 / 35, 25 / 35, 30 / 35, 1]);
   same(Quattro.fuelLabels.map(l => l.t), ["E", "¼", "½", "¾", "F"]);
-  assert.equal(Quattro.psiLabels[4].color, "redHi", "the 100 label reads hot");
+  assert.equal(Quattro.psiLabels[7].color, "redHi", "the 35 label, the top of the face, reads hot");
+  assert.equal(Quattro.psiLabels[0].color, undefined, "0 reads plain");
   assert.equal(Quattro.fuelLabels[0].color, "redHi", "E reads hot");
   assert.equal(Quattro.fuelLabels[4].color, "green", "F reads green");
 });
@@ -228,15 +252,17 @@ test("the dial labels are the mockup's", () => {
 // Needle fractions and zones for the live readings
 // ---------------------------------------------------------------------------
 
-test("psiNeedleFrac and psiZone: the locked amber 60 / red 80 edges on PSI itself", () => {
-  assert.equal(Quattro.psiNeedleFrac(68), 0.68);
-  assert.equal(Quattro.psiNeedleFrac(105), 1);
+test("psiNeedleFrac and psiZone: the amber 15 / red 28 edges on the 0-35 face", () => {
+  assert.equal(Quattro.psiNeedleFrac(17.5), 0.5, "the half-way mark of the face is 17.5 PSI");
+  assert.equal(Quattro.psiNeedleFrac(28), 28 / 35, "red at 28 sits at 0.8 of the sweep, near the top");
+  assert.equal(Quattro.psiNeedleFrac(35), 1, "35 is the top of the face");
+  assert.equal(Quattro.psiNeedleFrac(68), 1, "a reading past the face pins to the top, it never wraps");
   assert.equal(Quattro.psiNeedleFrac(-3), 0);
   assert.equal(Quattro.psiNeedleFrac(null), null);
-  assert.equal(Quattro.psiZone(80), "red", "the red edge is >= 80");
-  assert.equal(Quattro.psiZone(79.9), "amber");
-  assert.equal(Quattro.psiZone(60), "amber");
-  assert.equal(Quattro.psiZone(59.9), "green");
+  assert.equal(Quattro.psiZone(28), "red", "the red edge is >= 28 PSI");
+  assert.equal(Quattro.psiZone(27.9), "amber");
+  assert.equal(Quattro.psiZone(15), "amber", "the amber edge is >= 15 PSI");
+  assert.equal(Quattro.psiZone(14.9), "green");
   assert.equal(Quattro.psiZone(null), null);
 });
 
@@ -256,12 +282,12 @@ test("psiTip: the simple reading, one line, with the live zone word", () => {
   assert.equal(tip.header, "RAM PRESSURE");
   same(tip.rows.map(r => r.label), ["Now:"]);
   assert.equal(tip.rows[0].text, "12.8 PSI, green, healthy.");
-  assert.equal(Quattro.psiTip({ some_avg10: 68 }).rows[0].text, "68.0 PSI, amber, getting heavy.");
+  assert.equal(Quattro.psiTip({ some_avg10: 22 }).rows[0].text, "22.0 PSI, amber, getting heavy.");
 });
 
 test("psiTip: the zone words are the mockup's, and a missing reading says so instead of inventing one", () => {
-  assert.equal(Quattro.psiTip({ some_avg10: 85 }).rows[0].text, "85.0 PSI, red, act now.");
-  assert.equal(Quattro.psiTip({ some_avg10: 45 }).rows[0].text, "45.0 PSI, green, healthy.");
+  assert.equal(Quattro.psiTip({ some_avg10: 31 }).rows[0].text, "31.0 PSI, red, act now.");
+  assert.equal(Quattro.psiTip({ some_avg10: 9 }).rows[0].text, "9.0 PSI, green, healthy.");
   assert.equal(Quattro.psiTip(null).rows[0].text, "no pressure reading yet.");
   assert.equal(Quattro.psiTip({}).rows[0].text, "no pressure reading yet.");
 });
@@ -269,9 +295,15 @@ test("psiTip: the zone words are the mockup's, and a missing reading says so ins
 test("battTip: the simple reading, one line, and a machine with no swap says so honestly", () => {
   const tip = Quattro.battTip({ present: true, pct: 38 });
   assert.equal(tip.header, "SWAP RESERVE");
-  same(tip.rows.map(r => r.label), ["Reserve:"]);
-  assert.equal(tip.rows[0].text, "38 percent remaining right now.");
-  assert.equal(Quattro.battTip({ present: true, pct: 15 }).rows[0].text, "15 percent remaining right now.");
+  same(tip.rows.map(r => r.label), ["Now:"]);
+  // The locked form has no swap totals to price the percent against, so it says
+  // the percent free in the same free-ness vocabulary and invents no gigabytes.
+  assert.equal(tip.rows[0].text, "38% Free.");
+  assert.equal(Quattro.battTip({ present: true, pct: 15 }).rows[0].text, "15% Free.");
+  const live = Quattro.battTipWith({ present: true, pct: 38 }, 30, 14,
+    { swapTotalKb: 64 * 1024 * 1024, swapUsedKb: 40 * 1024 * 1024 });
+  assert.equal(live.rows[0].text, "38% Free (24/64 GiB).",
+    "round 8 ruling 4: the hover reads the percent free first, gigabytes in parentheses");
   const none = Quattro.battTip({ present: false, pct: 0 });
   assert.equal(none.rows.length, 1);
   assert.equal(none.rows[0].text, "no swap is configured.");
@@ -983,12 +1015,13 @@ test("tierFromStateWith: the hero judges PSI and the reserve against the drawn p
     "no swap configured never drives the tier");
 });
 
-test("tierFromState: the locked ladder keeps judging the locked lines", () => {
-  assert.equal(Quattro.tierFromState([], null, 85, null, false), 3,
-    "the locked form keeps the PSI 60/80 law the round-7 defaults froze");
-  assert.equal(Quattro.tierFromState([], null, 50, null, false), 1);
+test("tierFromState: the ladder keeps judging the round-8 PSI lines", () => {
+  assert.equal(Quattro.tierFromState([], null, 31, null, false), 3,
+    "the ladder judges the pressure lines the captain measured: 31 PSI is past the 28 wall");
+  assert.equal(Quattro.tierFromState([], null, 9, null, false), 1, "9 PSI is green");
+  assert.equal(Quattro.tierFromState([], null, 20, null, false), 2, "20 PSI sits between 15 and 28");
   assert.equal(Quattro.tierFromState([], null, null, 0, false), 3,
-    "the locked form counts a fully used reserve too");
+    "the ladder counts a fully used reserve too");
 });
 
 test("the tier ladder still folds codes, the coolant light and the arm into the worst", () => {
@@ -1459,7 +1492,7 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     "Quattro.psiTipWith(", "Quattro.battTipWith(", "Quattro.fuelTipWith(", "Quattro.coolantTipWith(",
     "Quattro.codeTip(", "Quattro.codesFromReadings(", "Quattro.dispatchToast(",
     "Quattro.litSegments(", "Quattro.ledBandWith(", "Quattro.INSTRUMENTS", "Quattro.PAL",
-    "Quattro.psiZoneArcsFor(", "Quattro.fuelZoneArcsFor(", "Quattro.dialTicks(",
+    "Quattro.psiZoneArcsFor(", "Quattro.fuelZoneArcsFor(", "Quattro.dialTicks(", "Quattro.psiTicks(",
     "Quattro.needleAngleDeg(", "Quattro.psiNeedleFrac(", "Quattro.fuelNeedleFrac(",
     "Quattro.reserveReading(", "Quattro.coolantBandWith(", "Quattro.diagnosisJson(",
     "Quattro.tierFromStateWith(",
@@ -1469,7 +1502,8 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     // pairs, the ranges, the push model's law and the row's sentences are all
     // quattro.js data the panel renders and the monitor owns on disk.
     "Quattro.SETTINGS", "Quattro.GAUGE_KEYS", "Quattro.valueRows(",
-    "Quattro.gaugePair(", "Quattro.gaugeRange(", "Quattro.gaugeTitle(",
+    "Quattro.gaugePair(", "Quattro.gaugeViewFor(", "Quattro.gaugeViewToStored(", "Quattro.gaugeTitle(",
+    "Quattro.settingsPairText(",
     "Quattro.battSegmentZone(",
     // Round 9: the merged column and the system click payload stay quattro.js
     // and memory.js decisions. The panel writes no system copy of its own.
