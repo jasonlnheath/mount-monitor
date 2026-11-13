@@ -263,7 +263,30 @@ BarWidget {
   property string appsText: ""
   property var cycleFailures: ({})
 
-  readonly property var readNames: ["meminfo", "psi", "swaps", "zram", "findmnt", "gpu", "apps"]
+  // Round 9: the system fault codes ride this same sample. Five cheap reads
+  // (bar probe, kernel delta, wedge grep, unit show, IO PSI) join the cycle,
+  // and the decisions - argvs, parsers, thresholds, copy - stay in quattro.js.
+  property string barProbeText: ""
+  property int barProbeExit: -1
+  property string kernelJournalText: ""
+  property bool kernelJournalOk: false
+  property string wedgeJournalText: ""
+  property int wedgeJournalExit: -1
+  property string unitShowText: ""
+  property bool unitShowOk: false
+  property string ioPsiText: ""
+  property bool ioPsiOk: false
+  // Session state the decoders need: the kernel cursor (epoch of the newest
+  // fault line already seen), the layer climb memory and the disk amber run.
+  // None of it persists: a shell restart re-baselines, so "since the last
+  // look" always means a look this monitor made.
+  property var sysKernelCursor: null
+  property var sysLayerPrev: null
+  property var sysDiskPrev: null
+  // The merged system code entries the dashboard reads.
+  property var sysCodes: []
+
+  readonly property var readNames: ["meminfo", "psi", "swaps", "zram", "findmnt", "gpu", "apps", "bar", "kernel", "wedge", "units", "iopsi"]
 
   function startSample(): void {
     if (cycleRunning) return;
@@ -277,6 +300,11 @@ BarWidget {
     zramProc.running = true;
     dfProc.running = true;
     gpuProc.running = true;
+    barProc.running = true;
+    kernelProc.running = true;
+    wedgeProc.running = true;
+    unitsProc.running = true;
+    ioPsiProc.running = true;
   }
 
   function markDone(name): void {
@@ -309,6 +337,11 @@ BarWidget {
     if (dfProc.running) dfProc.running = false;
     if (gpuProc.running) gpuProc.running = false;
     if (appsProc.running) appsProc.running = false;
+    if (barProc.running) barProc.running = false;
+    if (kernelProc.running) kernelProc.running = false;
+    if (wedgeProc.running) wedgeProc.running = false;
+    if (unitsProc.running) unitsProc.running = false;
+    if (ioPsiProc.running) ioPsiProc.running = false;
     console.warn("memory-monitor:", Memory.degradationSurface("wedged-process"), reason)
     for (var k = 0; k < readNames.length; k++) markDone(readNames[k]);
   }
@@ -321,11 +354,31 @@ BarWidget {
   function commitSample(): void {
     if (!stateLoaded) return;
     buildReadings();
+    buildSystemCodes();
     evaluateBands();
     rebindDisplayBands();
     if (isWriter) appendLog();
     schedulePolls();
     evaluateOnboarding();
+  }
+
+  // Round 9: decode the five system reads into the merged codes column. Every
+  // decision (thresholds, sustain, climb, copy) is quattro.js's; this only
+  // carries the session state between polls: the kernel cursor, the layer
+  // climb memory, the disk amber run. An abandoned cycle reads as unreadable,
+  // and an unreadable read renders the honest unknown row, never a healthy
+  // zero.
+  function buildSystemCodes(): void {
+    var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit);
+    var kernel = Quattro.kernelSysCode(Quattro.parseJournalLines(kernelJournalText), kernelJournalOk, sysKernelCursor);
+    sysKernelCursor = kernel.cursor;
+    var gpu = Quattro.gpuSysCode(wedgeJournalText, wedgeJournalExit);
+    var layer = Quattro.layerSysCode(Quattro.parseUnitShow(unitShowText), unitShowOk, sysLayerPrev);
+    sysLayerPrev = layer.next;
+    var disk = Quattro.diskSysCode(Quattro.parseIoPsi(ioPsiText), ioPsiOk, sysDiskPrev);
+    sysDiskPrev = disk.next;
+    sysCodes = [bar, kernel.entry, gpu].concat(layer.entries, [disk.entry])
+      .filter(function (c) { return c !== null && c !== undefined; });
   }
 
   function buildReadings(): void {
@@ -1365,6 +1418,80 @@ BarWidget {
     stderr: StdioCollector { onStreamFinished: void this.text }
     onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0) root.markFailed("apps", Memory.nvidiaMissingVerdict(root.appsText));
+    }
+  }
+
+  // Round 9: the system fault codes' readers. Five cheap reads on the same
+  // sample cadence, every argv from quattro.js. Each collector stores its
+  // text and its exit status; the decode in buildSystemCodes decides. The
+  // journal tools may be unreadable on a rig whose journal is closed: that
+  // decodes as the honest unknown row, never as a clean zero.
+  Process {
+    id: barProc
+    command: Quattro.barArgs()
+    stdout: StdioCollector {
+      onStreamFinished: root.barProbeText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.barProbeExit = exitCode;
+      root.markDone("bar");
+    }
+  }
+
+  Process {
+    id: kernelProc
+    command: Quattro.journalDeltaArgs(root.sysKernelCursor)
+    stdout: StdioCollector {
+      onStreamFinished: root.kernelJournalText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.kernelJournalOk = exitCode === 0;
+      if (exitCode !== 0) console.warn("memory-monitor: journalctl -k unreadable, exit", exitCode)
+      root.markDone("kernel");
+    }
+  }
+
+  Process {
+    id: wedgeProc
+    command: Quattro.gpuWedgeArgs()
+    stdout: StdioCollector {
+      onStreamFinished: root.wedgeJournalText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.wedgeJournalExit = exitCode;
+      if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: journalctl wedge grep unreadable, exit", exitCode)
+      root.markDone("wedge");
+    }
+  }
+
+  Process {
+    id: unitsProc
+    command: Quattro.layerUnitsArgs()
+    stdout: StdioCollector {
+      onStreamFinished: root.unitShowText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.unitShowOk = exitCode === 0;
+      if (exitCode !== 0) console.warn("memory-monitor: systemctl show unreadable, exit", exitCode)
+      root.markDone("units");
+    }
+  }
+
+  Process {
+    id: ioPsiProc
+    command: Quattro.ioPsiArgs()
+    stdout: StdioCollector {
+      onStreamFinished: root.ioPsiText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.ioPsiOk = exitCode === 0;
+      if (exitCode !== 0) console.warn("memory-monitor: /proc/pressure/io unreadable, exit", exitCode)
+      root.markDone("iopsi");
     }
   }
 

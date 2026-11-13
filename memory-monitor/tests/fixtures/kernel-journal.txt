@@ -1,0 +1,10 @@
+1794122679.713201 omarchy kernel: proc_thermal_pci 0000:00:04.0: error: proc_thermal_add, will continue
+1794124471.947342 omarchy kernel: kvm [351350]: vcpu0, guest rIP: 0xffffffffb1409cbd Unhandled WRMSR(0xc2) = 0xffff
+1794253195.003004 omarchy kernel: igc 0000:05:00.0 enp5s0: Detected Tx Unit Hang
+1794253195.003101 omarchy kernel: igc 0000:05:00.0 enp5s0: Detected Tx Unit Hang
+1794253195.003521 omarchy kernel: igc 0000:05:00.0 enp5s0: Detected Tx Unit Hang
+1794260997.684351 omarchy kernel: igc 0000:05:00.0 enp5s0: NETDEV WATCHDOG: CPU: 16: transmit queue 1 timed out 5366 ms
+1794261009.133001 omarchy kernel: igc 0000:05:00.0 enp5s0: NETDEV WATCHDOG: CPU: 16: transmit queue 3 timed out 5477 ms
+1794262493.523011 omarchy kernel: usb 1-2: device descriptor read/64, error -110
+1794262494.646112 omarchy kernel: Out of memory: Killed process 4021 (model-runner) total_vm=1982344 kB, oom_score_adj 0
+1794262495.700213 omarchy kernel: Out of memory: Killed process 5177 (ollama) total_vm=1220344 kB, oom_score_adj 0

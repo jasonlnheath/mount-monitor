@@ -207,19 +207,58 @@ touched, and the row moves them all live.
 Hovering the instrument reads the standard free format, and hovering the reserve
 tells the same story the values popup's SWAP row tells: `Now: 61% Free
 (39/64 GiB).` Under the cluster, the
-codes area: ONE column under one check-engine head, DRIVE codes only, always
-most critical at the top, rows stretched across the full card so each code
-carries its reading and its status. The doctrine is round 2's: RAM monitoring
-is PRESSURE + SWAP RESERVE, never amount used, so a high System RAM reading
-is the pressure gauge and the reserve battery and NO code; VRAM high lights
-the coolant light only. A code is a watched DRIVE sitting over your amber or
-red ceiling, wearing an OBD-style name (C plus four stable digits) and a
-one-line hover status (round 7: the severity line only). An empty column reads "ENGINE CLEAR" under
+codes area: ONE column under one check-engine head, always most critical at
+the top, rows stretched across the full card so each code carries its reading
+and its status. The doctrine is round 2's: RAM monitoring is PRESSURE + SWAP
+RESERVE, never amount used, so a high System RAM reading is the pressure gauge
+and the reserve battery and NO code; VRAM high lights the coolant light only.
+A drive code is a watched DRIVE sitting over your amber or red ceiling,
+wearing an OBD-style name (C plus four stable digits) and a one-line hover
+status (round 7: the severity line only). Round 9 extends the codes family to
+system health, five boolean faults on the same taxonomy, no calibration
+curves and no settings of their own (the gauges stay four; gauges watch
+calibrated curves, codes watch discrete faults):
+
+- **BAR** - the bar shell process (quickshell) died or restarted itself
+  recently. A shell younger than fifteen minutes that did not start with the
+  session is the moderate code; a missing shell process is severe; a process
+  that came up with the machine is a boot, not a fault. The visible row names
+  the restart age in minutes, never a PID.
+- **KERNEL** - new kernel fault lines (err priority and above) since the last
+  look, with a count and the culprit module named (NVRM, igc, usb, Out of
+  memory). The first look of a session sets the baseline and counts nothing,
+  and the cursor keeps honest books: a line can never report twice.
+- **GPU** - the driver-wedge fingerprint: the NVRM `GspRmAlloc` /
+  `NV_ERR_STATE_IN_USE` signature in this boot's kernel log. This is the big
+  red one, and its copy says plainly that a reboot clears it: there is no
+  in-place GPU reset on this hardware, and neither the code row nor the
+  diagnosis ever pretends otherwise. A scan capped past five hundred matching
+  lines reads "500+".
+- **LAYER** - a background systemd user unit (a small built-in list of the
+  Omarchy background units, wallpaper hosts included) climbing its own restart
+  count. Two restarts in one poll interval, or one climb on each of two
+  consecutive polls, is the fault; one restart alone - your own deliberate
+  `systemctl restart` - never is. A unit that is not installed drops off the
+  list.
+- **DISK** - IO pressure sustained past a bar: the kernel's IO stall score
+  (`some avg60` from `/proc/pressure/io`) at or over 10 for two consecutive
+  polls lights amber, at or over 25 lights red. These are honest first cuts,
+  revisited when calibration exists. Swap stays the predictive gauge tripwire
+  it is; DISK is the present-tense stall code and reads the pressure file
+  only.
+
+A system read that cannot be taken (the journal unreadable, systemd
+unreadable, no pressure file) renders the honest unknown row, never a fake
+clean zero. The visible rows stay terse - subject, count, culprit name, never
+a raw PID - while the click payload carries the full detail. An empty column reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
-code sends the same fixed prompt the toasts send to your default agent (inline
+code sends its fixed prompt to your default agent (a drive code's is the same
+prompt its toast sends; a system fault has no toast; inline
 when `agentInline` is set) with the dashboard's own pre-computed diagnosis
 appended as a fenced JSON block (code, severity, cause, top consumers,
-recommendation), so the agent explains from the dashboard's numbers, and
+recommendation - for a system fault: subject, cause and the exact detail,
+journal lines, unit names and counts), so the agent explains from the
+dashboard's numbers, and
 lights the green toast, red codes with the "processing now" wording added.
 Only a code at the critical band goes through the guard's arm gate first - the
 same single-flight, budget-gated check that owns every critical-band agent
@@ -304,6 +343,13 @@ faster: `Memory.logDue` decides which of those samples earns a row (§The baseli
 log), so a watched stretch at 2 seconds still leaves the log's window the length
 it was.
 
+The five round-9 system reads (the bar probe, the kernel fault delta, the GPU
+wedge grep, the unit show, the IO pressure file) ride this same sample cycle —
+no second timer system, no poll cadence of their own. They are cheap reads:
+process liveness, unit properties, a journaled delta and a pressure file. Their
+decision state is session-only — the kernel log cursor, the layer climb memory
+and the disk amber run — and a shell restart re-baselines all of it.
+
 ## Install
 
 ```bash
@@ -355,7 +401,10 @@ bash memory-monitor/tests/run.sh
 
 Node tests over `memory.js`, `quattro.js` and `ringkit.js` with fixtures for
 every parser, character-pinned toast copy per kind, the QuattroDash bands and
-code copy, the RingKit ↔ `mounts.js bandFor` conformance check, the
+code copy (round 9's system codes included: the real 2026-11-10 NVRM wedge
+lines as a fixture, synthetic IO pressure files, and fake process and unit
+state for BAR and LAYER), the RingKit ↔ `mounts.js bandFor` conformance check,
+the
 hostile-label regression, the multi-instance one-alert/one-log-row/one-arm
 check, the install-layout check, an `install.sh` syntax check, a `SKILL.md`
 check, and `qmllint` on the QML. `tests/round8.test.mjs` pins the captain's

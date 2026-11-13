@@ -535,6 +535,21 @@ function sanitizePath(value) {
     .slice(0, DEVICE_PATH_MAX);
 }
 
+// memory.js's sanitizeText, kept identical so one kernel or journal string
+// cannot read as two different strings depending on which file reports it.
+// The angle-bracket strip is what keeps the diagnosis delimiters unforgeable.
+function sanitizeText(value, max) {
+  const limit = asNumber(max) === null || asNumber(max) < 8 ? 160 : asNumber(max);
+  const text = String(value === undefined || value === null ? "" : value);
+  const stripped = text.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+  const safe = stripped
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/g, " ")
+    .replace(/[<>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return safe.length > limit ? safe.slice(0, limit - 3) + "..." : safe;
+}
+
 function fnv1a(text, seed) {
   let h = seed >>> 0;
   const t = String(text === undefined || text === null ? "" : text);
@@ -1073,6 +1088,12 @@ function valueRows(psiSome, reserve, swap, rootDrive, vram, codes) {
   for (let i = 0; i < list.length; i += 1) {
     const c = list[i];
     if (!c) continue;
+    if (c.alert && c.alert.type === "sys") {
+      // A system code is boolean, no percent behind it: the values row says
+      // what it is instead of guessing a reading.
+      rows.push({ label: c.code, value: "system fault showing" });
+      continue;
+    }
     const where = c.alert && c.alert.target ? " " + sanitizePath(c.alert.target) : "";
     const p = c.alert === undefined || c.alert === null ? null : asNumber(c.alert.pct);
     rows.push({ label: c.code, value: where + " " + (p === null ? "unknown" : String(Math.round(p))) + " percent" });
@@ -1163,6 +1184,551 @@ function codesHeadToken(codes) {
 // voice as the gauge labels (round 3).
 function codesEmptyText() {
   return "ENGINE CLEAR";
+}
+
+// --- round 9: the system codes (the captain's locked scope, 2026-11-12) -----
+//
+// The dash doctrine holds: four gauges stay exactly as they are (no new
+// gauges), gauges watch calibrated curves, codes watch discrete faults. The
+// codes family extends to system health: five boolean codes, no calibration
+// curves, no new settings surface (round 10 owns the settings area). Each
+// code rides the same taxonomy as a drive code: stable C#### digits over a
+// stable hash subject (the subject string itself is the hash input, the
+// drive "hd|<key>" precedent), the codes-area rendering, and the
+// moderate/severe Fix-line
+// contract. The visible row stays terse (subject, count, culprit name); the
+// click payload's diagnosis JSON carries the full detail (exact journal
+// lines, unit names, counts) for the agent side. Never a raw PID in visible
+// copy.
+//
+// The five (captain-approved):
+//   BAR    the bar shell process died or restarted itself recently
+//   KERNEL new kernel fault lines (err and crit) since the last look
+//   GPU    the NVRM driver-wedge signature in the kernel log
+//   LAYER  a systemd user unit stuck climbing its own restart count
+//   DISK   IO pressure sustained past a bar (the present-tense stall code;
+//          swap stays the predictive gauge tripwire it already is)
+//
+// Polling joins the existing sample cadence in MemoryMonitor.qml (no second
+// timer system); everything decided here: the argvs, the parsers, the
+// thresholds, the sustain and climb rules, every word of copy.
+
+// Stable hash subjects, the drive "hd|<key>" precedent. A system fault keeps
+// its code for as long as the condition is present, and re-derives the same
+// code on every restart. LAYER is the one per-resource family: a climbing
+// unit mints "sys|layer:<unit>", so each unit keeps its own digits, and the
+// bare family subject stays for the unreadable-systemd row.
+var SYS_SUBJECTS = {
+  bar: "sys|bar",
+  kernel: "sys|kernel",
+  gpu: "sys|gpu",
+  layer: "sys|layer",
+  disk: "sys|disk",
+};
+
+function layerSubject(unit) {
+  return SYS_SUBJECTS.layer + ":" + String(unit);
+}
+
+// The layer unit watch list: a small built-in list of the background units
+// this rig and Omarchy run. Absent units drop out of the readings; the list
+// is not a setting (round 10 owns the settings area). A unit's restart count
+// only climbs when systemd itself restarts it, so the climb is the fault and
+// one restart alone (a deliberate `systemctl restart`) never is.
+var LAYER_UNITS = [
+  "paris-layer.service",
+  "layerhost.service",
+  "omarchy-earth.service",
+  "omarchy-earth-pause.service",
+  "owed.service",
+];
+
+// DISK bars, first cuts shipped as defaults and revisited when round 10's
+// calibration exists: kernel IO stall score (some avg60) at or over 10 for a
+// sustained window lights amber, 25 and over lights red. Sustained means two
+// consecutive polls at or over the amber bar; the red bar lights on one poll
+// (avg60 is already a sixty-second window).
+var DISK_AMBER_AT = 10;
+var DISK_RED_AT = 25;
+var DISK_SUSTAIN_POLLS = 2;
+
+// BAR restart recency: a quickshell younger than this window that did not
+// start with the session is a recent restart. A process started within
+// BAR_BOOT_MARGIN_SEC of the system uptime is a boot start, not a fault.
+var BAR_RESTART_WINDOW_SEC = 900;
+var BAR_BOOT_MARGIN_SEC = 180;
+
+// The kernel fault line levels the KERNEL code watches: err and everything
+// above it. The NVRM wedge lines ride warning priority, which is exactly why
+// GPU is its own code with its own grep: the wedge never shows up in the
+// err/crit stream.
+var KERNEL_PRIORITY_ARGS = ["-p", "err"];
+
+// The driver-wedge fingerprint (the real-world signature on this rig). The
+// whole GPU signal: no vulkan probe, no driver poke - a probe would
+// false-positive during VRAM squeeze. journalctl caps the scan at the last
+// GPU_WEDGE_MAX_LINES matching lines; a saturated count reads "500+".
+var GPU_WEDGE_WORDS = ["GspRmAlloc", "NV_ERR_STATE_IN_USE"];
+var GPU_WEDGE_MAX_LINES = 500;
+
+// How many exact journal lines ride the diagnosis JSON for the agent: the
+// recent tail, not the whole history.
+var SYS_DETAIL_MAX_LINES = 20;
+
+// journalctl argv builders. The KERNEL delta reads only since the cursor (the
+// epoch of the newest line already seen); the GPU grep scans this boot. Both
+// outputs are short-unix: one line per entry, epoch first, so the parser can
+// order and cursor them without a date library.
+function journalDeltaArgs(cursor) {
+  const args = ["journalctl", "-k", "--output=short-unix", "--no-pager"];
+  const c = asNumber(cursor);
+  if (c !== null) args.push("--since=@" + c);
+  for (const a of KERNEL_PRIORITY_ARGS) args.push(a);
+  return args;
+}
+
+function gpuWedgeArgs() {
+  return ["journalctl", "-k", "-b", "--output=short-unix", "--no-pager",
+    "-n", String(GPU_WEDGE_MAX_LINES), "--grep", GPU_WEDGE_WORDS.join("|")];
+}
+
+// One systemctl show answers for the whole watch list. LoadState is what
+// separates an absent unit from a merely inactive one: a missing unit shows
+// ActiveState=inactive and NRestarts=0, and only not-found tells the truth.
+function layerUnitsArgs() {
+  return ["systemctl", "--user", "show", "--no-pager",
+    "--property=Id,LoadState,ActiveState,NRestarts,Restart"].concat(LAYER_UNITS);
+}
+
+// The bar probe: system uptime first, then quickshell's elapsed seconds, so
+// one child answers liveness and restart recency together. ps exits 1 when
+// nothing matches (the dead signal) and 127 when the tool is missing (which
+// must never read as a dead shell).
+function barArgs() {
+  return ["sh", "-c", "cat /proc/uptime; ps -o etimes= -C quickshell"];
+}
+
+function ioPsiArgs() {
+  return ["cat", "/proc/pressure/io"];
+}
+
+// --- round 9 parsers. Machine text in, plain records out. Nothing here
+// --- invents a value: an unparseable reading is readable=false.
+
+// `1794352157.695758 omarchy kernel: NVRM: GPU0 ...` lines, any mix.
+function parseJournalLines(text) {
+  const out = [];
+  const lines = String(text === undefined || text === null ? "" : text).split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const at = trimmed.indexOf(" ");
+    if (at <= 0) continue;
+    const epoch = asNumber(trimmed.slice(0, at));
+    if (epoch === null) continue;
+    const rest = trimmed.slice(at + 1);
+    const kat = rest.indexOf("kernel: ");
+    const message = kat >= 0 ? rest.slice(kat + "kernel: ".length) : rest;
+    out.push({ epoch: epoch, message: sanitizeText(message, 200) });
+  }
+  return out;
+}
+
+// The culprit module of one kernel message: the words before the first
+// colon, keeping only the leading identifier-shaped, digit-free tokens, so
+// `igc 0000:05:00.0 enp5s0:` names igc, `NVRM:` names NVRM, `Out of memory:`
+// names the whole phrase, and `BTRFS error (device sda2):` names BTRFS error
+// without the device parenthetical. Truncated and sanitized like everything
+// visible.
+function kernelModuleOf(message) {
+  const m = String(message === undefined || message === null ? "" : message);
+  const colon = m.indexOf(":");
+  if (colon < 0) return "kernel";
+  const tokens = m.slice(0, colon).split(/\s+/).filter(t => /^[A-Za-z][A-Za-z0-9_-]*$/.test(t) && !/\d/.test(t));
+  const kept = [];
+  for (const t of tokens) {
+    if (/\d/.test(t)) break;
+    kept.push(t);
+    if (kept.length >= 3) break;
+  }
+  const name = sanitizeText(kept.join(" "), 24);
+  return name.length > 0 ? name : "kernel";
+}
+
+// The bar probe text: first line the uptime, the rest ps elapsed seconds.
+function parseBarProbe(text) {
+  const lines = String(text === undefined || text === null ? "" : text)
+    .split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length === 0) return { readable: false, uptimeSec: null, ages: [] };
+  const uptimeSec = asNumber(lines[0].split(/\s+/)[0]);
+  if (uptimeSec === null) return { readable: false, uptimeSec: null, ages: [] };
+  const ages = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const age = asNumber(lines[i]);
+    if (age !== null && age >= 0) ages.push(age);
+  }
+  return { readable: true, uptimeSec: uptimeSec, ages: ages };
+}
+
+function parseUnitShow(text) {
+  const units = [];
+  const blocks = String(text === undefined || text === null ? "" : text)
+    .split(/\r?\n\s*\r?\n/);
+  for (const block of blocks) {
+    const record = {};
+    let any = false;
+    for (const line of block.split(/\r?\n/)) {
+      const at = line.indexOf("=");
+      if (at <= 0) continue;
+      record[line.slice(0, at)] = line.slice(at + 1);
+      any = true;
+    }
+    if (!any || record.Id === undefined) continue;
+    units.push({
+      id: sanitizeText(record.Id, 120),
+      found: record.LoadState !== "not-found",
+      active: sanitizeText(record.ActiveState, 16),
+      restarts: asNumber(record.NRestarts),
+      restartPolicy: sanitizeText(record.Restart, 16),
+    });
+  }
+  return units;
+}
+
+// `some avg10=0.04 avg60=0.06 avg300=0.20 total=3350258115` lines.
+function parseIoPsi(text) {
+  const lines = String(text === undefined || text === null ? "" : text)
+    .split(/\r?\n/);
+  for (const line of lines) {
+    if (line.indexOf("some ") !== 0) continue;
+    const m = /avg60=([0-9.]+)/.exec(line);
+    const v = m === null ? null : asNumber(m[1]);
+    return { readable: v !== null, someAvg60: v };
+  }
+  return { readable: false, someAvg60: null };
+}
+
+// --- round 9: one system code entry, the drive entry's exact shape ----------
+
+function sysCode(kind, subject, band, issue, status, fix, detail) {
+  const id = memIdSys(subject);
+  // The hash input is the subject itself, the drive "hd|<key>" precedent: the
+  // stable subject string IS what codeFor hashes, "sys|bar", not a re-prefix
+  // of it.
+  const code = "C" + ("0000" + (fnv1a(subject) % 10000)).slice(-4);
+  return {
+    code: code,
+    sev: band >= 2 ? "r" : "a",
+    band: band,
+    issue: issue,
+    status: status,
+    fix: fix,
+    alert: {
+      kind: "alert",
+      type: "sys",
+      sys: kind,
+      key: subject,
+      id: id,
+      code: code,
+      band: band,
+      detail: detail === undefined || detail === null ? {} : detail,
+    },
+  };
+}
+
+// The id a system code answers to, minted from its stable subject the way a
+// drive's id is minted from its key. memory.js owns the two-round
+// construction; this file cannot import it, so the digits are minted here
+// with the same fnv1a seeds and the same empty-target second round the
+// memory.js copy uses.
+function memIdSys(subject) {
+  const k = sanitizeText(subject, DEVICE_PATH_MAX);
+  return "mem-" + hex32(fnv1a(k, 2166136261)) + "-" +
+    hex32(fnv1a(k + "\u0001" + String(k.length), 2166136261 ^ 0x9e3779b9));
+}
+
+function hex32(n) {
+  const v = (n >>> 0).toString(16);
+  return "00000000".slice(v.length) + v;
+}
+
+var SYS_STATUS = {
+  moderate: "moderate, system fault showing.",
+  severe: "severe, system fault showing.",
+  unknown: "unknown. the reading could not be taken.",
+};
+
+var SYS_FIX = {
+  moderate: "click to send crash pattern to agent.",
+  severe: "agent has the crash pattern and is processing now.",
+};
+
+// --- BAR: the bar shell process --------------------------------------------
+//
+// Dead is severe; a restart inside the window that did not land with the
+// session is moderate; a boot start is clear; an unreadable probe is the
+// unknown row, never a confident healthy zero.
+function barSysCode(probe, exitCode) {
+  const p = probe || { readable: false, uptimeSec: null, ages: [] };
+  if (!p.readable) {
+    return sysCode("bar", SYS_SUBJECTS.bar, 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+      { alive: null, ageSec: null, uptimeSec: null });
+  }
+  const toolMissing = exitCode !== 0 && exitCode !== 1;
+  if (p.ages.length === 0 && toolMissing) {
+    return sysCode("bar", SYS_SUBJECTS.bar, 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+      { alive: null, ageSec: null, uptimeSec: p.uptimeSec });
+  }
+  if (p.ages.length === 0) {
+    return sysCode("bar", SYS_SUBJECTS.bar, 2, "Bar shell is not running.", SYS_STATUS.severe, SYS_FIX.severe,
+      { alive: false, ageSec: null, uptimeSec: p.uptimeSec });
+  }
+  // The youngest quickshell is the one whose age matters: a young process is
+  // the restart. A process that has lived about as long as the session is a
+  // boot start, not a fault.
+  const age = Math.min.apply(null, p.ages);
+  const sinceBoot = p.uptimeSec - age;
+  const restarted = age < BAR_RESTART_WINDOW_SEC && sinceBoot > BAR_BOOT_MARGIN_SEC;
+  if (!restarted) return null;
+  const minutes = Math.max(1, Math.round(age / 60));
+  return sysCode("bar", SYS_SUBJECTS.bar, 1,
+    "Bar shell restarted " + minutes + (minutes === 1 ? " minute" : " minutes") + " ago.",
+    SYS_STATUS.moderate, SYS_FIX.moderate,
+    { alive: true, ageSec: Math.round(age), uptimeSec: Math.round(p.uptimeSec) });
+}
+
+// --- KERNEL: new kernel fault lines since the last look ---------------------
+//
+// The first look of a session sets the baseline and counts nothing: "since
+// the last look" means a look this monitor actually made. The cursor rides
+// back to the caller; lines are counted only strictly after it, so a line
+// that landed in the same second as the cursor cannot report twice.
+function kernelSysCode(lines, readable, prevCursor) {
+  if (!readable) {
+    return {
+      cursor: prevCursor === null || prevCursor === undefined ? null : prevCursor,
+      entry: sysCode("kernel", SYS_SUBJECTS.kernel, 1, "Kernel log unreadable, faults unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+        { newLines: null, culprit: null, lines: [] }),
+    };
+  }
+  const cursor = asNumber(prevCursor);
+  const all = lines === null || lines === undefined ? [] : lines;
+  let maxEpoch = cursor === null ? null : cursor;
+  const fresh = [];
+  for (const line of all) {
+    if (maxEpoch === null || line.epoch > maxEpoch) maxEpoch = line.epoch;
+    if (cursor === null) continue;
+    if (line.epoch > cursor) fresh.push(line);
+  }
+  if (cursor === null || fresh.length === 0) {
+    return { cursor: maxEpoch, entry: null };
+  }
+  const counts = {};
+  for (const line of fresh) {
+    const mod = kernelModuleOf(line.message);
+    counts[mod] = (counts[mod] || 0) + 1;
+  }
+  // Most lines wins; the alphabetical tie-break keeps the row stable when a
+  // poll splits evenly between two modules.
+  let culprit = null;
+  let best = 0;
+  const mods = Object.keys(counts).sort();
+  for (const mod of mods) {
+    if (counts[mod] > best) { best = counts[mod]; culprit = mod; }
+  }
+  const recent = fresh.slice(-SYS_DETAIL_MAX_LINES).map(l => l.message);
+  return {
+    cursor: maxEpoch,
+    entry: sysCode("kernel", SYS_SUBJECTS.kernel, 1,
+      "Kernel faults: " + fresh.length + " new. Culprit: " + culprit + ".",
+      SYS_STATUS.moderate, SYS_FIX.moderate,
+      { newLines: fresh.length, culprit: culprit, lines: recent }),
+  };
+}
+
+// --- GPU: the driver-wedge fingerprint --------------------------------------
+//
+// The big red one. Present for the whole boot once the signature appears (the
+// journal is this boot's, so a reboot clears it the way the copy says). The
+// saturated count names the cap honestly. journalctl --grep exits 1 when
+// nothing matches: that is a readable, clean log (no fingerprint, no code),
+// the same line the bar probe draws for ps - exit 1 is no match, not a
+// missing tool. Only an exit past that is an unreadable log.
+function gpuSysCode(journalText, exitCode) {
+  if (exitCode !== 0 && exitCode !== 1) {
+    return sysCode("gpu", SYS_SUBJECTS.gpu, 1, "Kernel log unreadable, GPU state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
+      { wedgeLines: null, lines: [] });
+  }
+  const all = parseJournalLines(journalText);
+  const wedge = [];
+  for (const line of all) {
+    for (const word of GPU_WEDGE_WORDS) {
+      if (line.message.indexOf(word) >= 0) { wedge.push(line); break; }
+    }
+  }
+  if (wedge.length === 0) return null;
+  const saturated = wedge.length >= GPU_WEDGE_MAX_LINES;
+  const count = saturated ? GPU_WEDGE_MAX_LINES + "+" : String(wedge.length);
+  return sysCode("gpu", SYS_SUBJECTS.gpu, 2,
+    "GPU driver wedged: " + count + " NVRM faults in the log.",
+    "severe, the driver is wedged. only a reboot clears it.",
+    SYS_FIX.severe + " a reboot clears it.",
+    { wedgeLines: wedge.length, saturated: saturated,
+      lines: wedge.slice(-SYS_DETAIL_MAX_LINES).map(l => l.message) });
+}
+
+// --- LAYER: a unit climbing its own restart count ---------------------------
+//
+// prev is the session memory: { seen: { id: lastCount }, climbing: { id: bool
+// } }. A count that jumped two or more in one interval is climbing; a count
+// that climbed one on each of two consecutive looks is climbing; one restart
+// alone is not. A count that resets (the unit reactivated) moves the baseline
+// quietly. Every climbing unit is its own entry minted from its own
+// sys|layer:<unit> subject, the drive "hd|<key>" precedent: two units never
+// share one code, and each row names its unit.
+function layerSysCode(units, readable, prev) {
+  const memory = prev && typeof prev === "object" ? prev : { seen: {}, climbing: {} };
+  const nextSeen = Object.assign({}, memory.seen || {});
+  const nextClimbing = Object.assign({}, memory.climbing || {});
+  if (!readable) {
+    return {
+      next: { seen: nextSeen, climbing: nextClimbing },
+      entries: [sysCode("layer", SYS_SUBJECTS.layer, 1, "Layer units unknown, systemd unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
+        { unit: null, restarts: null, climbedBy: null })],
+    };
+  }
+  const entries = [];
+  for (const u of units === null || units === undefined ? [] : units) {
+    if (!u || !u.found || u.restarts === null || u.restarts === undefined) continue;
+    const last = nextSeen[u.id];
+    let delta = last === undefined || last === null ? 0 : u.restarts - last;
+    nextSeen[u.id] = u.restarts;
+    if (delta < 0) delta = 0;
+    const climbing = delta >= 2 || (delta >= 1 && nextClimbing[u.id] === true);
+    nextClimbing[u.id] = delta >= 1;
+    if (!climbing) continue;
+    entries.push(sysCode("layer", layerSubject(u.id), 1,
+      "Layer unit " + u.id + " keeps restarting.",
+      SYS_STATUS.moderate, SYS_FIX.moderate,
+      {
+        unit: u.id,
+        restarts: u.restarts,
+        climbedBy: delta,
+        restartPolicy: u.restartPolicy === "" ? null : u.restartPolicy,
+      }));
+  }
+  return { next: { seen: nextSeen, climbing: nextClimbing }, entries };
+}
+
+// --- DISK: IO pressure sustained past a bar ---------------------------------
+//
+// prev is { amberRuns: int }, the consecutive-poll run at or over the amber
+// bar. Red fires on one poll (avg60 is already a sustained window); amber
+// needs DISK_SUSTAIN_POLLS consecutive polls. Swap stays the predictive
+// gauge tripwire it is: this code reads /proc/pressure/io and nothing else,
+// and it never touches the round-8 swap doctrine.
+function diskSysCode(psi, readable, prev) {
+  const memory = prev && typeof prev === "object" && prev.amberRuns !== undefined
+    ? prev : { amberRuns: 0 };
+  if (!readable) {
+    return {
+      next: memory,
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 1, "IO pressure unknown, pressure file unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
+        { someAvg60: null, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: null }),
+    };
+  }
+  const v = psi === null || psi === undefined || psi.someAvg60 === undefined || psi.someAvg60 === null
+    ? null : asNumber(psi.someAvg60);
+  if (v === null) {
+    return {
+      next: memory,
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 1, "IO pressure unknown, pressure file unreadable.", SYS_STATUS.unknown, SYS_FIX.moderate,
+        { someAvg60: null, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: null }),
+    };
+  }
+  if (v >= DISK_RED_AT) {
+    return {
+      next: { amberRuns: 0 },
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 2,
+        "Disk stalls: IO pressure " + v.toFixed(1) + " over the red bar.",
+        SYS_STATUS.severe, SYS_FIX.severe,
+        { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: memory.amberRuns }),
+    };
+  }
+  if (v >= DISK_AMBER_AT) {
+    const runs = memory.amberRuns + 1;
+    if (runs < DISK_SUSTAIN_POLLS) return { next: { amberRuns: runs }, entry: null };
+    return {
+      next: { amberRuns: runs },
+      entry: sysCode("disk", SYS_SUBJECTS.disk, 1,
+        "Disk stalls: IO pressure " + v.toFixed(1) + " held " + runs + " polls.",
+        SYS_STATUS.moderate, SYS_FIX.moderate,
+        { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: runs }),
+    };
+  }
+  return { next: { amberRuns: 0 }, entry: null };
+}
+
+// The codes column, drives and system faults merged. One column, most
+// critical at the top, code ascending inside the same band: the sort is the
+// one codesFromReadings applies, now over both families.
+function allCodes(driveCodes, systemCodes) {
+  const out = [];
+  const drive = driveCodes === null || driveCodes === undefined ? [] : driveCodes;
+  const system = systemCodes === null || systemCodes === undefined ? [] : systemCodes;
+  for (const c of drive) if (c) out.push(c);
+  for (const c of system) if (c) out.push(c);
+  out.sort(function (a, b) {
+    if (a.sev !== b.sev) return a.sev === "r" ? -1 : 1;
+    if (a.band !== b.band) return b.band - a.band;
+    return a.code < b.code ? -1 : a.code > b.code ? 1 : 0;
+  });
+  return out;
+}
+
+// --- the system code diagnosis (round 9) ------------------------------------
+//
+// The click payload's full detail: exact journal lines, unit names, counts.
+// Same trust law as the drive diagnosis: one line, every backtick and angle
+// bracket scrubbed, so a kernel or unit string can never forge or close the
+// fence.
+function systemDiagnosisJson(entry) {
+  const e = entry || {};
+  const a = e.alert || {};
+  const d = a.detail || {};
+  const doc = {
+    code: e.code,
+    severity: diagnosisSeverity(e),
+    system: a.sys,
+    cause: e.issue,
+    detail: d,
+    recommendation: systemDiagnosisRecommendation(a.sys, e.sev),
+  };
+  return JSON.stringify(doc).replace(/[`<>]/g, " ");
+}
+
+// The fixed advice, in the dash's own words. The GPU wedge's words are law:
+// there is no in-place GPU reset on this hardware, and the copy never
+// pretends otherwise.
+function systemDiagnosisRecommendation(sys, sev) {
+  if (sys === "gpu") {
+    return "the nvidia driver is wedged. there is no in-place reset on this hardware. a reboot clears it. save work first. propose nothing that claims to reset the gpu in place.";
+  }
+  if (sys === "layer") {
+    return "report the unit's restart count and rate and name the cause. do not restart, stop, mask, or edit any unit yourself. propose the concrete change and wait for the user to confirm it.";
+  }
+  if (sys === "bar") {
+    return "report when and why the shell last exited. do not restart the shell yourself.";
+  }
+  if (sys === "kernel") {
+    return "identify the culprit module and whether the lines are still arriving. report first, propose second.";
+  }
+  if (sys === "disk") {
+    return "name the processes behind the io stalls, ranked. do not kill or throttle anything yourself.";
+  }
+  return sev === "r"
+    ? "act now. report the fault and propose the fix."
+    : "report the fault and propose the fix.";
 }
 
 // --- round 3: the hero tier phrase ------------------------------------------

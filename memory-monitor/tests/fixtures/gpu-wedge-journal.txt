@@ -1,0 +1,9 @@
+1794352157.695758 omarchy kernel: NVRM: GPU0 rpcRmApiAlloc_GSP: GspRmAlloc failed: hClient=0xc1d1656a; hParent=0xbeef0003; hObject=0xcef80002; hClass=0x0000a06c; paramsSize=0x0000001c; paramsStatus=0x00000019; status=0x00000019
+1794352165.813339 omarchy kernel: NVRM: GPU0 rpcRmApiAlloc_GSP: GspRmAlloc failed: hClient=0xc1d1656a; hParent=0xbeef0003; hObject=0xcef80002; hClass=0x0000a06c; paramsSize=0x0000001c; paramsStatus=0x00000019; status=0x00000019
+1794352165.834342 omarchy kernel: NVRM: GPU0 rpcRmApiAlloc_GSP: GspRmAlloc failed: hClient=0xc1d1656a; hParent=0xbeef0003; hObject=0xbeee0100; hClass=0x0000ca6f; paramsSize=0x00000178; paramsStatus=0x00000063; status=0x00000063
+1794352165.835146 omarchy kernel: NVRM: GPU0 nvAssertOkFailedNoLog: Assertion failed: State in use [NV_ERR_STATE_IN_USE] (0x00000063) returned from status @ kernel_channel.c:2811
+1794352165.835176 omarchy kernel: NVRM: GPU0 nvAssertOkFailedNoLog: Assertion failed: State in use [NV_ERR_STATE_IN_USE] (0x00000063) returned from _kchannelSendChannelAllocRpc(pKernelChannel, pKernelChannelGroup, bFullSriov) @ kernel_channel.c:980
+1794352165.838339 omarchy kernel: NVRM: GPU0 rpcRmApiAlloc_GSP: GspRmAlloc failed: hClient=0xc1d1656a; hParent=0xbeef0003; hObject=0xcef80002; hClass=0x0000a06c; paramsSize=0x0000001c; paramsStatus=0x00000019; status=0x00000019
+1794352187.787356 omarchy kernel: NVRM: GPU0 rpcRmApiAlloc_GSP: GspRmAlloc failed: hClient=0xc1d1656a; hParent=0xbeef0003; hObject=0xcef80002; hClass=0x0000a06c; paramsSize=0x0000001c; paramsStatus=0x00000019; status=0x00000019
+1794352263.321339 omarchy kernel: NVRM: GPU0 rpcRmApiAlloc_GSP: GspRmAlloc failed: hClient=0xc1d16d72; hParent=0xbeef0003; hObject=0xcef80001; hClass=0x0000a06c; paramsSize=0x0000001c; paramsStatus=0x00000063; status=0x00000063
+1794352264.025369 omarchy kernel: NVRM: GPU0 nvAssertOkFailedNoLog: Assertion failed: State in use [NV_ERR_STATE_IN_USE] (0x00000063) returned from status @ kernel_channel.c:2811
