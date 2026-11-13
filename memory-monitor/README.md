@@ -463,7 +463,13 @@ ceilings shown in gigabytes on a 5 GB step, the `Now: XX% Free (x/y GiB)` hover,
 the 0-35 pressure face with true tick numbers, and the square-canvas toast
 emblem the notification daemon cannot crop) and guards that the QML asks for
 every one of those decisions instead of carrying its own copy of them;
-`tests/qml-ids.test.mjs` drives the declared poll timers on a virtual clock. There is no CI in
+`tests/qml-ids.test.mjs` drives the declared poll timers on a virtual clock.
+`tests/calibration.test.mjs` pins round 10's stress calibration (the bounded
+grade plan, the wall-abort and quiet-window decisions, the proposal math, the
+copy) and executes the runner-to-helper seam for real: the unit argv's own
+`--plan` payload runs in `calibrate.py` and a cancelled run dies in seconds,
+and systemd itself accepts every property that argv builds (the live checks
+skip where `python3` or `systemd-run` is absent). There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 
