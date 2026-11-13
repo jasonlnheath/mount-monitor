@@ -2045,9 +2045,19 @@ Panel {
   property bool toastBad: false
 
   function showToast(t, bad) {
-    toastMark = t.mark
-    toastCode = t.code
-    toastText = t.text
+    // Round 10's calibration copy (refusals, cancelled, applied, kept) speaks
+    // plain sentences, while the round-9 dispatch toasts carry mark/code/text
+    // objects. Both must render: a bare string is the whole toast text, with
+    // the same check/cross mark the object path picks by severity.
+    if (typeof t === "string") {
+      toastMark = bad === true ? "✗" : "✓"
+      toastCode = ""
+      toastText = t
+    } else {
+      toastMark = t.mark
+      toastCode = t.code
+      toastText = t.text
+    }
     toastBad = bad === true
     toastTimer.restart()
   }

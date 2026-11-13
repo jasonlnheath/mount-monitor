@@ -433,7 +433,7 @@ test("calibUnitArgv assembles the bounded transient unit", () => {
     assert.equal(argv.includes(flag), true, `the unit must carry ${flag}`);
   }
   assert.equal(argv.includes(`--property=MemoryMax=${plan.ceilingMib}M`), true, "MemoryMax comes from the pinned plan");
-  assert.equal(argv.includes(`--property=MemorySwapMax=${plan.swapMaxKiB}KiB`), true, "the swap exposure is bounded deliberately, not left at systemd's default");
+  assert.equal(argv.includes(`--property=MemorySwapMax=${plan.swapMaxKiB}K`), true, "the swap exposure is bounded deliberately, not left at systemd's default");
   assert.equal(argv.includes("--property=RuntimeMaxSec=200"), true, "the machine-level hard time cap survives a dead shell");
   assert.equal(argv.includes("--property=TimeoutStopSec=5"), true, "cancel lands in seconds even against a thrashing helper");
   const py = argv.indexOf("python3");
@@ -648,4 +648,45 @@ test("the runner-to-helper seam composes: the unit argv's own --plan payload run
   assert.ok(outcome, "a SIGTERM'd run dies rather than hanging");
   assert.equal(outcome.signal, "SIGTERM", "cancel is the default disposition, never trapped or masked");
   assert.ok(Date.now() - killAt < 3000, "cancel lands in seconds against a live grade");
+});
+
+test("systemd itself accepts the unit argv the runner builds, and the pipe delivers its events", async () => {
+  const probe = spawnSync("systemd-run", ["--version"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("systemd-run is absent on this box");
+  }
+  // A user manager is not a given (containers, CI): distinguish "no bus" from
+  // "systemd refused something in our argv" - only the former skips.
+  const reach = spawnSync("systemd-run", ["--user", "--pipe", "--wait", "--collect", "--unit=quattrodash-calib-seam-probe", "/bin/true"], { encoding: "utf8", timeout: 30000 });
+  if (reach.status !== 0 && /connect|bus/i.test(reach.stderr || "")) {
+    return test.skip("no systemd user manager reachable here");
+  }
+  assert.equal(reach.status, 0, `a property-less probe unit must run (stderr: ${reach.stderr})`);
+
+  // The whole argv, from its systemd-run token on: every --property spelling
+  // the builder emits is accepted by the real parser (a suffix systemd rejects
+  // fails the whole launch with exit 1 before the helper ever starts - the
+  // KiB bug this test was written to hold shut), and --pipe carries the
+  // helper's grade lines back to the caller.
+  const plan = {
+    ok: true,
+    grades: [
+      { mib: 16, secs: 1 },
+      { mib: 16, secs: 1 },
+    ],
+    totalMib: 32,
+    capSec: 2,
+    ceilingMib: 544,
+    swapMaxKiB: 8388604,
+  };
+  const argv = Quattro.calibUnitArgv(HELPER, plan).slice(0);
+  const props = argv.filter((a) => String(a).startsWith("--property="));
+  assert.equal(props.length, 4, "the rail properties are all present");
+  const run = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: 60000 });
+  assert.equal(run.status, 0, `systemd-run accepted every property and the helper finished (stderr: ${run.stderr})`);
+  const events = run.stdout.split("\n").filter((l) => l.trim() !== "").map((l) => {
+    try { return JSON.parse(l); } catch { return { event: "unparseable", line: l }; }
+  });
+  assert.equal(events.filter((e) => e.event === "grade").length, 2, "both grade lines arrived through the unit's pipe");
+  assert.equal(events.filter((e) => e.event === "done").length, 1, "the done line arrived through the unit's pipe");
 });

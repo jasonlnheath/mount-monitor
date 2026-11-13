@@ -2190,7 +2190,11 @@ function calibUnitArgv(helperPath, plan) {
     "--collect",
     "--unit=" + CALIB_UNIT,
     "--property=MemoryMax=" + p.ceilingMib + "M",
-    "--property=MemorySwapMax=" + p.swapMaxKiB + "KiB",
+    // systemd's parse_size takes K, not KiB: the IEC spelling is refused with
+    // "Failed to parse MemorySwapMax= value ... Invalid argument" and the unit
+    // never starts (verified live against systemd 262). The value is the same
+    // kibibytes the plan speaks, only the suffix systemd reads.
+    "--property=MemorySwapMax=" + p.swapMaxKiB + "K",
     "--property=RuntimeMaxSec=" + CALIB_UNIT_RUNTIME_SEC,
     "--property=TimeoutStopSec=" + CALIB_STOP_GRACE_SEC,
     "python3",
