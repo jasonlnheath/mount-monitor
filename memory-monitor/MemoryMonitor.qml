@@ -1424,8 +1424,10 @@ BarWidget {
       byBin[s.bin].push(s);
     }
     var records = [];
+    var cum = 0;
     for (var g = 0; g < grades.length; g++) {
-      records.push(Quattro.calibSampleRecord(g, grades[g].mib, byBin[g] || []));
+      cum += grades[g].mib;
+      records.push(Quattro.calibSampleRecord(g, cum, byBin[g] || []));
     }
     return records;
   }

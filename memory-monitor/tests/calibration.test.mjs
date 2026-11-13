@@ -283,6 +283,11 @@ test("calibQuietFor holds through the run and the hot aftermath, releases on cal
   assert.equal(Quattro.calibQuietFor({ phase: "idle" }, 999999, 40, 30), false);
 });
 
+test("the settle window's PSI floor mirrors memory.js's stall floor", () => {
+  assert.equal(Quattro.CALIB_SETTLE_PSI_FLOOR, Memory.PSI_STALL_FLOOR,
+    "the modules never import each other, so this pin is what holds the settle heat judge to the stall lane it mirrors");
+});
+
 // ---------------------------------------------------------------------------
 // The band proposal. PSI scales down from the observed wall (fractions 0.35 /
 // 0.65); the reserve pair scales between knee and wall; no wall floors at the
