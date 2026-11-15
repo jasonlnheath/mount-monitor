@@ -259,7 +259,8 @@ guarded crossings, parser, and copy live in `mounts.js`, which
 bash tests/run.sh
 ```
 
-That runs `node --test tests/` against the fixtures in `tests/fixtures/` (plus
+That runs `node --test tests/*.test.mjs` (the files named, not the directory,
+so node 22 runs it too) against the fixtures in `tests/fixtures/` (plus
 live `findmnt` and `lsblk` checks that skip when a mount or the tool is not
 present) and, when Qt's `qmllint` is installed, checks that `MountMonitor.qml`,
 `VramSymbol.qml`, `VramPanel.qml` and `CardBar.qml` parse and their `mounts.js`

@@ -527,6 +527,34 @@ function asNumber(value) {
   return isFinite(n) ? n : null;
 }
 
+// memory.js's asString, kept identical so one state value cannot read as two
+// different strings depending on which file reports it.
+function asString(value) {
+  if (value === undefined || value === null) return "";
+  return String(value);
+}
+
+// memory.js's asList, kept identical for the same reason. The calibration's
+// sample and record lists cross the QML boundary, where a list is a Qt list:
+// array-like with a numeric length and NOT a JavaScript Array, the exact trap
+// the setting reads already learned to normalize around.
+function asList(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null) return null;
+  if (typeof value.length === "number" && typeof value !== "string") {
+    const out = [];
+    for (let i = 0; i < value.length; i += 1) out.push(value[i]);
+    return out;
+  }
+  try {
+    const round = JSON.parse(JSON.stringify(value));
+    if (Array.isArray(round)) return round;
+  } catch (ignored) {
+    // Not list-shaped at all. The caller falls back to the documented default.
+  }
+  return null;
+}
+
 function sanitizePath(value) {
   return String(value === undefined || value === null ? "" : value)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
@@ -840,6 +868,9 @@ var SETTINGS = {
   header: "GAUGE SETTINGS",
   hint: "Drag a slider to set where each color starts.",
   reset: "RESET TO DEFAULTS",
+  // Round 10: the twin function next to the reset. Reset says use the fleet's
+  // numbers; this says measure mine. The panel's own copy lives in CALIB.
+  calibrate: "RUN STRESS CALIBRATION",
   amberLabel: "AMBER",
   redLabel: "RED",
   // Round 7 item 3, reshaped by round 7.5 item 18: one what-and-why
@@ -2038,3 +2069,525 @@ var SYMBOLS = {
     ],
   },
 };
+
+// ===========================================================================
+// ROUND 10: the stress-calibration button.
+//
+// The twin of the reset: reset says use the fleet's numbers, calibration says
+// measure this machine. A short graded memory ladder runs under a transient
+// systemd user unit (the kernel-enforced rails live on the unit, never in this
+// code trusting itself), the dash records the machine's own stall curve per
+// grade, and the proposal derives amber/red from the observed wall and knee.
+//
+// Every decision is here: the plan builder, the grade clock, the abort
+// conditions, the quiet window (which alert families a deliberate stress may
+// hold and which it must never), the proposal math, the unit argv and the
+// copy. The widget runs what this says; the dash only renders it.
+// ===========================================================================
+
+// --- the bounds -------------------------------------------------------------
+
+var CALIB_GRADE_SECS = 40;            // each grade holds about forty seconds
+var CALIB_GRADE_FRACS = [0.2, 0.4, 0.6, 0.8];
+var CALIB_GRADE_FLOOR_MIB = 256;      // cumulative-target floor
+var CALIB_GRADE_CAP_MIB = 8192;       // cumulative-target cap: the ladder never retains more
+var CALIB_MIN_HEADROOM_KB = 1024 * 1024;   // refuse to start under 1 GiB available
+var CALIB_CAP_SEC = 180;              // the widget's own hard watchdog
+var CALIB_UNIT_RUNTIME_SEC = 200;     // systemd's cap: bounds an orphaned unit even if the shell dies
+var CALIB_STOP_GRACE_SEC = 5;         // TimeoutStopSec: cancel lands in seconds, not at the 90 s default
+var CALIB_CEILING_MARGIN_MIB = 512;   // MemoryMax sits this far above the ladder's top
+var CALIB_CEILING_RESERVE_KB = 1024 * 1024;  // and never within 1 GiB of physical RAM
+var CALIB_PSI_WALL = 40.0;            // the wall class: sustained some avg10 at or over this
+var CALIB_KNEE_PSI = 5.0;             // the knee: the first grade with measurable sustained stalls
+var CALIB_SWAP_WALL_KB_PER_MIN = 3 * 1024 * 1024;  // twice the round-8 climb telltale's own rate
+var CALIB_SWAP_MAX_GAP_MS = 20000;    // a wider sample gap is a gap, not a rate
+var CALIB_SWAP_MOVE_PCT = 10;         // a reserve that moved less says nothing about itself
+var CALIB_PSI_AMBER_FRAC = 0.35;      // amber = 35 percent of the wall's sustained PSI
+var CALIB_PSI_RED_FRAC = 0.65;        // red = 65 percent of it
+var CALIB_SETTLE_MS = 90 * 1000;      // the aftermath window after a run ends
+// The stall floor the settle window reads PSI against. Mirrors memory.js's
+// PSI_STALL_FLOOR: the modules never import each other, so the number is
+// written here too and the conformance tests hold the two together.
+var CALIB_SETTLE_PSI_FLOOR = 1.0;
+// The one unit name, and the only unit this feature will ever touch.
+var CALIB_UNIT = "quattrodash-calib";
+
+// --- the plan ---------------------------------------------------------------
+//
+// Bounded and honest on any machine, from the sample the widget already holds.
+// The ladder RETAINS (each grade keeps its allocation), so the grades are the
+// DELTAS between clamped cumulative targets and the top of the climb is
+// 0.8x MemAvailable - never the 2.0x a naive per-grade fraction would plan,
+// and never a cgroup ceiling left at or above physical RAM, which is not a
+// wall but an invitation to the global oom killer.
+function calibPlan(meminfo) {
+  const info = meminfo || {};
+  const totalKb = asNumber(info.MemTotal);
+  const availKb = asNumber(info.MemAvailable);
+  const swapKb = asNumber(info.SwapTotal);
+  if (totalKb === null || availKb === null || availKb < CALIB_MIN_HEADROOM_KB) {
+    return { ok: false, why: "headroom" };
+  }
+  const availMib = Math.floor(availKb / 1024);
+  const physicalMib = Math.floor((totalKb - CALIB_CEILING_RESERVE_KB) / 1024);
+  const targetCap = Math.min(CALIB_GRADE_CAP_MIB, physicalMib - CALIB_CEILING_MARGIN_MIB);
+  if (targetCap < CALIB_GRADE_FLOOR_MIB) {
+    return { ok: false, why: "headroom" };
+  }
+  const clampTarget = (v) =>
+    Math.max(CALIB_GRADE_FLOOR_MIB, Math.min(targetCap, Math.round(v)));
+  let prev = 0;
+  const grades = [];
+  for (const frac of CALIB_GRADE_FRACS) {
+    const target = clampTarget(frac * availMib);
+    const delta = target - prev;
+    prev = target;
+    if (delta > 0) grades.push({ mib: delta, secs: CALIB_GRADE_SECS });
+  }
+  const totalMib = prev;
+  return {
+    ok: true,
+    grades: grades,
+    totalMib: totalMib,
+    capSec: CALIB_CAP_SEC,
+    ceilingMib: Math.min(totalMib + CALIB_CEILING_MARGIN_MIB, physicalMib),
+    swapMaxKiB: swapKb === null ? 0 : Math.floor(swapKb / 2),
+  };
+}
+
+// The grade active at elapsedSec on the PLANNED clock. Display fallback only:
+// real samples bin by the helper's own grade events, because a slow-to-touch
+// rig grades on the helper's clock, not this one.
+function gradeAt(plan, elapsedSec) {
+  const t = asNumber(elapsedSec);
+  const grades = plan && plan.grades ? plan.grades : [];
+  if (t === null || t < 0) return grades.length > 0 ? 0 : null;
+  let acc = 0;
+  for (let i = 0; i < grades.length; i++) {
+    acc += grades[i].secs;
+    if (t < acc) return i;
+  }
+  return null;
+}
+
+// --- the runner -------------------------------------------------------------
+//
+// One transient user unit owns the stressor for the whole run; the widget is a
+// client, not the owner of the child. --pipe is what connects the unit's
+// stdout to the starting process (without it the helper's progress lines go to
+// the journal and the widget is blind). MemoryMax is the kernel wall above the
+// ladder, clamped below physical by calibPlan; MemorySwapMax deliberately
+// bounds the reserve exposure at half; RuntimeMaxSec is the machine-level time
+// cap that holds even if the shell dies; TimeoutStopSec is what makes cancel
+// honest against a thrashing helper.
+function calibUnitArgv(helperPath, plan) {
+  const p = plan || {};
+  return [
+    "systemd-run",
+    "--user",
+    "--pipe",
+    "--wait",
+    "--collect",
+    "--unit=" + CALIB_UNIT,
+    "--property=MemoryMax=" + p.ceilingMib + "M",
+    // systemd's parse_size takes K, not KiB: the IEC spelling is refused with
+    // "Failed to parse MemorySwapMax= value ... Invalid argument" and the unit
+    // never starts (verified live against systemd 262). The value is the same
+    // kibibytes the plan speaks, only the suffix systemd reads.
+    "--property=MemorySwapMax=" + p.swapMaxKiB + "K",
+    "--property=RuntimeMaxSec=" + CALIB_UNIT_RUNTIME_SEC,
+    "--property=TimeoutStopSec=" + CALIB_STOP_GRACE_SEC,
+    "python3",
+    asString(helperPath) || "",
+    "--plan",
+    JSON.stringify(asList(p.grades) || []),
+  ];
+}
+
+// Cancel, the hard-cap watchdog and the orphan sweep all run this one command:
+// a cgroup-wide stop that lands within TimeoutStopSec whatever the helper is
+// doing.
+function calibStopArgv() {
+  return ["systemctl", "--user", "stop", CALIB_UNIT + ".service"];
+}
+
+function calibProbeArgv() {
+  return ["systemctl", "--user", "is-active", CALIB_UNIT];
+}
+
+// The two cheap preflight reads (typed argv, no shell): the runner exists and
+// is reachable, and the helper's interpreter exists. Either missing refuses
+// honestly instead of falling back to an unbounded child - the bound child is
+// the design, not a preference.
+function calibPreflightArgvs() {
+  return [["systemd-run", "--version"], ["python3", "-V"]];
+}
+
+// --- the abort conditions ---------------------------------------------------
+//
+// Evaluated per 2 s sample during a run; first fire wins and the widget stops
+// the unit immediately. Samples are the widget's own readings, oldest first:
+// { atMs, elapsedSec, psiSome10, swapUsedKb, dirtyKb }. Dirty pages are
+// RECORDED, never an abort trigger - the stressor writes no files, so dirty
+// movement is kernel reclaim doing its job under the ladder.
+function calibAbortFor(samples, plan) {
+  const none = { abort: false, why: null, grade: null };
+  const list = [];
+  const raw = asList(samples) || [];
+  for (const s of raw) {
+    if (s && asNumber(s.atMs) !== null && asNumber(s.psiSome10) !== null && asNumber(s.swapUsedKb) !== null) {
+      list.push(s);
+    }
+  }
+  if (list.length < 2 || !plan) return none;
+  const a = list[list.length - 1];
+  const b = list[list.length - 2];
+  const grade = gradeAt(plan, a.elapsedSec);
+  if (asNumber(a.psiSome10) >= CALIB_PSI_WALL && asNumber(b.psiSome10) >= CALIB_PSI_WALL) {
+    return { abort: true, why: "psi-wall", grade: grade };
+  }
+  const gap = asNumber(a.atMs) - asNumber(b.atMs);
+  if (gap > 0 && gap <= CALIB_SWAP_MAX_GAP_MS) {
+    const rate = (asNumber(a.swapUsedKb) - asNumber(b.swapUsedKb)) / (gap / 60000);
+    if (rate >= CALIB_SWAP_WALL_KB_PER_MIN) {
+      return { abort: true, why: "swap-storm", grade: grade };
+    }
+  }
+  return none;
+}
+
+// --- the quiet window -------------------------------------------------------
+//
+// A deliberate stress must not page the captain about itself. The gauges keep
+// showing the honest live bands; what is held is the alerting, and only for
+// the code families a memory ladder can actually cause.
+//
+// KERNEL and DISK are held: a cgroup OOM line lands in the journal, and
+// reclaim/swap IO moves the io PSI average. BAR, GPU and LAYER pass through:
+// a calibration never restarts the bar, never touches the GPU, never changes
+// a unit, so a fault there during a run is genuine.
+function calibQuietFor(state, nowMs, ioSomeAvg60, psiSome10) {
+  if (!state || typeof state !== "object") return false;
+  if (state.phase === "running") return true;
+  const endedAtMs = asNumber(state.endedAtMs);
+  if (endedAtMs === null) return false;
+  if (asNumber(nowMs) === null || nowMs - endedAtMs > CALIB_SETTLE_MS) return false;
+  const io = asNumber(ioSomeAvg60);
+  const psi = asNumber(psiSome10);
+  const hot = (io !== null && io >= DISK_AMBER_AT) || (psi !== null && psi >= CALIB_SETTLE_PSI_FLOOR);
+  return hot;
+}
+
+// Decode-and-hold. The decoders run exactly as always; the session state they
+// carry (kernel cursor, layer climb memory, disk amber run) ALWAYS advances -
+// quiet or not - because a frozen cursor would replay calibration-era journal
+// lines after the run and forge a KERNEL code out of the ladder's own OOM
+// line. While quiet, kernel and disk entries are dropped; bar, gpu and layer
+// ride through.
+function sysCodesQuiet(bar, kernel, gpu, layer, disk, quiet) {
+  const k = kernel && typeof kernel === "object" ? kernel : {};
+  const l = layer && typeof layer === "object" ? layer : {};
+  const d = disk && typeof disk === "object" ? disk : {};
+  const entries = [];
+  if (bar) entries.push(bar);
+  if (!quiet && k.entry) entries.push(k.entry);
+  if (gpu) entries.push(gpu);
+  const layerEntries = asList(l.entries) || [];
+  for (const e of layerEntries) if (e) entries.push(e);
+  if (!quiet && d.entry) entries.push(d.entry);
+  return {
+    cursor: k.cursor === undefined ? null : k.cursor,
+    layerNext: l.next === undefined ? null : l.next,
+    diskNext: d.next === undefined ? null : d.next,
+    entries: entries,
+  };
+}
+
+// --- the curve records ------------------------------------------------------
+//
+// The widget summarizes its own 2 s samples per grade through this, binned by
+// the helper's grade events where they have arrived. `samples` is that grade's
+// slice of { atMs, psiSome10, psiSome60, swapPct, dirtyKb }; nulls are
+// readings the cycle failed to take and are skipped, never read as zero.
+function calibSampleRecord(grade, targetMib, samples) {
+  const list = [];
+  const raw = asList(samples) || [];
+  for (const s of raw) {
+    if (s && typeof s === "object") list.push(s);
+  }
+  const nums = (key) => {
+    const out = [];
+    for (const s of list) {
+      const v = asNumber(s[key]);
+      if (v !== null) out.push(v);
+    }
+    return out;
+  };
+  const mean = (arr) => (arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length);
+  const psi10 = nums("psiSome10");
+  const psi60 = nums("psiSome60");
+  const dirty = nums("dirtyKb");
+  const pct = nums("swapPct");
+  // The biggest swap rate between two consecutive samples inside the grade.
+  let rateMax = null;
+  for (let i = 1; i < list.length; i++) {
+    const a = asNumber(list[i].atMs);
+    const b = asNumber(list[i - 1].atMs);
+    const ua = asNumber(list[i].swapUsedKb);
+    const ub = asNumber(list[i - 1].swapUsedKb);
+    if (a === null || b === null || ua === null || ub === null) continue;
+    const gap = a - b;
+    if (gap <= 0 || gap > CALIB_SWAP_MAX_GAP_MS) continue;
+    const rate = (ua - ub) / (gap / 60000);
+    if (rateMax === null || rate > rateMax) rateMax = rate;
+  }
+  return {
+    grade: grade,
+    targetMib: targetMib,
+    psiSome10Avg: mean(psi10),
+    psiSome10Max: psi10.length === 0 ? null : Math.max.apply(null, psi10),
+    psiSome60Last: psi60.length === 0 ? null : psi60[psi60.length - 1],
+    swapUsedPctEnd: pct.length === 0 ? null : pct[pct.length - 1],
+    swapKbPerMinMax: rateMax,
+    dirtyKbAvg: mean(dirty),
+  };
+}
+
+// --- the proposal -----------------------------------------------------------
+//
+// PSI scales down from the observed wall (0.35 / 0.65 of the wall's sustained
+// PSI); the reserve pair scales between knee and wall, never at the raw wall
+// (a red at the observed 97 percent used would only fire at the wall the run
+// just proved dangerous). No wall found floors at the fleet defaults: the
+// machine proved stronger than the probe, so the fleet numbers are the honest
+// floor, never a false-alert invite. A user-set critical that blocks the
+// proposed red blocks APPLY and rewrites nothing - critical is never proposed,
+// never clobbered. `stored` carries the pairs as they are right now:
+// psi from the threshold store (with critical), batt from gaugeSettings.
+function calibProposalFor(records, plan, stored) {
+  const list = [];
+  const raw = asList(records) || [];
+  for (const r of raw) if (r && typeof r === "object") list.push(r);
+  const storedPsi = stored && stored.psi && typeof stored.psi === "object" ? stored.psi : {};
+  const clampPct = (v) => Math.max(GAUGE_PCT_MIN, Math.min(GAUGE_PCT_MAX, v));
+
+  // Wall and knee grades. The MAX column counts as a wall sign because an
+  // internal abort fires on the raw samples: two spikes at 40+ can average
+  // below the bar inside their grade, and that wall is real.
+  let wallGrade = null;
+  let kneeGrade = null;
+  for (let i = 0; i < list.length; i++) {
+    const psiMax = asNumber(list[i].psiSome10Max);
+    const psiAvg = asNumber(list[i].psiSome10Avg);
+    const rate = asNumber(list[i].swapKbPerMinMax);
+    if (
+      wallGrade === null &&
+      ((psiMax !== null && psiMax >= CALIB_PSI_WALL) ||
+        (rate !== null && rate >= CALIB_SWAP_WALL_KB_PER_MIN))
+    ) {
+      wallGrade = i;
+    }
+    if (kneeGrade === null && psiAvg !== null && psiAvg >= CALIB_KNEE_PSI) {
+      kneeGrade = i;
+    }
+  }
+
+  // The PSI pair.
+  let psiAmber;
+  let psiRed;
+  let confidence;
+  if (wallGrade !== null) {
+    const wallAvg = asNumber(list[wallGrade].psiSome10Avg);
+    const base = wallAvg === null ? GAUGE_DEFAULTS.psi.amber : wallAvg;
+    psiAmber = clampPct(Math.round(base * CALIB_PSI_AMBER_FRAC));
+    psiRed = clampPct(Math.round(base * CALIB_PSI_RED_FRAC));
+    confidence = "wall";
+  } else {
+    psiAmber = GAUGE_DEFAULTS.psi.amber;
+    psiRed = GAUGE_DEFAULTS.psi.red;
+    confidence = "floor";
+  }
+  if (psiRed <= psiAmber) psiRed = clampPct(psiAmber + 1);
+
+  // The reserve pair, in USED percent. No reserve, a reserve the ladder never
+  // exercised, or too few readings: no proposal, the stored pair stays.
+  let batt = null;
+  const swapReadings = [];
+  for (const r of list) {
+    const v = asNumber(r.swapUsedPctEnd);
+    if (v !== null) swapReadings.push(v);
+  }
+  if (swapReadings.length >= 2) {
+    const moved = swapReadings[swapReadings.length - 1] - swapReadings[0];
+    if (moved >= CALIB_SWAP_MOVE_PCT) {
+      if (wallGrade === null) {
+        // The fleet floor speaks free percent in GAUGE_DEFAULTS; the proposal
+        // speaks used, the unit reserveThresholds judges.
+        batt = {
+          amber: 100 - GAUGE_DEFAULTS.batt.amber,
+          red: 100 - GAUGE_DEFAULTS.batt.red,
+        };
+      } else {
+        const kneePct =
+          kneeGrade !== null && asNumber(list[kneeGrade].swapUsedPctEnd) !== null
+            ? asNumber(list[kneeGrade].swapUsedPctEnd)
+            : swapReadings[0];
+        const wallPct = asNumber(list[wallGrade].swapUsedPctEnd);
+        if (wallPct !== null) {
+          const knee = Math.min(kneePct, wallPct);
+          batt = {
+            amber: clampPct(Math.round(knee + CALIB_PSI_AMBER_FRAC * (wallPct - knee))),
+            red: clampPct(Math.round(knee + CALIB_PSI_RED_FRAC * (wallPct - knee))),
+          };
+        }
+      }
+      if (batt !== null && batt.red <= batt.amber) batt.red = clampPct(batt.amber + 1);
+    }
+  }
+
+  // A user-set critical above the proposed red blocks the apply. The effective
+  // pair is the stored one: the proposal never silently rewrites a critical.
+  const critical = asNumber(storedPsi.critical);
+  const blocked = critical !== null && psiRed >= critical;
+  const psi = blocked
+    ? { amber: asNumber(storedPsi.amber), red: asNumber(storedPsi.red) }
+    : { amber: psiAmber, red: psiRed };
+
+  return {
+    psi: psi,
+    batt: batt,
+    wallGrade: wallGrade,
+    kneeGrade: kneeGrade,
+    confidence: confidence,
+    blocked: blocked,
+  };
+}
+
+// --- the reserve pair crosses into the store's own unit --------------------
+//
+// The proposal speaks USED percent, the unit the band machinery judges and the
+// curve was measured in. The gauge settings store keeps FREE percent (and
+// shows gigabytes on machines that have swap) - this is the one conversion,
+// here and nowhere else, so the panel's used-percent numbers and the stored
+// pair can never drift apart by half an inversion.
+function calibBattToStored(pair) {
+  const p = pair || {};
+  const amber = asNumber(p.amber);
+  const red = asNumber(p.red);
+  if (amber === null || red === null) return null;
+  return { amber: clamp(100 - amber), red: clamp(100 - red) };
+  function clamp(v) { return Math.max(GAUGE_PCT_MIN, Math.min(GAUGE_PCT_MAX, v)); }
+}
+
+// --- the copy ---------------------------------------------------------------
+//
+// The language rule holds here too: no em dashes, no en dashes, no semicolons.
+// The warning is the captain's sentence, plain as he said it.
+var CALIB = {
+  title: "STRESS CALIBRATION",
+  confirm: {
+    heading: "ABOUT TO STRESS THIS MACHINE",
+    body:
+      "About three minutes of graded memory pressure. Only RAM and the swap reserve are measured. " +
+      "Your machine may stutter for a few minutes - save your work, and cancel anytime.",
+    start: "START",
+    dontRun: "DON'T RUN",
+  },
+  running: {
+    heading: "MEASURING THIS MACHINE",
+    cancel: "CANCEL",
+    cancelNote: "cancel stops the run in seconds",
+  },
+  gradeLabel: function (grade, total) {
+    const g = asNumber(grade) === null ? 1 : grade + 1;
+    const t = asNumber(total) === null ? g : total;
+    return "GRADE " + g + " OF " + t;
+  },
+  propose: {
+    heading: "PROPOSED FROM YOUR MACHINE",
+    apply: "APPLY",
+    keep: "KEEP DEFAULTS",
+    note: "Measured from this run. Apply writes the numbers like any setting, keep changes nothing.",
+    blockedNote: "Your critical line blocks the proposed red. Raise it or set it aside, then run again.",
+  },
+  done: {
+    applied: "Applied. Your gauges use the measured lines.",
+    kept: "Kept your settings. Nothing changed.",
+  },
+  // Internal walls propose with APPLY: the partial curve is real data. External
+  // aborts are DISMISS only: a watchdog or a cancel says nothing about where
+  // this machine's wall is.
+  reasons: {
+    psiWall: function (grade) {
+      const g = asNumber(grade) === null ? "" : " in grade " + (grade + 1);
+      return "Memory stalls hit the wall class" + g + ". Stopped early. The wall it found is real: review the proposal.";
+    },
+    swapStorm: function (grade) {
+      const g = asNumber(grade) === null ? "" : " in grade " + (grade + 1);
+      return "Swap climbed at storm rate" + g + ". Stopped early. The wall it found is real: review the proposal.";
+    },
+    ceiling: "The stressor hit its own memory ceiling. Stopped early.",
+    died: function (code) {
+      return "The stressor stopped at its ceiling or failed early (exit " + code + ").";
+    },
+    cap: "The three minute cap ended the run.",
+    cancelled: "Cancelled. Nothing was applied.",
+  },
+  refused: {
+    headroom: "Not enough headroom right now. Close something and try again.",
+    systemd: "systemd-run is unavailable, so the runner cannot be bounded. Calibration refused.",
+    python: "python3 is unavailable, so the stressor cannot run. Calibration refused.",
+    running: "A calibration is already running.",
+    instance: "The primary instance runs the calibration.",
+  },
+};
+
+// --- the panel's words for numbers ------------------------------------------
+//
+// The proposal screen shows the raw curve beside the proposed numbers, so the
+// captain sees WHY. These are the line builders, here so the dash renders and
+// decides nothing; the language rule holds on their output too.
+function calibCurveLine(record) {
+  const r = record || {};
+  const grade = asNumber(r.grade) === null ? 0 : r.grade;
+  const target = asNumber(r.targetMib);
+  const psi = asNumber(r.psiSome10Avg);
+  const swap = asNumber(r.swapUsedPctEnd);
+  const dirty = asNumber(r.dirtyKbAvg);
+  const parts = [
+    "GRADE " + (grade + 1),
+    "TARGET " + (target === null ? "?" : target) + " MiB",
+    "PSI " + (psi === null ? "-" : psi.toFixed(1)),
+    "SWAP " + (swap === null ? "-" : Math.round(swap) + "%"),
+    "DIRTY " + (dirty === null ? "-" : Math.round(dirty / 1024) + " MB"),
+  ];
+  return parts.join("   ");
+}
+
+function calibProposalLines(proposal, stored) {
+  const p = proposal || {};
+  const s = stored || {};
+  const storedPsi = s.psi || {};
+  const storedBatt = s.batt || {};
+  const out = [];
+  out.push(
+    "RAM PRESSURE AMBER " + p.psi.amber + " PSI (WAS " + storedPsi.amber + "), RED " +
+    p.psi.red + " PSI (WAS " + storedPsi.red + ")"
+  );
+  if (p.batt === null || p.batt === undefined) {
+    out.push("SWAP RESERVE UNTOUCHED. THE RUN DID NOT EXERCISE IT");
+  } else {
+    // The stored pair keeps free percent; the proposal speaks used percent, so
+    // the "was" numbers are inverted into the same unit the proposal uses.
+    const wasAmber = asNumber(storedBatt.amber) === null ? "?" : 100 - asNumber(storedBatt.amber);
+    const wasRed = asNumber(storedBatt.red) === null ? "?" : 100 - asNumber(storedBatt.red);
+    out.push(
+      "SWAP RESERVE AMBER " + p.batt.amber + "% USED (WAS " + wasAmber + "), RED " +
+      p.batt.red + "% USED (WAS " + wasRed + ")"
+    );
+  }
+  if (p.confidence === "floor") {
+    out.push("NO WALL FOUND. THE FLEET DEFAULTS ARE THE FLOOR");
+  }
+  return out;
+}

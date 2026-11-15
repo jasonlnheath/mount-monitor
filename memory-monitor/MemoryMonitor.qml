@@ -217,7 +217,14 @@ BarWidget {
       windowOpen: root.anySurfaceOpen,
       watchBand: root.watchBand(),
     });
-    return override > 0 ? override : value;
+    var chosen = override > 0 ? override : value;
+    // Round 10: a calibration - and its hot aftermath - is a watch state of
+    // its own. The curve is sampled on the 2 s lane whatever the resources
+    // read, the kernel's own constant, and it wins even over a pollMs
+    // override: the captain asked the dash to measure, and a sample every
+    // half minute measures nothing.
+    if (root.calibQuiet()) chosen = Math.min(chosen, Memory.POLL_WATCH_MS);
+    return chosen;
   }
 
   function bandOf(key): int {
@@ -285,6 +292,26 @@ BarWidget {
   property var sysDiskPrev: null
   // The merged system code entries the dashboard reads.
   property var sysCodes: []
+  // Round 10: the io PSI some avg60 the last cycle decoded, so the quiet
+  // predicate can judge the aftermath without re-reading the file.
+  property real lastIoSomeAvg60: -1
+  property bool hasLastIoSomeAvg60: false
+
+  // ---- Round 10: the stress calibration. The whole state machine lives here;
+  //      every decision lives in Quattro (calibPlan, calibUnitArgv,
+  //      calibAbortFor, calibQuietFor, sysCodesQuiet, calibProposalFor,
+  //      calibSampleRecord, calibBattToStored). The runner is a transient
+  //      systemd user unit that dies with one stop command and cannot outlive
+  //      its own RuntimeMaxSec; the helper ships beside this file and writes
+  //      nothing anywhere. Only the writer instance starts one.
+  //      phase: preflight | running | proposing | aborted. null = idle.
+  property var calib: null
+  // When the last run ended, in epoch ms. Kept after the state object goes
+  // idle, because the settle quiet window outlives the panel's business with
+  // the run.
+  property real calibEndedAtMs: 0
+  property bool calibWasQuiet: false
+  property bool calibOrphanChecked: false
 
   readonly property var readNames: ["meminfo", "psi", "swaps", "zram", "findmnt", "gpu", "apps", "bar", "kernel", "wedge", "units", "iopsi"]
 
@@ -355,6 +382,7 @@ BarWidget {
     if (!stateLoaded) return;
     buildReadings();
     buildSystemCodes();
+    if (root.calibActive()) root.noteCalibSample();
     evaluateBands();
     rebindDisplayBands();
     if (isWriter) appendLog();
@@ -368,17 +396,28 @@ BarWidget {
   // climb memory, the disk amber run. An abandoned cycle reads as unreadable,
   // and an unreadable read renders the honest unknown row, never a healthy
   // zero.
+  // Round 10: the decode goes through Quattro.sysCodesQuiet, which returns the
+  // merged entries AND the session state. While a calibration (or its hot
+  // aftermath) holds the quiet window, kernel and disk entries are held but
+  // the kernel cursor, layer memory and disk run STILL advance - a frozen
+  // cursor would replay calibration-era journal lines after the run and forge
+  // a KERNEL code out of the ladder's own lines. Bar, gpu and layer ride
+  // through: a fault there during a run is genuine, a calibration causes none
+  // of them.
   function buildSystemCodes(): void {
+    var ioPsi = Quattro.parseIoPsi(ioPsiText);
+    hasLastIoSomeAvg60 = ioPsi !== null && ioPsi.someAvg60 !== null && ioPsi.someAvg60 !== undefined;
+    lastIoSomeAvg60 = hasLastIoSomeAvg60 ? ioPsi.someAvg60 : -1;
     var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit);
     var kernel = Quattro.kernelSysCode(Quattro.parseJournalLines(kernelJournalText), kernelJournalOk, sysKernelCursor);
-    sysKernelCursor = kernel.cursor;
     var gpu = Quattro.gpuSysCode(wedgeJournalText, wedgeJournalExit);
     var layer = Quattro.layerSysCode(Quattro.parseUnitShow(unitShowText), unitShowOk, sysLayerPrev);
-    sysLayerPrev = layer.next;
-    var disk = Quattro.diskSysCode(Quattro.parseIoPsi(ioPsiText), ioPsiOk, sysDiskPrev);
-    sysDiskPrev = disk.next;
-    sysCodes = [bar, kernel.entry, gpu].concat(layer.entries, [disk.entry])
-      .filter(function (c) { return c !== null && c !== undefined; });
+    var disk = Quattro.diskSysCode(ioPsi, ioPsiOk, sysDiskPrev);
+    var merged = Quattro.sysCodesQuiet(bar, kernel, gpu, layer, disk, root.calibQuiet());
+    sysKernelCursor = merged.cursor;
+    sysLayerPrev = merged.layerNext;
+    sysDiskPrev = merged.diskNext;
+    sysCodes = merged.entries;
   }
 
   function buildReadings(): void {
@@ -451,13 +490,17 @@ BarWidget {
     var seen = [];
     var nextLatched = JSON.parse(JSON.stringify(latchedMap));
 
+    var quiet = root.calibQuiet();
+    var releaseEdge = root.calibWasQuiet && !quiet;
+    root.calibWasQuiet = quiet;
+
     if (ramReading !== null) {
       seen.push("ram");
-      applyBand("ram", "ram", ramReading.pct, thresholds("ram"), nextLatched, ramReading);
+      applyBand("ram", "ram", ramReading.pct, thresholds("ram"), nextLatched, ramReading, quiet, releaseEdge);
     }
     if (vramReading !== null) {
       seen.push("vram");
-      applyBand("vram", "vram", vramReading.pct, thresholds("vram"), nextLatched, vramReading);
+      applyBand("vram", "vram", vramReading.pct, thresholds("vram"), nextLatched, vramReading, quiet, releaseEdge);
     }
 
     var wanted = watchedMounts();
@@ -466,7 +509,7 @@ BarWidget {
       var device = hdDevices[i];
       seen.push(device.key);
       targets[device.key] = device.targets === undefined ? [] : Array.from(device.targets, t => String(t));
-      applyBand(device.key, "hd", device.pct, thresholds("hd"), nextLatched, device);
+      applyBand(device.key, "hd", device.pct, thresholds("hd"), nextLatched, device, quiet, releaseEdge);
     }
     deviceTargets = targets;
 
@@ -520,7 +563,7 @@ BarWidget {
     hdDevices = rows;
   }
 
-  function applyBand(key, type, pct, ceiling, latchedTarget, entry): void {
+  function applyBand(key, type, pct, ceiling, latchedTarget, entry, quiet, releaseEdge): void {
     var previous = bandOf(key);
     var result;
     if (type === "ram") {
@@ -553,9 +596,18 @@ BarWidget {
       psiStalledLast = psiNow;
       swapEscalatedLast = swapNow;
     }
+    // Round 10: a deliberate stress does not page the captain about itself.
+    // The bands stay honest (everything above still ran), but a fire inside
+    // the quiet window is dropped, and on the sample where quiet releases,
+    // anything STILL over a line catches up once - a stall that began inside
+    // the window fires late but never vanishes, while the usual aftermath
+    // (already back to green) stays silent. The round-8 guard arm rides this
+    // same held lane.
+    var catchUp = releaseEdge && held > 0;
+    if (quiet) fire = false;
     primed = true;
     if (isWriter && (held !== previous || firstSample)) saveState();
-    if (!fire) return;
+    if (!fire && !catchUp) return;
     if (entry) entry.band = held;
     // The toast says the signal's own number: PSI for a pressure band, the
     // used percent for a swap band. The MemAvailable percent is data for the
@@ -953,6 +1005,15 @@ BarWidget {
     bands = parsed.bands;
     if (!stateDirDone) return;
     reconcilePersistedArms();
+    // Round 10: the orphan sweep. A shell restart mid-run leaves the transient
+    // unit running with nobody watching it; RuntimeMaxSec bounds it, and this
+    // one is-active probe (writer instance, once per generation) stops it at
+    // the next start. It names exactly the calibration unit and nothing else.
+    if (!root.calibOrphanChecked && root.isWriter) {
+      root.calibOrphanChecked = true;
+      calibProbeProc.command = Quattro.calibProbeArgv();
+      calibProbeProc.running = true;
+    }
   }
 
   function parseJson(raw): var {
@@ -1197,6 +1258,289 @@ BarWidget {
   }
 
   // ---------------------------------------------------------------------------
+  // Round 10: the stress calibration. State machine, runner plumbing and the
+  // quiet window. The law: the runner is a transient user unit the widget is a
+  // CLIENT of - cancel is one stop command, RuntimeMaxSec bounds an orphaned
+  // unit even if the shell dies, and nothing here ever falls back to an
+  // unbounded child. Only the writer instance starts or sweeps. Every decision
+  // is Quattro's; this file carries processes, timers and state.
+  // ---------------------------------------------------------------------------
+
+  function calibState(): var {
+    return root.calib;
+  }
+
+  function calibActive(): bool {
+    return root.calib !== null && (root.calib.phase === "preflight" || root.calib.phase === "running");
+  }
+
+  // The quiet predicate the alert lanes and the poll clamp read. During a run
+  // everything is quiet whatever the readings say; after an end, the settle
+  // window holds while the aftermath still reads hot and lets go early when
+  // it does not. calibQuietFor judges; this only feeds it the widget's own
+  // last decoded readings.
+  function calibQuiet(): bool {
+    if (root.calibActive()) return true;
+    if (root.calibEndedAtMs <= 0) return false;
+    return Quattro.calibQuietFor(
+      { phase: "ended", endedAtMs: root.calibEndedAtMs },
+      Date.now(),
+      root.hasLastIoSomeAvg60 ? root.lastIoSomeAvg60 : null,
+      psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : null,
+    );
+  }
+
+  function startCalibration(): var {
+    if (root.calib !== null) return Quattro.CALIB.refused.running;
+    if (!root.isWriter) return Quattro.CALIB.refused.instance;
+    var plan = Quattro.calibPlan(Memory.parseMeminfo(meminfoText));
+    if (!plan.ok) return Quattro.CALIB.refused.headroom;
+    root.calib = {
+      phase: "preflight",
+      startedAtMs: 0,
+      endedAtMs: 0,
+      plan: plan,
+      samples: [],
+      records: [],
+      gradeCursor: -1,
+      grade: 0,
+      live: null,
+      proposal: null,
+      reason: "",
+      internal: false,
+      blocked: false,
+    };
+    var argvs = Quattro.calibPreflightArgvs();
+    calibPreflightProc.which = 0;
+    calibPreflightProc.command = argvs[0];
+    calibPreflightProc.running = true;
+    return null;
+  }
+
+  function calibRefuse(why): void {
+    root.calib = null;
+    root.calibRefusal = String(why === undefined || why === null ? "" : why);
+  }
+
+  // The helper sits beside this file wherever the shell installed it; the
+  // same anchoring the toast icons use.
+  readonly property string calibHelperPath: {
+    var url = Qt.resolvedUrl("calibrate.py").toString();
+    if (url.indexOf("file://") === 0) url = url.substring(7);
+    return decodeURIComponent(url);
+  }
+
+  function calibLaunch(): void {
+    if (root.calib === null || root.calib.phase !== "preflight") return;
+    calibRunProc.command = Quattro.calibUnitArgv(root.calibHelperPath, root.calib.plan);
+    calibRunProc.running = true;
+    root.calib = Object.assign({}, root.calib, {
+      phase: "running",
+      startedAtMs: Date.now(),
+    });
+    calibCapTimer.restart();
+    // Measurement begins now: re-arm the poll timers so the first sample of
+    // the curve lands inside the first seconds of the first grade.
+    root.startSample();
+  }
+
+  function cancelCalibration(): var {
+    if (!root.calibActive()) return null;
+    root.calibEndedAtMs = Date.now();
+    root.calib = null;
+    calibCapTimer.stop();
+    calibStopProc.command = Quattro.calibStopArgv();
+    calibStopProc.running = true;
+    return Quattro.CALIB.reasons.cancelled;
+  }
+
+  // The helper's stdout, one JSON line per grade start plus the done line.
+  // Parsed defensively: its words bin the samples, its grade label is what
+  // the panel shows; anything unreadable is ignored, never guessed into state.
+  function noteCalibLine(line): void {
+    var text = String(line === undefined || line === null ? "" : line).trim();
+    if (text === "") return;
+    if (root.calib === null || root.calib.phase !== "running") return;
+    var event = null;
+    try { event = JSON.parse(text); } catch (e) { return; }
+    if (event === null || typeof event !== "object" || event.event !== "grade") return;
+    if (typeof event.grade !== "number" || event.grade < 0) return;
+    root.calib = Object.assign({}, root.calib, {
+      gradeCursor: event.grade,
+      grade: event.grade,
+    });
+  }
+
+  // Which grade bin a sample belongs to. The helper's own grade events are the
+  // truth once the first lands (a slow-to-touch rig grades on the helper's
+  // clock); the planned clock fills the gap before it.
+  function calibBinFor(sample): int {
+    if (root.calib === null) return -1;
+    if (root.calib.gradeCursor >= 0) return root.calib.gradeCursor;
+    var elapsedMs = sample.atMs - root.calib.startedAtMs;
+    var planned = Quattro.gradeAt(root.calib.plan, elapsedMs / 1000);
+    return planned === null ? 0 : planned;
+  }
+
+  // One curve point per sample cycle, straight from the readings the cycle
+  // already took - no second measurement, no second reader. Then the abort
+  // conditions, per sample, first fire wins.
+  function noteCalibSample(): void {
+    if (root.calib === null || root.calib.phase !== "running") return;
+    var now = Date.now();
+    var meminfo = Memory.parseMeminfo(meminfoText);
+    var entry = {
+      atMs: now,
+      elapsedSec: root.calib.startedAtMs > 0 ? (now - root.calib.startedAtMs) / 1000 : 0,
+      bin: 0,
+      psiSome10: psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : null,
+      psiSome60: psi !== null && psi.some_avg60 !== undefined ? psi.some_avg60 : null,
+      swapUsedKb: ramReading !== null && ramReading.swapUsedKb !== undefined ? ramReading.swapUsedKb : null,
+      swapPct: ramReading !== null && ramReading.swapPct !== undefined ? ramReading.swapPct : null,
+      dirtyKb: meminfo.Dirty === undefined ? null : meminfo.Dirty,
+    };
+    entry.bin = root.calibBinFor(entry);
+    var samples = JSON.parse(JSON.stringify(root.calib.samples));
+    samples.push(entry);
+    var live = {
+      psiSome10: entry.psiSome10,
+      swapPct: entry.swapPct,
+      dirtyKb: entry.dirtyKb,
+    };
+    root.calib = Object.assign({}, root.calib, { samples: samples, live: live });
+    var abort = Quattro.calibAbortFor(samples, root.calib.plan);
+    if (abort.abort) root.calibInternalAbort(abort.why, abort.grade);
+  }
+
+  // The per-grade summaries the proposal reads, binned by the helper's own
+  // grade events.
+  function calibBuildRecords(): var {
+    if (root.calib === null) return [];
+    var grades = root.calib.plan.grades;
+    var byBin = {};
+    for (var i = 0; i < root.calib.samples.length; i++) {
+      var s = root.calib.samples[i];
+      if (!byBin[s.bin]) byBin[s.bin] = [];
+      byBin[s.bin].push(s);
+    }
+    var records = [];
+    var cum = 0;
+    for (var g = 0; g < grades.length; g++) {
+      cum += grades[g].mib;
+      records.push(Quattro.calibSampleRecord(g, cum, byBin[g] || []));
+    }
+    return records;
+  }
+
+  function calibStoredPairs(): var {
+    return {
+      psi: thresholds("ram"),
+      batt: gaugePairFor("batt"),
+    };
+  }
+
+  // A wall sign fired mid-run: the ladder stops, and the partial curve is real
+  // data - the proposal stands on it, with APPLY.
+  function calibInternalAbort(why, grade): void {
+    if (root.calib === null || root.calib.phase !== "running") return;
+    root.calibEndedAtMs = Date.now();
+    root.calib = Object.assign({}, root.calib, {
+      phase: "running",
+      reason: why === "psi-wall" ? Quattro.CALIB.reasons.psiWall(grade) : Quattro.CALIB.reasons.swapStorm(grade),
+      internal: true,
+    });
+    calibCapTimer.stop();
+    calibStopProc.command = Quattro.calibStopArgv();
+    calibStopProc.running = true;
+  }
+
+  // Watchdog or surprise death: nothing about where this machine's wall is,
+  // so the curve is dismissed, never proposed.
+  function calibExternalAbort(reason): void {
+    if (root.calib === null || root.calib.phase !== "running") return;
+    root.calibEndedAtMs = Date.now();
+    root.calib = Object.assign({}, root.calib, {
+      phase: "aborted",
+      reason: reason,
+      internal: false,
+    });
+    calibCapTimer.stop();
+    calibStopProc.command = Quattro.calibStopArgv();
+    calibStopProc.running = true;
+  }
+
+  // The unit client exited. A clean exit after a full ladder proposes; the
+  // helper's own exit 2 says the ceiling caught a grade; anything else without
+  // a stop request is an early death. A stop this widget itself asked for
+  // (cancel, abort, cap) has already moved the state, so its exit lands here
+  // as nothing.
+  function calibUnitExited(exitCode): void {
+    if (root.calib === null || root.calib.phase !== "running") return;
+    calibCapTimer.stop();
+    root.calibEndedAtMs = Date.now();
+    // A wall-sign abort (or a full clean ladder) proposes: the partial curve
+    // is real data. The helper's own exit 2 says its allocator refused - the
+    // ceiling caught it; anything else is an early death, honest either way
+    // about not knowing which.
+    var propose = root.calib.internal || exitCode === 0;
+    if (propose) {
+      var records = root.calibBuildRecords();
+      var proposal = Quattro.calibProposalFor(records, root.calib.plan, root.calibStoredPairs());
+      root.calib = Object.assign({}, root.calib, {
+        phase: "proposing",
+        records: records,
+        proposal: proposal,
+        blocked: proposal.blocked,
+      });
+      return;
+    }
+    root.calib = Object.assign({}, root.calib, {
+      phase: "aborted",
+      internal: false,
+      reason: exitCode === 2 ? Quattro.CALIB.reasons.ceiling : Quattro.CALIB.reasons.died(exitCode),
+    });
+  }
+
+  function dismissCalibration(): void {
+    root.calib = null;
+  }
+
+  // APPLY: the proposed values land through the exact paths a slider drag
+  // uses, so ordering rules and user-set criticals are enforced by the same
+  // code and a blocked apply refuses loudly. Returns a refusal string the dash
+  // shows, or null on success.
+  function applyCalibration(): var {
+    if (root.calib === null || root.calib.phase !== "proposing" || root.calib.proposal === null) return null;
+    if (root.calib.proposal.blocked) return Quattro.CALIB.propose.blockedNote;
+    var refused = setGaugePair("psi", "amber", root.calib.proposal.psi.amber);
+    if (refused !== null && refused !== undefined) return refused;
+    refused = setGaugePair("psi", "red", root.calib.proposal.psi.red);
+    if (refused !== null && refused !== undefined) return refused;
+    var stored = Quattro.calibBattToStored(root.calib.proposal.batt);
+    if (stored !== null) {
+      refused = setGaugePair("batt", "amber", stored.amber);
+      if (refused !== null && refused !== undefined) return refused;
+      refused = setGaugePair("batt", "red", stored.red);
+      if (refused !== null && refused !== undefined) return refused;
+    }
+    root.calib = null;
+    return null;
+  }
+
+  property string calibRefusal: ""
+
+  // The orphan sweep's answer: `active` with nobody watching means a previous
+  // generation died mid-run. Stop the unit; the next start is clean. Anything
+  // other than exactly `active` (inactive, failed, not found) is nothing.
+  function calibOrphanCheck(text): void {
+    if (String(text === undefined || text === null ? "" : text).trim() !== "active") return;
+    if (root.calibActive()) return;
+    console.warn("memory-monitor: stopping orphaned calibration unit");
+    calibStopProc.command = Quattro.calibStopArgv();
+    calibStopProc.running = true;
+  }
+
+  // ---------------------------------------------------------------------------
   // The baseline log. Absolute numbers, one row per sample, one writer per
   // sample, appended without a shell and rotated by a window, not a truncate.
   // Round 8 ruling 1 samples every 2 seconds while anything is amber or a window
@@ -1216,6 +1560,7 @@ BarWidget {
       guard: state.guard,
       arm: arm,
       alerts: pendingAlertEvents,
+      calib: root.calibQuiet(),
     });
     if (!Memory.logDue(record, root.lastLoggedRecord)) return;
     root.lastLoggedRecord = record;
@@ -1492,6 +1837,65 @@ BarWidget {
       root.ioPsiOk = exitCode === 0;
       if (exitCode !== 0) console.warn("memory-monitor: /proc/pressure/io unreadable, exit", exitCode)
       root.markDone("iopsi");
+    }
+  }
+
+  // --- Round 10: the calibration runner plumbing. Four processes and one
+  //     watchdog timer. The run process is a long-running CLIENT of the
+  //     transient unit (systemd-run --pipe --wait): its stdout streams the
+  //     helper's grade events and its exit carries the unit's. The stop
+  //     process is the one command cancel, the aborts and the orphan sweep
+  //     all run. The preflight chain is two typed argvs; either refusal is
+  //     honest, and nothing ever falls back to an unbounded child.
+  Process {
+    id: calibPreflightProc
+    property int which: 0
+    command: ["true"]
+    onExited: function(exitCode, exitStatus) {
+      if (root.calib === null || root.calib.phase !== "preflight") return;
+      var argvs = Quattro.calibPreflightArgvs();
+      if (exitCode !== 0) {
+        root.calibRefuse(this.which === 0 ? Quattro.CALIB.refused.systemd : Quattro.CALIB.refused.python);
+        return;
+      }
+      if (this.which === 0) {
+        this.which = 1;
+        this.command = argvs[1];
+        this.running = true;
+        return;
+      }
+      root.calibLaunch();
+    }
+  }
+
+  Process {
+    id: calibRunProc
+    command: []
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: (line) => root.noteCalibLine(line)
+    }
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("memory-monitor: calibrate:", this.text.trim())
+    }
+    onExited: function(exitCode, exitStatus) {
+      root.calibUnitExited(exitCode);
+    }
+  }
+
+  Process {
+    id: calibStopProc
+    command: []
+    stderr: StdioCollector {
+      onStreamFinished: if (this.text.trim() !== "") console.warn("memory-monitor: calib stop:", this.text.trim())
+    }
+  }
+
+  Process {
+    id: calibProbeProc
+    command: []
+    stdout: StdioCollector {
+      onStreamFinished: root.calibOrphanCheck(this.text)
     }
   }
 
@@ -1777,6 +2181,16 @@ BarWidget {
     interval: 8000
     repeat: false
     onTriggered: if (root.cycleRunning) root.abandonCycle("readers timed out")
+  }
+
+  // The widget's own hard cap on a calibration run, the second belt under the
+  // unit's RuntimeMaxSec. A run that is still active at the cap is a run whose
+  // helper wedged: stop it and say so. External aborts dismiss, never propose.
+  Timer {
+    id: calibCapTimer
+    interval: Quattro.CALIB_CAP_SEC * 1000
+    repeat: false
+    onTriggered: root.calibExternalAbort(Quattro.CALIB.reasons.cap)
   }
 
   Timer {

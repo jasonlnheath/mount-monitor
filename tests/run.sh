@@ -13,7 +13,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(dirname "$here")"
 
 command -v node > /dev/null || { echo "node is required to run the tests" >&2; exit 1; }
-node --test "$here"
+# Name the test files, not the directory: node's --test only learned directory
+# arguments in v23+, and older node (the v22 on a stock PATH) tries to load the
+# directory as a module and dies before running a single test.
+node --test "$here"/*.test.mjs
 
 # The skills the repo ships are what install.sh copies, so check they are real
 # skill directories and that the installer still parses.

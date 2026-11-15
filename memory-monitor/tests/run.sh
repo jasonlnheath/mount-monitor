@@ -19,7 +19,10 @@ plugin="$(dirname "$here")"
 repo="$(dirname "$plugin")"
 
 command -v node > /dev/null || { echo "node is required to run the tests" >&2; exit 1; }
-node --test "$here"
+# Name the test files, not the directory: node's --test only learned directory
+# arguments in v23+, and older node (the v22 on a stock PATH) tries to load the
+# directory as a module and dies before running a single test.
+node --test "$here"/*.test.mjs
 
 bash -n "$plugin/install.sh" || { echo "memory-monitor/install.sh syntax check FAILED" >&2; exit 1; }
 for skill_dir in "$plugin"/skills/*/; do

@@ -72,7 +72,7 @@ test("install.sh installs a self-contained plugin at the one level the shell sca
     // The widget imports memory.js and ringkit.js. A QML JS module cannot import
     // another JS module, so ringkit.js has to be copied beside its consumer or
     // the plugin loads as a bar widget that throws on its first decision.
-    for (const file of ["manifest.json", "MemoryMonitor.qml", "MemoryPanel.qml", "QuattroDash.qml", "QuattroSymbol.qml", "CardBar.qml", "memory.js", "quattro.js", "ringkit.js", "README.md"]) {
+    for (const file of ["manifest.json", "MemoryMonitor.qml", "MemoryPanel.qml", "QuattroDash.qml", "QuattroSymbol.qml", "CardBar.qml", "memory.js", "quattro.js", "calibrate.py", "ringkit.js", "README.md"]) {
       assert.equal(existsSync(path.join(dir, file)), true, `${file} is missing from the installed plugin`);
     }
 
