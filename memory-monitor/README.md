@@ -359,8 +359,9 @@ minutes, and a hardware change gets a re-tune, without anyone guessing.
 
 What a run does: about three minutes of graded MEMORY-ONLY pressure (four
 steps of roughly forty seconds, each step holding its allocation — the ladder
-climbs toward 80 percent of MemAvailable, capped at 8 GiB whatever the
-machine has) while the dash records this machine's own stall curve grade by
+climbs toward 80 percent of MemAvailable, capped at 80 percent of physical
+RAM so a roomy machine reaches the pressure zone) while the dash records this
+machine's own stall curve grade by
 category: memory PSI, swap used and its rate, dirty pages. No files are
 written anywhere; the stressor (`calibrate.py`, shipped beside the widget)
 allocates and touches anonymous memory and nothing else.

@@ -2090,7 +2090,7 @@ var SYMBOLS = {
 var CALIB_GRADE_SECS = 40;            // each grade holds about forty seconds
 var CALIB_GRADE_FRACS = [0.2, 0.4, 0.6, 0.8];
 var CALIB_GRADE_FLOOR_MIB = 256;      // cumulative-target floor
-var CALIB_GRADE_CAP_MIB = 8192;       // cumulative-target cap: the ladder never retains more
+var CALIB_CAP_PHYS_FRAC = 0.8;        // cumulative-target cap: this fraction of physical RAM
 var CALIB_MIN_HEADROOM_KB = 1024 * 1024;   // refuse to start under 1 GiB available
 var CALIB_CAP_SEC = 180;              // the widget's own hard watchdog
 var CALIB_UNIT_RUNTIME_SEC = 200;     // systemd's cap: bounds an orphaned unit even if the shell dies
@@ -2120,6 +2120,10 @@ var CALIB_UNIT = "quattrodash-calib";
 // 0.8x MemAvailable - never the 2.0x a naive per-grade fraction would plan,
 // and never a cgroup ceiling left at or above physical RAM, which is not a
 // wall but an invitation to the global oom killer.
+//
+// The cumulative-target cap is 80 percent of PHYSICAL RAM, not a fixed number:
+// a fixed 8 GiB cap made a roomy rig top out below reclaim, so the PSI and
+// swap meters never moved and the run measured nothing but a quiet machine.
 function calibPlan(meminfo) {
   const info = meminfo || {};
   const totalKb = asNumber(info.MemTotal);
@@ -2130,7 +2134,10 @@ function calibPlan(meminfo) {
   }
   const availMib = Math.floor(availKb / 1024);
   const physicalMib = Math.floor((totalKb - CALIB_CEILING_RESERVE_KB) / 1024);
-  const targetCap = Math.min(CALIB_GRADE_CAP_MIB, physicalMib - CALIB_CEILING_MARGIN_MIB);
+  const targetCap = Math.min(
+    Math.floor(CALIB_CAP_PHYS_FRAC * physicalMib),
+    physicalMib - CALIB_CEILING_MARGIN_MIB,
+  );
   if (targetCap < CALIB_GRADE_FLOOR_MIB) {
     return { ok: false, why: "headroom" };
   }

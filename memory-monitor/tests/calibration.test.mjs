@@ -29,6 +29,17 @@ const RIG = {
   SwapFree: 4 * MIB - 2 * 1024 * 1024,
 };
 
+// The target cap mirrors calibPlan's own rails: 80 percent of physical RAM
+// (MemTotal minus the ceiling reserve), still clamped below the ceiling's
+// margin. Keep this the twin of the plan builder so a drift fails here.
+const physicalMibOf = (meminfo) =>
+  Math.floor((meminfo.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024);
+const targetCapOf = (meminfo) =>
+  Math.min(
+    Math.floor(Quattro.CALIB_CAP_PHYS_FRAC * physicalMibOf(meminfo)),
+    physicalMibOf(meminfo) - Quattro.CALIB_CEILING_MARGIN_MIB,
+  );
+
 // ---------------------------------------------------------------------------
 // The plan builder. Grades are DELTAS between clamped cumulative targets, so
 // the ladder retains and tops out at 0.8x available - never the 2.0x a naive
@@ -45,7 +56,7 @@ test("calibPlan builds four bounded grades as deltas of cumulative targets", () 
 
   // Cumulative targets: clamp(round(frac * availMiB), floor, cap), fracs .2/.4/.6/.8.
   const availMib = 8192;
-  const clamps = (v) => Math.max(Quattro.CALIB_GRADE_FLOOR_MIB, Math.min(Quattro.CALIB_GRADE_CAP_MIB, Math.round(v)));
+  const clamps = (v) => Math.max(Quattro.CALIB_GRADE_FLOOR_MIB, Math.min(targetCapOf(RIG), Math.round(v)));
   const targets = [0.2, 0.4, 0.6, 0.8].map((f) => clamps(f * availMib));
   let prev = 0;
   plan.grades.forEach((g, i) => {
@@ -76,11 +87,14 @@ test("calibPlan clamps tiny and huge machines into honest ladders", () => {
   }
   assert.equal(small.totalMib, prev);
 
-  // Huge: the cap binds, so the ladder never retains more than 8 GiB whatever
-  // the machine has, and the ceiling still sits under physical RAM.
-  const huge = Quattro.calibPlan({ MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB });
+  // Huge: the cap scales with the machine, so the ladder tops at 0.8x what
+  // is actually free - well past the old fixed 8 GiB - and never above 80
+  // percent of physical RAM; the ceiling still sits under physical RAM.
+  const hugeMachine = { MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB };
+  const huge = Quattro.calibPlan(hugeMachine);
   assert.equal(huge.ok, true);
-  assert.equal(huge.totalMib <= Quattro.CALIB_GRADE_CAP_MIB, true, "the cumulative top never exceeds the per-target cap");
+  assert.ok(huge.totalMib > 8192, "a huge machine's ladder scales past the old fixed 8 GiB cap");
+  assert.ok(huge.totalMib <= targetCapOf(hugeMachine), "the cumulative top never exceeds the physical cap");
 
   // A well-populated small machine: 0.8x MemAvailable would climb past the
   // ceiling physical RAM allows (3120 MiB of ladder under a 3072 MiB MemoryMax),
@@ -94,19 +108,58 @@ test("calibPlan clamps tiny and huge machines into honest ladders", () => {
       Math.floor((populated.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024) - Quattro.CALIB_CEILING_MARGIN_MIB,
     "the ladder tops out with its margin to spare under the physical bound",
   );
+  assert.equal(
+    idleSmall.totalMib,
+    targetCapOf(populated),
+    "here 80 percent of physical RAM is the binding rail, and the ladder lands on it",
+  );
 
   // The ceiling is the kernel wall: above the ladder, below physical RAM.
   for (const { meminfo, plan } of [
     { meminfo: RIG, plan: Quattro.calibPlan(RIG) },
     { meminfo: { MemTotal: 4 * MIB, MemAvailable: 1500 * 1024, SwapTotal: 0, SwapFree: 0 }, plan: small },
-    { meminfo: { MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB }, plan: huge },
+    { meminfo: hugeMachine, plan: huge },
     { meminfo: populated, plan: idleSmall },
   ]) {
-    const physicalMib = Math.floor((meminfo.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024);
+    const physicalMib = physicalMibOf(meminfo);
     assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
     assert.ok(plan.ceilingMib <= physicalMib, "the ceiling never reaches physical RAM minus the reserve");
     assert.equal(plan.ceilingMib, Math.min(plan.totalMib + Quattro.CALIB_CEILING_MARGIN_MIB, physicalMib));
   }
+});
+
+test("calibPlan lets a roomy machine climb past the old 8 GiB cap into the pressure zone", () => {
+  // The captain's rig: 64 GiB physical, 50 GiB free. The fixed 8 GiB cap made
+  // this climb mathematically unable to reach reclaim - no PSI, no swap, no
+  // calibration - so the cap must scale with the machine instead.
+  const roomy = { MemTotal: 64 * MIB, MemAvailable: 50 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB };
+  const plan = Quattro.calibPlan(roomy);
+  assert.equal(plan.ok, true);
+  assert.ok(plan.totalMib > 8192, "the top cumulative target clears the old fixed 8 GiB cap");
+  assert.equal(plan.totalMib, 40960, "the climb tops at 0.8x the 50 GiB actually free");
+  assert.ok(plan.totalMib <= targetCapOf(roomy), "the ladder never retains more than the physical cap");
+  const physicalMib = physicalMibOf(roomy);
+  assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
+  assert.ok(plan.ceilingMib < physicalMib, "the ceiling stays below physical RAM minus the reserve");
+  assert.equal(plan.ceilingMib, Math.min(plan.totalMib + Quattro.CALIB_CEILING_MARGIN_MIB, physicalMib));
+});
+
+test("calibPlan keeps a busy machine's ladder exactly as it was before the cap change", () => {
+  // The November 13 runs: a loaded rig with about 2 GiB free planned a ladder
+  // topping at 1638 MiB, and a 10 GiB-free machine planned one topping at the
+  // old 8192 MiB cap. Neither rail moves under the physical cap: on both, 80
+  // percent of physical RAM sits above the top target 0.8x available plans.
+  const busy = { MemTotal: 16 * MIB, MemAvailable: 2048 * 1024, SwapTotal: 4 * MIB, SwapFree: 4 * MIB };
+  const plan = Quattro.calibPlan(busy);
+  assert.equal(plan.ok, true);
+  same(plan.grades.map((g) => g.mib), [410, 409, 410, 409], "the 1638-MiB-style ladder is unchanged");
+  assert.equal(plan.totalMib, 1638);
+
+  const tenFree = { MemTotal: 16 * MIB, MemAvailable: 10 * MIB, SwapTotal: 4 * MIB, SwapFree: 4 * MIB };
+  const ten = Quattro.calibPlan(tenFree);
+  assert.equal(ten.ok, true);
+  same(ten.grades.map((g) => g.mib), [2048, 2048, 2048, 2048], "the 10 GiB-free ladder still tops at the same 8192 MiB");
+  assert.equal(ten.totalMib, 8192);
 });
 
 test("calibPlan bounds the swap exposure at half the reserve", () => {
