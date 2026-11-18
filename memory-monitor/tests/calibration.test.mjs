@@ -269,17 +269,23 @@ test("gradeAt walks the planned ladder by seconds", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The abort conditions. Sustained walls abort; single spikes do not; dirty
-// pages are recorded curve data and never a wall sign. Samples are the
-// widget's own 2 s readings, oldest first: { atMs, elapsedSec, psiSome10,
-// swapUsedKb, dirtyKb }.
+// The abort conditions. A sustained wall aborts: THREE consecutive avg10
+// readings at or over the wall class, or TWO consecutive avg60 readings at
+// or over the sustained bar. One- and two-sample transients are fault-in
+// reclaim (the live probe caught a transient micro-storm touch the class
+// twice inside a grade the deeper ladders never approached), so they land
+// in the record's psiSome10Max and never abort. Dirty pages and the swap
+// rate are recorded curve data and never abort triggers - on zram-backed
+// swap a high rate is compression throughput, not danger; PSI is the
+// universal danger signal. Samples are the widget's own 2 s readings, oldest
+// first: { atMs, elapsedSec, psiSome10, psiSome60, swapUsedKb, dirtyKb }.
 // ---------------------------------------------------------------------------
 
-function sample(elapsedSec, psiSome10, swapUsedKb, dirtyKb) {
-  return { atMs: elapsedSec * 1000, elapsedSec, psiSome10, swapUsedKb, dirtyKb };
+function sample(elapsedSec, psiSome10, swapUsedKb, dirtyKb, psiSome60) {
+  return { atMs: elapsedSec * 1000, elapsedSec, psiSome10, swapUsedKb, dirtyKb, psiSome60: psiSome60 === undefined ? null : psiSome60 };
 }
 
-test("a sustained PSI wall aborts, a single spike does not", () => {
+test("a spike pair at the wall class records, never aborts", () => {
   const plan = Quattro.calibPlan(RIG);
   const calm = [
     sample(4, 2, 100 * 1024, 50 * 1024),
@@ -295,42 +301,116 @@ test("a sustained PSI wall aborts, a single spike does not", () => {
   ];
   same(Quattro.calibAbortFor(spike, plan), { abort: false, why: null, grade: null }, "one sample over the wall is a spike, not a wall");
 
+  // The probe's transient: two consecutive readings at the class, gone by the
+  // next. That is fault-in reclaim, recorded in psiSome10Max, not a wall.
+  const pair = [
+    sample(4, 10, 100 * 1024, 50 * 1024),
+    sample(6, 44, 100 * 1024, 50 * 1024),
+    sample(8, 46, 100 * 1024, 50 * 1024),
+  ];
+  same(Quattro.calibAbortFor(pair, plan), { abort: false, why: null, grade: null },
+    "two samples over the wall is a transient, not a wall");
+});
+
+test("three consecutive samples at the wall class abort", () => {
+  const plan = Quattro.calibPlan(RIG);
   const wall = [
     sample(4, 10, 100 * 1024, 50 * 1024),
     sample(6, 44, 100 * 1024, 50 * 1024),
     sample(8, 46, 100 * 1024, 50 * 1024),
+    sample(10, 41, 100 * 1024, 50 * 1024),
   ];
   const abort = Quattro.calibAbortFor(wall, plan);
   assert.equal(abort.abort, true);
   assert.equal(abort.why, "psi-wall");
   assert.equal(abort.grade, 0, "the abort names the grade it happened in");
+
+  // A dip between the readings breaks the run: not three consecutive.
+  const dipped = [
+    sample(4, 10, 100 * 1024, 50 * 1024),
+    sample(6, 44, 100 * 1024, 50 * 1024),
+    sample(8, 12, 100 * 1024, 50 * 1024),
+    sample(10, 46, 100 * 1024, 50 * 1024),
+    sample(12, 41, 100 * 1024, 50 * 1024),
+  ];
+  same(Quattro.calibAbortFor(dipped, plan), { abort: false, why: null, grade: null },
+    "the three readings must be consecutive");
 });
 
-test("a swap storm aborts at the wall rate, not below it", () => {
+test("two consecutive avg60 readings at the sustained bar abort", () => {
+  const plan = Quattro.calibPlan(RIG);
+  // avg10 never neared the class; avg60 holds the sustained pressure.
+  const sustained = [
+    sample(4, 3, 100 * 1024, 50 * 1024, 2),
+    sample(6, 6, 100 * 1024, 50 * 1024, 26),
+    sample(8, 6, 100 * 1024, 50 * 1024, 27),
+  ];
+  const abort = Quattro.calibAbortFor(sustained, plan);
+  assert.equal(abort.abort, true, "the sustained bar is the wall too");
+  assert.equal(abort.why, "psi-wall");
+
+  // One reading over, then back under: weather, not a wall.
+  const weather = [
+    sample(4, 3, 100 * 1024, 50 * 1024, 2),
+    sample(6, 6, 100 * 1024, 50 * 1024, 26),
+    sample(8, 6, 100 * 1024, 50 * 1024, 10),
+  ];
+  same(Quattro.calibAbortFor(weather, plan), { abort: false, why: null, grade: null },
+    "the two avg60 readings must be consecutive");
+
+  // A cycle that failed to read avg60 breaks the pair: missing data aborts
+  // nothing.
+  const blind = [
+    sample(4, 3, 100 * 1024, 50 * 1024, 26),
+    sample(6, 6, 100 * 1024, 50 * 1024, null),
+  ];
+  same(Quattro.calibAbortFor(blind, plan), { abort: false, why: null, grade: null });
+});
+
+test("a swap storm never aborts: the rate is recorded, never a trigger", () => {
   const plan = Quattro.calibPlan(RIG);
   const wall = Quattro.CALIB_SWAP_WALL_KB_PER_MIN;
 
-  // Exactly at the wall rate over a 2 s gap: rate = jump / (2/60) min.
+  // Exactly at the old storm rate over a 2 s gap: measured, not aborted. On
+  // zram-backed swap a high rate is compression throughput, not danger.
   const jumpAtWall = Math.round(wall * (2 / 60));
   const at = [
     sample(4, 10, 1000 * 1024, 0),
     sample(6, 10, 1000 * 1024 + jumpAtWall, 0),
   ];
-  assert.equal(Quattro.calibAbortFor(at, plan).why, "swap-storm");
+  same(Quattro.calibAbortFor(at, plan), { abort: false, why: null, grade: null },
+    "the probe measured 16 GB/min of swap-in at PSI 1.4: throughput, not a wall");
 
-  // A whisker below is heavy but not a storm: measured, not aborted.
-  const below = [
+  // Far beyond it too: PSI is the universal danger signal.
+  const beyond = [
     sample(4, 10, 1000 * 1024, 0),
-    sample(6, 10, 1000 * 1024 + jumpAtWall - 1, 0),
+    sample(6, 10, 1000 * 1024 + 4 * MIB, 0),
   ];
-  same(Quattro.calibAbortFor(below, plan), { abort: false, why: null, grade: null });
+  same(Quattro.calibAbortFor(beyond, plan), { abort: false, why: null, grade: null });
+});
 
-  // A wide sample gap is a gap, not a rate: the widget did not take that pair.
-  const gapped = [
-    sample(4, 10, 1000 * 1024, 0),
-    sample(30, 10, 1000 * 1024 + 4 * MIB, 0),
+test("a storm-grade still records its rate and still marks the wall for the proposal", () => {
+  const plan = Quattro.calibPlan(RIG);
+  const jump = Math.round(Quattro.CALIB_SWAP_WALL_KB_PER_MIN * (2 / 60));
+  const gradeSamples = [
+    { atMs: 0, psiSome10: 1.5, psiSome60: 0.4, swapUsedKb: 100 * 1024, swapPct: 20, dirtyKb: 0 },
+    { atMs: 2000, psiSome10: 1.4, psiSome60: 0.5, swapUsedKb: 100 * 1024 + jump, swapPct: 30, dirtyKb: 0 },
   ];
-  same(Quattro.calibAbortFor(gapped, plan), { abort: false, why: null, grade: null });
+  const rec = Quattro.calibSampleRecord(3, 4000, gradeSamples);
+  assert.ok(rec.swapKbPerMinMax >= Quattro.CALIB_SWAP_WALL_KB_PER_MIN, "the rate is recorded, not thrown away");
+  const records = [
+    record(0, 0.5, 1.0, 5, 0),
+    record(1, 2.0, 3.0, 20, 0),
+    record(2, 4.0, 6.0, 40, 0),
+    record(3, rec.psiSome10Avg, rec.psiSome10Max, rec.swapUsedPctEnd, rec.swapKbPerMinMax),
+  ];
+  const proposal = Quattro.calibProposalFor(records, plan, {
+    psi: { amber: 15, red: 28, critical: null },
+    batt: { amber: 30, red: 14 },
+  });
+  assert.equal(proposal.wallGrade, 3, "the rate still feeds wall-grade detection for band math");
+  assert.equal(proposal.psi.amber, 14, "the class-floor anchor from the first spec holds");
+  assert.equal(proposal.psi.red, 26);
 });
 
 test("dirty pages never abort a run", () => {

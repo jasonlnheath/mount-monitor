@@ -377,11 +377,17 @@ seconds. The stressor never runs unbounded: if `systemd-run` or `python3` is
 missing, calibration refuses. Under 1 GiB of MemAvailable it refuses too —
 close something and try again.
 
-The run auto-aborts the moment wall signs appear: memory PSI sustained at the
-wall class, or swap climbing at storm rate (twice the climb telltale's own
-line). A wall abort stops the ladder early and still proposes — the partial
-curve is real data. The watchdog cap, a surprise exit and a cancel dismiss
-instead: they say nothing about where this machine's wall is.
+The run auto-aborts on memory PSI sustained at the wall class: three
+consecutive `some avg10` readings at or over 40, or two consecutive
+`some avg60` readings at or over 25. One- and two-sample transients are
+fault-in reclaim, not a wall — they land in the record's MAX column and
+never abort. The swap rate never aborts either: on zram-backed swap a
+high rate is compression throughput, not danger (the rig probe measured
+16 GB/min of swap-in at PSI 1.4), so the rate is recorded curve data
+that still feeds the proposal's wall detection. A wall abort stops the
+ladder early and still proposes — the partial curve is real data. The
+watchdog cap, a surprise exit and a cancel dismiss instead: they say
+nothing about where this machine's wall is.
 
 While a run is live — and through the settle window after it — the dash holds
 the alert lanes a deliberate stress could trip: the KERNEL and DISK codes stay

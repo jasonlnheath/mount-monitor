@@ -2100,6 +2100,7 @@ var CALIB_STOP_GRACE_SEC = 5;         // TimeoutStopSec: cancel lands in seconds
 var CALIB_CEILING_MARGIN_MIB = 512;   // MemoryMax sits this far above the ladder's top
 var CALIB_CEILING_RESERVE_KB = 1024 * 1024;  // and never within 1 GiB of physical RAM
 var CALIB_PSI_WALL = 40.0;            // the wall class: sustained some avg10 at or over this
+var CALIB_PSI_AVG60_WALL = 25.0;      // the sustained bar: two consecutive some avg60 readings at or over this are the wall too
 var CALIB_KNEE_PSI = 5.0;             // the knee: the first grade with measurable sustained stalls
 var CALIB_SWAP_WALL_KB_PER_MIN = 3 * 1024 * 1024;  // twice the round-8 climb telltale's own rate
 var CALIB_SWAP_MAX_GAP_MS = 20000;    // a wider sample gap is a gap, not a rate
@@ -2256,9 +2257,17 @@ function calibPreflightArgvs() {
 //
 // Evaluated per 2 s sample during a run; first fire wins and the widget stops
 // the unit immediately. Samples are the widget's own readings, oldest first:
-// { atMs, elapsedSec, psiSome10, swapUsedKb, dirtyKb }. Dirty pages are
-// RECORDED, never an abort trigger - the stressor writes no files, so dirty
-// movement is kernel reclaim doing its job under the ladder.
+// { atMs, elapsedSec, psiSome10, psiSome60, swapUsedKb, dirtyKb }.
+// The psi wall needs THREE consecutive avg10 readings at or over the wall
+// class, or TWO consecutive avg60 readings at or over the sustained bar: a
+// one- or two-sample transient is fault-in reclaim (the live probe caught a
+// micro-storm touch the class twice inside a grade whose deeper ladders never
+// saw sustained PSI), it lands in the record's psiSome10Max and never aborts.
+// Dirty pages and the swap rate are RECORDED, never abort triggers - on
+// zram-backed swap a high rate is compression throughput, not danger (the
+// probe measured 16 GB/min of swap-in at PSI 1.4), and PSI is the universal
+// danger signal; the rate still feeds the proposal's wall-grade detection
+// and band math.
 function calibAbortFor(samples, plan) {
   const none = { abort: false, why: null, grade: null };
   const list = [];
@@ -2271,16 +2280,20 @@ function calibAbortFor(samples, plan) {
   if (list.length < 2 || !plan) return none;
   const a = list[list.length - 1];
   const b = list[list.length - 2];
+  const c = list.length >= 3 ? list[list.length - 3] : null;
   const grade = gradeAt(plan, a.elapsedSec);
-  if (asNumber(a.psiSome10) >= CALIB_PSI_WALL && asNumber(b.psiSome10) >= CALIB_PSI_WALL) {
+  if (
+    c !== null &&
+    asNumber(a.psiSome10) >= CALIB_PSI_WALL &&
+    asNumber(b.psiSome10) >= CALIB_PSI_WALL &&
+    asNumber(c.psiSome10) >= CALIB_PSI_WALL
+  ) {
     return { abort: true, why: "psi-wall", grade: grade };
   }
-  const gap = asNumber(a.atMs) - asNumber(b.atMs);
-  if (gap > 0 && gap <= CALIB_SWAP_MAX_GAP_MS) {
-    const rate = (asNumber(a.swapUsedKb) - asNumber(b.swapUsedKb)) / (gap / 60000);
-    if (rate >= CALIB_SWAP_WALL_KB_PER_MIN) {
-      return { abort: true, why: "swap-storm", grade: grade };
-    }
+  const a60 = asNumber(a.psiSome60);
+  const b60 = asNumber(b.psiSome60);
+  if (a60 !== null && b60 !== null && a60 >= CALIB_PSI_AVG60_WALL && b60 >= CALIB_PSI_AVG60_WALL) {
+    return { abort: true, why: "psi-wall", grade: grade };
   }
   return none;
 }
@@ -2404,9 +2417,11 @@ function calibProposalFor(records, plan, stored) {
   const storedPsi = stored && stored.psi && typeof stored.psi === "object" ? stored.psi : {};
   const clampPct = (v) => Math.max(GAUGE_PCT_MIN, Math.min(GAUGE_PCT_MAX, v));
 
-  // Wall and knee grades. The MAX column counts as a wall sign because an
-  // internal abort fires on the raw samples: two spikes at 40+ can average
-  // below the bar inside their grade, and that wall is real.
+  // Wall and knee grades. The MAX column counts as a wall sign: a spike or a
+  // swap rate can mark where the machine gave out without a sustained abort
+  // (transients never abort, and on zram the rate is compression throughput),
+  // and the anchor below floors such a wall at the wall class so the
+  // transient cannot talk the pair below it.
   let wallGrade = null;
   let kneeGrade = null;
   for (let i = 0; i < list.length; i++) {
@@ -2561,10 +2576,6 @@ var CALIB = {
     psiWall: function (grade) {
       const g = asNumber(grade) === null ? "" : " in grade " + (grade + 1);
       return "Memory stalls hit the wall class" + g + ". Stopped early. The wall it found is real: review the proposal.";
-    },
-    swapStorm: function (grade) {
-      const g = asNumber(grade) === null ? "" : " in grade " + (grade + 1);
-      return "Swap climbed at storm rate" + g + ". Stopped early. The wall it found is real: review the proposal.";
     },
     ceiling: "The stressor hit its own memory ceiling. Stopped early.",
     died: function (code) {
