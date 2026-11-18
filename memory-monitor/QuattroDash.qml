@@ -2049,7 +2049,7 @@ Panel {
   property bool toastBad: false
 
   function showToast(t, bad) {
-    // Round 10's calibration copy (refusals, cancelled, applied, kept) speaks
+    // Round 10's calibration copy (refusals, cancelled) speaks
     // plain sentences, while the round-9 dispatch toasts carry mark/code/text
     // objects. Both must render: a bare string is the whole toast text, with
     // the same check/cross mark the object path picks by severity.
