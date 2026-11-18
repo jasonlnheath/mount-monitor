@@ -166,13 +166,13 @@ test("calibPlan caps every grade where the helper's own parser does", () => {
   // A very large machine: 256 GiB physical, 200 GiB free. The eight steps plan
   // ~25408 MiB each - still inside the helper's bound - but the law is the
   // same either way: the builder and the helper enforce one per-grade bound,
-  // so no plan the builder ships can die at the helper's parse.
+  // so no plan the builder ships can die at the helper's parse. The helper
+  // probes further down pin the helper's enforced bound to this same constant
+  // by exit code, from both sides of the line.
   const big = { MemTotal: 256 * MIB, MemAvailable: 200 * MIB, SwapTotal: 32 * MIB, SwapFree: 32 * MIB };
   const plan = Quattro.calibPlan(big);
   assert.equal(plan.ok, true);
-  const bound = Number(readFileSync(HELPER, "utf8").match(/MAX_GRADE_MIB\s*=\s*(\d+)/)[1]);
-  assert.equal(Quattro.CALIB_GRADE_MAX_MIB, bound,
-    "the builder and the helper enforce one per-grade bound, so no plan dies at parse");
+  const bound = Quattro.CALIB_GRADE_MAX_MIB;
   assert.ok(plan.grades.length > 0, "the ladder still climbs");
   for (const g of plan.grades) {
     assert.ok(g.mib >= 1 && g.mib <= bound, `a grade of ${g.mib} MiB stays inside the helper's 1..${bound}`);
@@ -193,11 +193,14 @@ test("calibPlan splits an oversized step into sub-grades instead of shrinking th
   const big = { MemTotal: 384 * MIB, MemAvailable: 320 * MIB, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
   const plan = Quattro.calibPlan(big);
   assert.equal(plan.ok, true);
-  const src = readFileSync(HELPER, "utf8");
-  const bound = Number(src.match(/MAX_GRADE_MIB\s*=\s*(\d+)/)[1]);
-  const maxGrades = Number(src.match(/MAX_GRADES\s*=\s*(\d+)/)[1]);
+  // The most grades a conforming plan can carry: every step splits into at
+  // most CALIB_GRADE_SECS sub-grades, because each holds at least one second
+  // of its step's window. The helper probes further down pin the helper's
+  // enforced count law to exactly this budget, from both sides of the line.
+  const gradeBudget = Quattro.CALIB_GRADE_STEPS * Quattro.CALIB_GRADE_SECS;
+  const bound = Quattro.CALIB_GRADE_MAX_MIB;
   assert.ok(plan.grades.length > Quattro.CALIB_GRADE_STEPS, "the oversized steps split into more grades");
-  assert.ok(plan.grades.length <= maxGrades, "the split ladder stays inside the helper's grade-count law");
+  assert.ok(plan.grades.length <= gradeBudget, "the split ladder stays inside the helper's grade-count law");
   assert.equal(plan.totalMib, 313753, "the physical rails bind the top, and splitting never lowers it");
   for (const g of plan.grades) {
     assert.ok(g.mib >= 1 && g.mib <= bound, `a split grade of ${g.mib} MiB stays inside the helper's 1..${bound}`);
@@ -711,6 +714,146 @@ test("the helper really allocates the plan it is given, and writes only stdout",
   });
   assert.equal(bad.status, 3, "a bad plan exits 3 and never allocates");
   assert.equal(bad.stdout.trim(), "", "a refused plan never printed progress");
+});
+
+// The test box's own free window, in MiB. The boundary probes below hand the
+// real helper a plan whose first grade is tens of GiB: the box must be able to
+// take that allocation, or the probe skips - the same law the live tests above
+// already follow for python3, systemd-run and qml6.
+function boxAvailMib() {
+  const m = readFileSync("/proc/meminfo", "utf8").match(/^MemAvailable:\s+(\d+) kB$/m);
+  return m ? Math.floor(Number(m[1]) / 1024) : null;
+}
+
+// The most grades a conforming plan can carry: eight steps, each splitting into
+// at most twenty one-second sub-grades, because no sub-grade holds less than
+// one second of its step's twenty.
+const gradeBudget = () => Quattro.CALIB_GRADE_STEPS * Quattro.CALIB_GRADE_SECS;
+
+test("the helper refuses one grade over either plan law before allocating", () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // Over the per-grade bound: one MiB past CALIB_GRADE_MAX_MIB.
+  const overMib = spawnSync("python3", [HELPER, "--plan",
+    JSON.stringify([{ mib: Quattro.CALIB_GRADE_MAX_MIB + 1, secs: 1 }])], {
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(overMib.status, 3, "a grade one MiB over the bound exits 3");
+  assert.equal(overMib.stdout.trim(), "", "a refused plan never printed progress");
+
+  // Over the grade-count law: one one-MiB grade past the builder's own budget.
+  const overCount = spawnSync("python3", [HELPER, "--plan",
+    JSON.stringify(Array.from({ length: gradeBudget() + 1 }, () => ({ mib: 1, secs: 1 })))], {
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(overCount.status, 3, "a plan one grade over the count law exits 3");
+  assert.equal(overCount.stdout.trim(), "", "a refused plan never printed progress");
+});
+
+test("the helper accepts plans exactly at both plan-law bounds", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // Exactly at the per-grade bound the plan runs for real and finishes. The
+  // grade holds the bound's full MiB for a second, so the probe skips on a box
+  // without the window to hold it.
+  const avail = boxAvailMib();
+  if (avail === null || avail < Quattro.CALIB_GRADE_MAX_MIB + 2048) {
+    return test.skip("this box cannot hold a grade at the per-grade bound");
+  }
+  const atBound = spawnSync("python3", [HELPER, "--plan",
+    JSON.stringify([{ mib: Quattro.CALIB_GRADE_MAX_MIB, secs: 1 }])], {
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  assert.equal(atBound.status, 0, `the helper finishes a grade exactly at the bound (stderr: ${atBound.stderr})`);
+  const events = atBound.stdout.split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l));
+  assert.equal(events.length, 2, "one grade line, plus the done line");
+  assert.equal(events[0].event, "grade");
+  assert.equal(events[0].mib, Quattro.CALIB_GRADE_MAX_MIB);
+  assert.equal(events[1].event, "done");
+  assert.equal(events[1].cumMib, Quattro.CALIB_GRADE_MAX_MIB);
+
+  // Exactly at the count law the plan is accepted too. Every grade holds at
+  // least one second, so a full budget-sized run is minutes of clock: the
+  // first grade line is the handshake that the parse accepted the count - a
+  // refused plan prints nothing and exits 3 - and SIGTERM ends the probe.
+  const child = spawn("python3", [HELPER, "--plan",
+    JSON.stringify(Array.from({ length: gradeBudget() }, () => ({ mib: 1, secs: 1 })))], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let childErr = "";
+  child.stderr.on("data", (chunk) => { childErr += chunk; });
+  const first = await new Promise((resolve, reject) => {
+    child.stdout.once("data", (chunk) => resolve(JSON.parse(chunk.toString().split("\n")[0])));
+    child.once("exit", (code) => reject(new Error(`the helper exited ${code} before its first grade line (stderr: ${childErr.trim()})`)));
+  });
+  assert.equal(first.event, "grade");
+  assert.equal(first.grade, 0);
+  assert.equal(first.mib, 1, "the budget-sized plan started grading: the count law accepted it");
+  const outcome = await new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.kill("SIGTERM");
+    setTimeout(() => resolve(null), 5000);
+  });
+  assert.ok(outcome, "the probe's run dies rather than hanging");
+  assert.equal(outcome.signal, "SIGTERM");
+});
+
+test("the split plan calibPlan ships on a huge rig clears the real helper's parse", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // The huge-rig boundary: 1.5 TiB physical, mostly idle. The physical rail
+  // binds the top at 1257472 MiB, every one of the eight steps splits into
+  // five sub-grades, and the plan ships 40 grades - the exact shape that must
+  // clear the helper's grade-count law whole, not die at its parse.
+  const titan = { MemTotal: 1610612736, MemAvailable: 1300000 * 1024, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
+  const plan = Quattro.calibPlan(titan);
+  assert.equal(plan.ok, true);
+  assert.ok(plan.grades.length > Quattro.CALIB_GRADE_STEPS, "the huge rig's oversized steps split");
+  assert.ok(plan.grades.length <= gradeBudget(), "the split plan stays inside the grade-count law");
+  for (const g of plan.grades) {
+    assert.ok(g.mib >= 1 && g.mib <= Quattro.CALIB_GRADE_MAX_MIB, `a split grade of ${g.mib} MiB stays inside the helper's 1..${Quattro.CALIB_GRADE_MAX_MIB}`);
+    assert.ok(g.secs >= 1 && g.secs <= 60, `a split grade's ${g.secs} s stays inside the helper's 1..60`);
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0), "splitting moves no memory");
+
+  // The first grade is tens of GiB: the box must be able to take its
+  // allocation for the handshake, or the probe skips.
+  const avail = boxAvailMib();
+  if (avail === null || avail < plan.grades[0].mib + 2048) {
+    return test.skip("this box cannot hold the boundary plan's first grade");
+  }
+  const child = spawn("python3", [HELPER, "--plan", JSON.stringify(plan.grades)], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let childErr = "";
+  child.stderr.on("data", (chunk) => { childErr += chunk; });
+  const first = await new Promise((resolve, reject) => {
+    child.stdout.once("data", (chunk) => resolve(JSON.parse(chunk.toString().split("\n")[0])));
+    child.once("exit", (code) => reject(new Error(`the helper exited ${code} on calibPlan's own payload (stderr: ${childErr.trim()})`)));
+  });
+  assert.equal(first.event, "grade", "the real helper accepted the split plan and started grading it");
+  assert.equal(first.grade, 0);
+  assert.equal(first.mib, plan.grades[0].mib);
+  assert.equal(first.cumMib, plan.grades[0].mib);
+  const outcome = await new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.kill("SIGTERM");
+    setTimeout(() => resolve(null), 5000);
+  });
+  assert.ok(outcome, "the probe's run dies rather than hanging");
+  assert.equal(outcome.signal, "SIGTERM");
 });
 
 test("the runner-to-helper seam composes: the unit argv's own --plan payload runs in the real helper", async () => {
