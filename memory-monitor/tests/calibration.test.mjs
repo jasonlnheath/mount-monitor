@@ -459,6 +459,86 @@ test("the proposal scales the PSI pair down from the observed wall", () => {
   assert.equal(proposal.blocked, false);
 });
 
+// ---------------------------------------------------------------------------
+// The wall anchor. A spike wall (a MAX at 40+ over a grade average still low)
+// and a swap-rate wall both anchor the PSI pair on the wall class, 40: scaling
+// 0.35 / 0.65 off a low grade average proposes a pair tighter than the fleet
+// floor, the false-alert invite the proposal's own doctrine forbids. A rig
+// that sustained above the class keeps its observed average.
+// ---------------------------------------------------------------------------
+
+test("a spike wall anchors the pair on the wall class, not the grade average", () => {
+  const plan = Quattro.calibPlan(RIG);
+  const spiked = [
+    record(0, 0.5, 1.0, 5, 0),
+    record(1, 2.0, 3.0, 20, 0),
+    record(2, 6.0, 8.0, 45, 0),
+    record(3, 3.1, 44.0, 78, 0), // one ugly 10-second stall window: MAX crossed 40, the 20-second grade averaged 3.1
+  ];
+  const proposal = Quattro.calibProposalFor(spiked, plan, {
+    psi: { amber: 15, red: 28, critical: null },
+    batt: { amber: 30, red: 14 },
+  });
+  assert.equal(proposal.wallGrade, 3, "the MAX spike is a wall");
+  assert.equal(proposal.confidence, "wall");
+  assert.equal(proposal.psi.amber, 14, "amber is 0.35 of the 40 wall class, not of the 3.1 grade average");
+  assert.equal(proposal.psi.red, 26, "red is 0.65 of the 40 wall class");
+  assert.notDeepEqual([proposal.psi.amber, proposal.psi.red], [1, 2],
+    "the grade average must never anchor the pair: 1/2 is the false-alert invite the doctrine forbids");
+});
+
+test("a sustained wall keeps the average-anchored pair", () => {
+  const plan = Quattro.calibPlan(RIG);
+  const sustained = [
+    record(0, 0.5, 1.0, 5, 0),
+    record(1, 2.0, 3.0, 20, 0),
+    record(2, 8.0, 10.0, 45, 0),
+    record(3, 52.0, 55.0, 88, 0), // a monster rig: the whole grade sat above the wall class
+  ];
+  const proposal = Quattro.calibProposalFor(sustained, plan, {
+    psi: { amber: 15, red: 28, critical: null },
+    batt: { amber: 30, red: 14 },
+  });
+  assert.equal(proposal.wallGrade, 3);
+  assert.equal(proposal.psi.amber, Math.round(0.35 * 52), "the observed average is the anchor when it clears the class");
+  assert.equal(proposal.psi.red, Math.round(0.65 * 52));
+});
+
+test("a swap-rate wall anchors the pair on the wall class too", () => {
+  const plan = Quattro.calibPlan(RIG);
+  const swapWall = [
+    record(0, 0.5, 1.0, 5, 0),
+    record(1, 2.0, 3.0, 20, 0),
+    record(2, 6.0, 8.0, 45, 0),
+    record(3, 4.0, 6.0, 78, 4 * 1024 * 1024), // the wall fired on the swap rate; PSI never neared the class
+  ];
+  const proposal = Quattro.calibProposalFor(swapWall, plan, {
+    psi: { amber: 15, red: 28, critical: null },
+    batt: { amber: 30, red: 14 },
+  });
+  assert.equal(proposal.wallGrade, 3, "the swap rate is a wall");
+  assert.equal(proposal.psi.amber, 14, "the class floor holds even though PSI stayed low");
+  assert.equal(proposal.psi.red, 26);
+});
+
+test("no wall still floors at the fleet pair, exactly", () => {
+  const plan = Quattro.calibPlan(RIG);
+  const strong = [
+    record(0, 0.5, 1.0, 5, 0),
+    record(1, 1.0, 2.0, 12, 0),
+    record(2, 2.0, 2.5, 18, 0),
+    record(3, 3.0, 3.5, 24, 0),
+  ];
+  const proposal = Quattro.calibProposalFor(strong, plan, {
+    psi: { amber: 15, red: 28, critical: null },
+    batt: { amber: 30, red: 14 },
+  });
+  assert.equal(proposal.wallGrade, null);
+  assert.equal(proposal.confidence, "floor");
+  assert.equal(proposal.psi.amber, 15, "GAUGE_DEFAULTS.psi amber, unchanged");
+  assert.equal(proposal.psi.red, 28, "GAUGE_DEFAULTS.psi red, unchanged");
+});
+
 test("the reserve pair scales between knee and wall, never at the raw wall", () => {
   const plan = Quattro.calibPlan(RIG);
   const proposal = Quattro.calibProposalFor(QUIET_CURVE, plan, {

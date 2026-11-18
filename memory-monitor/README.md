@@ -393,7 +393,9 @@ can exclude the excursion. The gauges keep showing the honest live bands
 throughout; nothing is hidden, only the paging is held.
 
 The proposal screen shows the measured curve beside the proposed numbers: RAM
-amber/red as fractions (0.35 / 0.65) of the wall's sustained PSI, the swap
+amber/red as fractions (0.35 / 0.65) of the anchored wall — the greater of
+the wall grade's sustained average and the 40 PSI wall class, so a spike-found
+or swap-rate wall cannot talk the pair below the class — the swap
 reserve pair scaled between the knee and the wall in percent used, and — when
 the machine shrugged off the whole ladder — the fleet defaults as the honest
 floor. APPLY and KEEP DEFAULTS are equal citizens; APPLY writes through the

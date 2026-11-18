@@ -2104,7 +2104,7 @@ var CALIB_KNEE_PSI = 5.0;             // the knee: the first grade with measurab
 var CALIB_SWAP_WALL_KB_PER_MIN = 3 * 1024 * 1024;  // twice the round-8 climb telltale's own rate
 var CALIB_SWAP_MAX_GAP_MS = 20000;    // a wider sample gap is a gap, not a rate
 var CALIB_SWAP_MOVE_PCT = 10;         // a reserve that moved less says nothing about itself
-var CALIB_PSI_AMBER_FRAC = 0.35;      // amber = 35 percent of the wall's sustained PSI
+var CALIB_PSI_AMBER_FRAC = 0.35;      // amber = 35 percent of the anchored wall (class or observed)
 var CALIB_PSI_RED_FRAC = 0.65;        // red = 65 percent of it
 var CALIB_SETTLE_MS = 90 * 1000;      // the aftermath window after a run ends
 // The stall floor the settle window reads PSI against. Mirrors memory.js's
@@ -2384,8 +2384,12 @@ function calibSampleRecord(grade, targetMib, samples) {
 
 // --- the proposal -----------------------------------------------------------
 //
-// PSI scales down from the observed wall (0.35 / 0.65 of the wall's sustained
-// PSI); the reserve pair scales between knee and wall, never at the raw wall
+// PSI anchors on the greater of the observed wall average and the wall class
+// (0.35 / 0.65 of that anchor): a MAX spike or a swap rate can be the sign
+// that found the wall while the grade's own average still sits far below the
+// class, and scaling off that average would propose a pair tighter than the
+// fleet floor, the false-alert invite this block never ships. The reserve
+// pair scales between knee and wall, never at the raw wall
 // (a red at the observed 97 percent used would only fire at the wall the run
 // just proved dangerous). No wall found floors at the fleet defaults: the
 // machine proved stronger than the probe, so the fleet numbers are the honest
@@ -2427,7 +2431,14 @@ function calibProposalFor(records, plan, stored) {
   let confidence;
   if (wallGrade !== null) {
     const wallAvg = asNumber(list[wallGrade].psiSome10Avg);
-    const base = wallAvg === null ? GAUGE_DEFAULTS.psi.amber : wallAvg;
+    // The pair anchors on the greater of the wall grade's average and the wall
+    // class itself: a MAX spike (one ugly 10-second stall window) or a swap
+    // rate can be the sign that found the wall while the grade's 20-second
+    // average sits far below the class, and scaling off that average would
+    // propose amber and red tighter than the fleet floor, the false-alert
+    // invite the doctrine forbids. A rig that sustained above the class
+    // keeps its own average.
+    const base = Math.max(wallAvg === null ? CALIB_PSI_WALL : wallAvg, CALIB_PSI_WALL);
     psiAmber = clampPct(Math.round(base * CALIB_PSI_AMBER_FRAC));
     psiRed = clampPct(Math.round(base * CALIB_PSI_RED_FRAC));
     confidence = "wall";
