@@ -2090,6 +2090,7 @@ var SYMBOLS = {
 var CALIB_GRADE_SECS = 40;            // each grade holds about forty seconds
 var CALIB_GRADE_FRACS = [0.2, 0.4, 0.6, 0.8];
 var CALIB_GRADE_FLOOR_MIB = 256;      // cumulative-target floor
+var CALIB_GRADE_MAX_MIB = 32768;      // per-grade delta cap: the helper's own MAX_GRADE_MIB
 var CALIB_CAP_PHYS_FRAC = 0.8;        // cumulative-target cap: this fraction of physical RAM
 var CALIB_MIN_HEADROOM_KB = 1024 * 1024;   // refuse to start under 1 GiB available
 var CALIB_CAP_SEC = 180;              // the widget's own hard watchdog
@@ -2119,7 +2120,9 @@ var CALIB_UNIT = "quattrodash-calib";
 // DELTAS between clamped cumulative targets and the top of the climb is
 // 0.8x MemAvailable - never the 2.0x a naive per-grade fraction would plan,
 // and never a cgroup ceiling left at or above physical RAM, which is not a
-// wall but an invitation to the global oom killer.
+// wall but an invitation to the global oom killer. No single grade exceeds
+// CALIB_GRADE_MAX_MIB, the helper's own per-grade bound, so the plan built
+// here is always a plan the helper's parser accepts.
 //
 // The cumulative-target cap is 80 percent of PHYSICAL RAM, not a fixed number:
 // a fixed 8 GiB cap made a roomy rig top out below reclaim, so the PSI and
@@ -2147,8 +2150,8 @@ function calibPlan(meminfo) {
   const grades = [];
   for (const frac of CALIB_GRADE_FRACS) {
     const target = clampTarget(frac * availMib);
-    const delta = target - prev;
-    prev = target;
+    const delta = Math.min(target - prev, CALIB_GRADE_MAX_MIB);
+    prev += delta;
     if (delta > 0) grades.push({ mib: delta, secs: CALIB_GRADE_SECS });
   }
   const totalMib = prev;

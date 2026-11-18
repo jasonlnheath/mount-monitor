@@ -144,6 +144,28 @@ test("calibPlan lets a roomy machine climb past the old 8 GiB cap into the press
   assert.equal(plan.ceilingMib, Math.min(plan.totalMib + Quattro.CALIB_CEILING_MARGIN_MIB, physicalMib));
 });
 
+test("calibPlan caps every grade where the helper's own parser does", () => {
+  // A very large machine: 256 GiB physical, 200 GiB free. The raw fractions
+  // plan 40960-MiB grades, but the helper refuses any grade over its own
+  // MAX_GRADE_MIB before allocating a page (exit 3, bad plan), so the builder
+  // caps each delta at that same bound: the plan that ships is a plan that runs.
+  const big = { MemTotal: 256 * MIB, MemAvailable: 200 * MIB, SwapTotal: 32 * MIB, SwapFree: 32 * MIB };
+  const plan = Quattro.calibPlan(big);
+  assert.equal(plan.ok, true);
+  const bound = Number(readFileSync(HELPER, "utf8").match(/MAX_GRADE_MIB\s*=\s*(\d+)/)[1]);
+  assert.equal(Quattro.CALIB_GRADE_MAX_MIB, bound,
+    "the builder and the helper enforce one per-grade bound, so no plan dies at parse");
+  assert.ok(plan.grades.length > 0, "the capped ladder still climbs");
+  for (const g of plan.grades) {
+    assert.ok(g.mib >= 1 && g.mib <= bound, `a grade of ${g.mib} MiB stays inside the helper's 1..${bound}`);
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0),
+    "totalMib is the ladder actually held, never a phantom unclamped target");
+  const physicalMib = physicalMibOf(big);
+  assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
+  assert.ok(plan.ceilingMib <= physicalMib, "the ceiling never reaches physical RAM minus the reserve");
+});
+
 test("calibPlan keeps a busy machine's ladder exactly as it was before the cap change", () => {
   // The November 13 runs: a loaded rig with about 2 GiB free planned a ladder
   // topping at 1638 MiB, and a 10 GiB-free machine planned one topping at the
