@@ -1409,7 +1409,7 @@ BarWidget {
     };
     root.calib = Object.assign({}, root.calib, { samples: samples, live: live });
     var abort = Quattro.calibAbortFor(samples, root.calib.plan);
-    if (abort.abort) root.calibInternalAbort(abort.why, abort.grade);
+    if (abort.abort) root.calibInternalAbort(abort.grade, abort.why);
   }
 
   // The per-grade summaries the proposal reads, binned by the helper's own
@@ -1440,13 +1440,16 @@ BarWidget {
   }
 
   // A wall sign fired mid-run: the ladder stops, and the partial curve is real
-  // data - the proposal stands on it, with APPLY.
-  function calibInternalAbort(why, grade): void {
+  // data - the proposal stands on it, with APPLY. The two stop kinds speak
+  // their own sentences: the class was hit, or pressure held at the bar.
+  function calibInternalAbort(grade, why): void {
     if (root.calib === null || root.calib.phase !== "running") return;
     root.calibEndedAtMs = Date.now();
     root.calib = Object.assign({}, root.calib, {
       phase: "running",
-      reason: why === "psi-wall" ? Quattro.CALIB.reasons.psiWall(grade) : Quattro.CALIB.reasons.swapStorm(grade),
+      reason: why === "psi-sustained"
+        ? Quattro.CALIB.reasons.psiSustained(grade)
+        : Quattro.CALIB.reasons.psiWall(grade),
       internal: true,
     });
     calibCapTimer.stop();

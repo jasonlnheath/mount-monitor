@@ -2100,11 +2100,13 @@ var CALIB_STOP_GRACE_SEC = 5;         // TimeoutStopSec: cancel lands in seconds
 var CALIB_CEILING_MARGIN_MIB = 512;   // MemoryMax sits this far above the ladder's top
 var CALIB_CEILING_RESERVE_KB = 1024 * 1024;  // and never within 1 GiB of physical RAM
 var CALIB_PSI_WALL = 40.0;            // the wall class: sustained some avg10 at or over this
+var CALIB_PSI_AVG60_WALL = 25.0;      // the sustained bar: two consecutive some avg60 readings at or over this are the wall too
+var CALIB_PSI_AVG60_WINDOW_SECS = 60.0;  // the kernel's own avg60 window length: the sustained bar arms only once the run is this old
 var CALIB_KNEE_PSI = 5.0;             // the knee: the first grade with measurable sustained stalls
 var CALIB_SWAP_WALL_KB_PER_MIN = 3 * 1024 * 1024;  // twice the round-8 climb telltale's own rate
 var CALIB_SWAP_MAX_GAP_MS = 20000;    // a wider sample gap is a gap, not a rate
 var CALIB_SWAP_MOVE_PCT = 10;         // a reserve that moved less says nothing about itself
-var CALIB_PSI_AMBER_FRAC = 0.35;      // amber = 35 percent of the wall's sustained PSI
+var CALIB_PSI_AMBER_FRAC = 0.35;      // amber = 35 percent of the anchored wall (class or observed)
 var CALIB_PSI_RED_FRAC = 0.65;        // red = 65 percent of it
 var CALIB_SETTLE_MS = 90 * 1000;      // the aftermath window after a run ends
 // The stall floor the settle window reads PSI against. Mirrors memory.js's
@@ -2256,9 +2258,23 @@ function calibPreflightArgvs() {
 //
 // Evaluated per 2 s sample during a run; first fire wins and the widget stops
 // the unit immediately. Samples are the widget's own readings, oldest first:
-// { atMs, elapsedSec, psiSome10, swapUsedKb, dirtyKb }. Dirty pages are
-// RECORDED, never an abort trigger - the stressor writes no files, so dirty
-// movement is kernel reclaim doing its job under the ladder.
+// { atMs, elapsedSec, psiSome10, psiSome60, swapUsedKb, dirtyKb }.
+// The psi wall needs THREE consecutive avg10 readings at or over the wall
+// class, or TWO consecutive avg60 readings at or over the sustained bar: a
+// one- or two-sample transient is fault-in reclaim (the live probe caught a
+// micro-storm touch the class twice inside a grade whose deeper ladders never
+// saw sustained PSI), it lands in the record's psiSome10Max and never aborts.
+// Each bar stops the run under its own kind (psi-wall, psi-sustained), and the
+// proposal's wall scan recognizes both signs, so a stop always has a wall to
+// show. The avg60 bar arms only once the latest sample is
+// CALIB_PSI_AVG60_WINDOW_SECS into the run: avg60 is the kernel's own 60 s
+// window, so a younger run's readings still carry the minute before the run,
+// and pre-run PSI carryover never stops a fresh run.
+// Dirty pages and the swap rate are RECORDED, never abort triggers - on
+// zram-backed swap a high rate is compression throughput, not danger (the
+// probe measured 16 GB/min of swap-in at PSI 1.4), and PSI is the universal
+// danger signal; the rate still feeds the proposal's wall-grade detection
+// and band math.
 function calibAbortFor(samples, plan) {
   const none = { abort: false, why: null, grade: null };
   const list = [];
@@ -2271,16 +2287,24 @@ function calibAbortFor(samples, plan) {
   if (list.length < 2 || !plan) return none;
   const a = list[list.length - 1];
   const b = list[list.length - 2];
+  const c = list.length >= 3 ? list[list.length - 3] : null;
   const grade = gradeAt(plan, a.elapsedSec);
-  if (asNumber(a.psiSome10) >= CALIB_PSI_WALL && asNumber(b.psiSome10) >= CALIB_PSI_WALL) {
+  if (
+    c !== null &&
+    asNumber(a.psiSome10) >= CALIB_PSI_WALL &&
+    asNumber(b.psiSome10) >= CALIB_PSI_WALL &&
+    asNumber(c.psiSome10) >= CALIB_PSI_WALL
+  ) {
     return { abort: true, why: "psi-wall", grade: grade };
   }
-  const gap = asNumber(a.atMs) - asNumber(b.atMs);
-  if (gap > 0 && gap <= CALIB_SWAP_MAX_GAP_MS) {
-    const rate = (asNumber(a.swapUsedKb) - asNumber(b.swapUsedKb)) / (gap / 60000);
-    if (rate >= CALIB_SWAP_WALL_KB_PER_MIN) {
-      return { abort: true, why: "swap-storm", grade: grade };
-    }
+  const a60 = asNumber(a.psiSome60);
+  const b60 = asNumber(b.psiSome60);
+  const runAgeSec = asNumber(a.elapsedSec);
+  if (
+    runAgeSec !== null && runAgeSec >= CALIB_PSI_AVG60_WINDOW_SECS &&
+    a60 !== null && b60 !== null && a60 >= CALIB_PSI_AVG60_WALL && b60 >= CALIB_PSI_AVG60_WALL
+  ) {
+    return { abort: true, why: "psi-sustained", grade: grade };
   }
   return none;
 }
@@ -2336,8 +2360,8 @@ function sysCodesQuiet(bar, kernel, gpu, layer, disk, quiet) {
 //
 // The widget summarizes its own 2 s samples per grade through this, binned by
 // the helper's grade events where they have arrived. `samples` is that grade's
-// slice of { atMs, psiSome10, psiSome60, swapPct, dirtyKb }; nulls are
-// readings the cycle failed to take and are skipped, never read as zero.
+// slice of { atMs, elapsedSec, psiSome10, psiSome60, swapPct, dirtyKb }; nulls
+// are readings the cycle failed to take and are skipped, never read as zero.
 function calibSampleRecord(grade, targetMib, samples) {
   const list = [];
   const raw = asList(samples) || [];
@@ -2354,9 +2378,21 @@ function calibSampleRecord(grade, targetMib, samples) {
   };
   const mean = (arr) => (arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length);
   const psi10 = nums("psiSome10");
-  const psi60 = nums("psiSome60");
   const dirty = nums("dirtyKb");
   const pct = nums("swapPct");
+  // The sustained sign: the highest avg60 the grade took at post-gate run
+  // age. A reading younger than CALIB_PSI_AVG60_WINDOW_SECS still carries the
+  // minute before the run, so it never marks a young grade as the wall; the
+  // highest, not the last, because samples keep landing for the seconds a
+  // stop takes while the kernel's own 60 s window is already decaying.
+  let sustained60 = null;
+  for (const s of list) {
+    const age = asNumber(s.elapsedSec);
+    const v = asNumber(s.psiSome60);
+    if (age !== null && age >= CALIB_PSI_AVG60_WINDOW_SECS && v !== null) {
+      if (sustained60 === null || v > sustained60) sustained60 = v;
+    }
+  }
   // The biggest swap rate between two consecutive samples inside the grade.
   let rateMax = null;
   for (let i = 1; i < list.length; i++) {
@@ -2375,7 +2411,7 @@ function calibSampleRecord(grade, targetMib, samples) {
     targetMib: targetMib,
     psiSome10Avg: mean(psi10),
     psiSome10Max: psi10.length === 0 ? null : Math.max.apply(null, psi10),
-    psiSome60Last: psi60.length === 0 ? null : psi60[psi60.length - 1],
+    psiSome60Max: sustained60,
     swapUsedPctEnd: pct.length === 0 ? null : pct[pct.length - 1],
     swapKbPerMinMax: rateMax,
     dirtyKbAvg: mean(dirty),
@@ -2384,8 +2420,12 @@ function calibSampleRecord(grade, targetMib, samples) {
 
 // --- the proposal -----------------------------------------------------------
 //
-// PSI scales down from the observed wall (0.35 / 0.65 of the wall's sustained
-// PSI); the reserve pair scales between knee and wall, never at the raw wall
+// PSI anchors on the greater of the observed wall average and the wall class
+// (0.35 / 0.65 of that anchor): a MAX spike or a swap rate can be the sign
+// that found the wall while the grade's own average still sits far below the
+// class, and scaling off that average would propose a pair tighter than the
+// fleet floor, the false-alert invite this block never ships. The reserve
+// pair scales between knee and wall, never at the raw wall
 // (a red at the observed 97 percent used would only fire at the wall the run
 // just proved dangerous). No wall found floors at the fleet defaults: the
 // machine proved stronger than the probe, so the fleet numbers are the honest
@@ -2400,19 +2440,26 @@ function calibProposalFor(records, plan, stored) {
   const storedPsi = stored && stored.psi && typeof stored.psi === "object" ? stored.psi : {};
   const clampPct = (v) => Math.max(GAUGE_PCT_MIN, Math.min(GAUGE_PCT_MAX, v));
 
-  // Wall and knee grades. The MAX column counts as a wall sign because an
-  // internal abort fires on the raw samples: two spikes at 40+ can average
-  // below the bar inside their grade, and that wall is real.
+  // Wall and knee grades. The MAX column counts as a wall sign: a spike or a
+  // swap rate can mark where the machine gave out without a sustained abort
+  // (transients never abort, and on zram the rate is compression throughput),
+  // and the anchor below floors such a wall at the wall class so the
+  // transient cannot talk the pair below it. The sustained avg60 sign is read
+  // the same way, so a stop the sustained bar fires always has a wall here
+  // too; its record keeps pre-gate readings out, so carryover never marks a
+  // young grade.
   let wallGrade = null;
   let kneeGrade = null;
   for (let i = 0; i < list.length; i++) {
     const psiMax = asNumber(list[i].psiSome10Max);
     const psiAvg = asNumber(list[i].psiSome10Avg);
     const rate = asNumber(list[i].swapKbPerMinMax);
+    const sustained = asNumber(list[i].psiSome60Max);
     if (
       wallGrade === null &&
       ((psiMax !== null && psiMax >= CALIB_PSI_WALL) ||
-        (rate !== null && rate >= CALIB_SWAP_WALL_KB_PER_MIN))
+        (rate !== null && rate >= CALIB_SWAP_WALL_KB_PER_MIN) ||
+        (sustained !== null && sustained >= CALIB_PSI_AVG60_WALL))
     ) {
       wallGrade = i;
     }
@@ -2427,7 +2474,14 @@ function calibProposalFor(records, plan, stored) {
   let confidence;
   if (wallGrade !== null) {
     const wallAvg = asNumber(list[wallGrade].psiSome10Avg);
-    const base = wallAvg === null ? GAUGE_DEFAULTS.psi.amber : wallAvg;
+    // The pair anchors on the greater of the wall grade's average and the wall
+    // class itself: a MAX spike (one ugly 10-second stall window), a swap
+    // rate, or a sustained avg60 reading can be the sign that found the wall
+    // while the grade's 20-second average sits far below the class, and
+    // scaling off that average would propose amber and red tighter than the
+    // fleet floor, the false-alert invite the doctrine forbids. A rig that
+    // sustained above the class keeps its own average.
+    const base = Math.max(wallAvg === null ? CALIB_PSI_WALL : wallAvg, CALIB_PSI_WALL);
     psiAmber = clampPct(Math.round(base * CALIB_PSI_AMBER_FRAC));
     psiRed = clampPct(Math.round(base * CALIB_PSI_RED_FRAC));
     confidence = "wall";
@@ -2551,9 +2605,9 @@ var CALIB = {
       const g = asNumber(grade) === null ? "" : " in grade " + (grade + 1);
       return "Memory stalls hit the wall class" + g + ". Stopped early. The wall it found is real: review the proposal.";
     },
-    swapStorm: function (grade) {
+    psiSustained: function (grade) {
       const g = asNumber(grade) === null ? "" : " in grade " + (grade + 1);
-      return "Swap climbed at storm rate" + g + ". Stopped early. The wall it found is real: review the proposal.";
+      return "Memory pressure held at the sustained bar" + g + ". Stopped early. The wall it found is real: review the proposal.";
     },
     ceiling: "The stressor hit its own memory ceiling. Stopped early.",
     died: function (code) {
