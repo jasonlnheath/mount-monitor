@@ -893,9 +893,11 @@ test("calibSampleRecord summarizes a grade's samples, skipping failed readings",
 
 test("the curve and proposal line builders speak used percent and obey the language rule", () => {
   const line = Quattro.calibCurveLine({ grade: 2, targetMib: 1638, psiSome10Avg: 6.25, swapUsedPctEnd: 45.2, dirtyKbAvg: 102400 });
-  assert.ok(line.includes("GRADE 3"), line);
+  assert.ok(line.includes("G3"), line);
   assert.ok(line.includes("PSI 6.3"), line);
   assert.ok(line.includes("SWAP 45%"), line);
+  assert.ok(line.includes("DIRTY 100 MB"), line);
+  assert.ok(line.includes("TGT 1638 MiB"), line);
   const lines = Quattro.calibProposalLines(
     { psi: { amber: 16, red: 29 }, batt: { amber: 60, red: 73 }, confidence: "wall" },
     { psi: { amber: 15, red: 28 }, batt: { amber: 30, red: 14 } },
@@ -910,6 +912,31 @@ test("the curve and proposal line builders speak used percent and obey the langu
   assert.ok(untouched.some((l) => l.includes("NO WALL FOUND")));
   const bad = lines.concat([line, untouched.join(" ")]).filter((t) => /[\u2014\u2013;]/.test(t));
   same(bad, [], `em dashes, en dashes and semicolons are banned: ${JSON.stringify(bad)}`);
+});
+
+test("the curve line fits the card: tight columns, no right-edge clipping", () => {
+  // The captain's 2026-11-18 ruling: the matrix clipped its DIRTY column on
+  // the rig. The builder owns the fit, so the contract pins the exact row and
+  // the budget it must stay under.
+  const line = Quattro.calibCurveLine({ grade: 2, targetMib: 1638, psiSome10Avg: 6.25, swapUsedPctEnd: 45.2, dirtyKbAvg: 102400 });
+  assert.equal(line, "G3  TGT 1638 MiB  PSI 6.3  SWAP 45%  DIRTY 100 MB");
+
+  // The budget: the card is contentWidth space(380) with popup padding
+  // space(14) each side, and spacing scales with the font the caption renders
+  // at (10 design px, mono advance 0.6 em = 6 design px a character), so the
+  // fit is scale-invariant: floor((380 - 28) / 6) = 58 characters.
+  const BUDGET = 58;
+
+  // The widest row the captain's 16 GiB rig can emit: started with all RAM
+  // free, the ladder tops at 80 percent of physical (12288 MiB), PSI and the
+  // reserve max out, and dirty tracks the target grade for grade.
+  const worst16 = Quattro.calibCurveLine({ grade: 7, targetMib: 12288, psiSome10Avg: 100, swapUsedPctEnd: 100, dirtyKbAvg: 12288 * 1024 });
+  assert.equal(worst16, "G8  TGT 12288 MiB  PSI 100.0  SWAP 100%  DIRTY 12288 MB");
+  assert.ok(worst16.length <= BUDGET, `${worst16.length} chars: ${worst16}`);
+
+  // A six-digit target (a 1 TiB box's 80 percent) still fits.
+  const huge = Quattro.calibCurveLine({ grade: 7, targetMib: 999999, psiSome10Avg: 100, swapUsedPctEnd: 100, dirtyKbAvg: 999999 * 1024 });
+  assert.ok(huge.length <= BUDGET, `${huge.length} chars: ${huge}`);
 });
 
 test("the refusal copy names every honest way a start can refuse", () => {

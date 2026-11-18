@@ -2593,10 +2593,6 @@ var CALIB = {
     note: "Measured from this run. Apply writes the numbers like any setting, keep changes nothing.",
     blockedNote: "Your critical line blocks the proposed red. Raise it or set it aside, then run again.",
   },
-  done: {
-    applied: "Applied. Your gauges use the measured lines.",
-    kept: "Kept your settings. Nothing changed.",
-  },
   // Internal walls propose with APPLY: the partial curve is real data. External
   // aborts are DISMISS only: a watchdog or a cancel says nothing about where
   // this machine's wall is.
@@ -2630,6 +2626,14 @@ var CALIB = {
 // The proposal screen shows the raw curve beside the proposed numbers, so the
 // captain sees WHY. These are the line builders, here so the dash renders and
 // decides nothing; the language rule holds on their output too.
+//
+// The curve line is a five-column matrix row inside the popup card, so it is
+// built tight on purpose (the captain's 2026-11-18 ruling: the matrix clipped
+// its DIRTY column on the rig). The card's inner width fits about 58 mono
+// caption characters (contentWidth space(380) minus popup padding space(14)
+// twice, at 6 design px a character), and the widest row the builder can emit
+// stays inside that budget: two-space columns, G<n> for the grade, TGT for the
+// target. Full words would overflow; no column is dropped instead.
 function calibCurveLine(record) {
   const r = record || {};
   const grade = asNumber(r.grade) === null ? 0 : r.grade;
@@ -2638,13 +2642,13 @@ function calibCurveLine(record) {
   const swap = asNumber(r.swapUsedPctEnd);
   const dirty = asNumber(r.dirtyKbAvg);
   const parts = [
-    "GRADE " + (grade + 1),
-    "TARGET " + (target === null ? "?" : target) + " MiB",
+    "G" + (grade + 1),
+    "TGT " + (target === null ? "?" : target) + " MiB",
     "PSI " + (psi === null ? "-" : psi.toFixed(1)),
     "SWAP " + (swap === null ? "-" : Math.round(swap) + "%"),
     "DIRTY " + (dirty === null ? "-" : Math.round(dirty / 1024) + " MB"),
   ];
-  return parts.join("   ");
+  return parts.join("  ");
 }
 
 function calibProposalLines(proposal, stored) {
