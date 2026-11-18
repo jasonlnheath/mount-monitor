@@ -357,11 +357,13 @@ CALIBRATION** — the twin function. Reset says use the fleet's numbers; this
 says measure this machine. It exists so a new install gets honest bands in
 minutes, and a hardware change gets a re-tune, without anyone guessing.
 
-What a run does: about three minutes of graded MEMORY-ONLY pressure (four
-steps of roughly forty seconds, each step holding its allocation — the ladder
-climbs toward 80 percent of MemAvailable, capped at 80 percent of physical
-RAM so a roomy machine reaches the pressure zone) while the dash records this
-machine's own stall curve grade by
+What a run does: about three minutes of graded MEMORY-ONLY pressure (eight
+steps of roughly twenty seconds, each step holding its allocation — the ladder
+climbs until the machine holds everything but a small reserve, about 1.5 GiB,
+of its free memory, so the run ends where reclaim and swap actually engage on
+any machine with headroom; a step larger than the stressor's own per-grade
+bound splits into sub-grades rather than shrinking the climb) while the dash
+records this machine's own stall curve grade by
 category: memory PSI, swap used and its rate, dirty pages. No files are
 written anywhere; the stressor (`calibrate.py`, shipped beside the widget)
 allocates and touches anonymous memory and nothing else.
