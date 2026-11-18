@@ -90,6 +90,10 @@ already alerting on — so one drive produces one toast, not two.
   per-process breakdown `nvidia-smi` can see, and an explicit **desktop /
   compositor (unattributed)** row — clamped at zero — because `nvidia-smi` cannot
   see the compositor, and the desktop is what the red band exists to protect.
+  The per-process breakdown also surfaces on the dash: hovering the VRAM
+  instrument shows the top three processes by MiB held (percent of total VRAM
+  beside each), an "Other" remainder row, and the Total row matching the dial;
+  click pins the popover, click again releases.
   First card only, and the detail window says so.
 
 ## Alerts
@@ -206,7 +210,15 @@ defaults, the coolant light follows the VRAM floor until its sliders are
 touched, and the row moves them all live.
 Hovering the instrument reads the standard free format, and hovering the reserve
 tells the same story the values popup's SWAP row tells: `Now: 61% Free
-(39/64 GiB).` Under the cluster, the
+(39/64 GiB).` When the VRAM sample carries a per-process list (nvidia-smi saw
+current compute processes), the VRAM hover becomes the per-process grid
+instead: the top three processes by MiB held, sorted descending, each with its
+percent of total VRAM, then one remainder row labelled "Other", then a Total
+row matching the dial's own used number. A click pins the popover so it stays
+up while you read it (a fresh sample refreshes it in place, so the grid and the
+dial never disagree); a second click releases it to the ordinary hover rules.
+With no per-process list - an idle GPU or no NVML - the hover keeps the plain
+free-percent line, never a broken or empty grid. Under the cluster, the
 codes area: ONE column under one check-engine head, always most critical at
 the top, rows stretched across the full card so each code carries its reading
 and its status. The doctrine is round 2's: RAM monitoring is PRESSURE + SWAP

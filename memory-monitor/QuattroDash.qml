@@ -107,6 +107,8 @@ Panel {
   readonly property var swaps: mon("swaps", null)
   readonly property var rootDrive: mon("rootReading", null)
   readonly property var vram: mon("vramReading", null)
+  // The open popover re-renders in place on every fresh sample.
+  onVramChanged: root.refreshTip()
   readonly property var devices: mon("hdDevices", [])
   readonly property var hdRows: mon("hdRows", [])
 
@@ -335,7 +337,7 @@ Panel {
   // edge the popup takes - open or close - the section is folded first, so an
   // expanded settings block can never survive a screen exit and mis-render on
   // the way back.
-  onOpenedChanged: if (typeof content !== "undefined" && content) content.settingsOpen = false
+  onOpenedChanged: { if (typeof content !== "undefined" && content) content.settingsOpen = false; if (!opened) root.releaseTipPin() }
 
   CardBar { id: cardBar; api: root.bar }
 
@@ -478,7 +480,7 @@ Panel {
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
                 onContainsMouseChanged: if (!containsMouse) root.hideTip()
-                onPositionChanged: if (containsMouse) root.showTip(psiWrap.tip(), psiArea, mouse.x, mouse.y)
+                onPositionChanged: if (containsMouse) root.showTip(psiWrap.tip(), psiArea, psiWrap, mouse.x, mouse.y)
               }
             }
 
@@ -602,7 +604,7 @@ Panel {
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
                 onContainsMouseChanged: if (!containsMouse) root.hideTip()
-                onPositionChanged: if (containsMouse) root.showTip(battBox.tip(), battArea, mouse.x, mouse.y)
+                onPositionChanged: if (containsMouse) root.showTip(battBox.tip(), battArea, battBox, mouse.x, mouse.y)
               }
             }
 
@@ -638,6 +640,15 @@ Panel {
               border.color: Quattro.PAL.line
 
               function tip() {
+                // The per-process grid first: when the sample carries apps
+                // (nvidia-smi saw compute processes) the hover shows them.
+                // Without a list - idle GPU or no NVML - the plain free-
+                // percent tip stays, never a broken or empty grid.
+                var grid = Quattro.vramAppsGrid(
+                  root.vram === null ? null : root.vram.apps,
+                  root.vram,
+                  root.vramPair.red, root.vramPair.amber)
+                if (grid !== null) return grid
                 return Quattro.coolantTipWith(
                   root.vram === null ? null : { present: true, usedMib: root.vram.vramUsedMib, freeMib: root.vram.vramFreeMib, totalMib: root.vram.vramTotalMib },
                   root.vramPair.red, root.vramPair.amber)
@@ -775,10 +786,13 @@ Panel {
                 id: vramArea
                 anchors.fill: parent
                 hoverEnabled: true
-                acceptedButtons: Qt.NoButton
+                // The VRAM grid is the one instrument with a click: it pins
+                // the popover so it survives the pointer leaving the square.
+                acceptedButtons: Qt.LeftButton
                 cursorShape: Qt.PointingHandCursor
+                onClicked: root.pinTip(!root.tipPinned)
                 onContainsMouseChanged: if (!containsMouse) root.hideTip()
-                onPositionChanged: if (containsMouse) root.showTip(vramBox.tip(), vramArea, mouse.x, mouse.y)
+                onPositionChanged: if (containsMouse) root.showTip(vramBox.tip(), vramArea, vramBox, mouse.x, mouse.y)
               }
             }
 
@@ -830,7 +844,7 @@ Panel {
                 acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
                 onContainsMouseChanged: if (!containsMouse) root.hideTip()
-                onPositionChanged: if (containsMouse) root.showTip(fuelWrap.tip(), fuelArea, mouse.x, mouse.y)
+                onPositionChanged: if (containsMouse) root.showTip(fuelWrap.tip(), fuelArea, fuelWrap, mouse.x, mouse.y)
               }
             }
 
@@ -1519,15 +1533,27 @@ Panel {
               Layout.fillWidth: true
               spacing: 8
 
+              // The VRAM process grid rides the same card: its rows carry
+              // mib/pct number columns, so the name takes the free width
+              // (elided) instead of the fixed 56px key column and the value
+              // sentence stays empty. The total row (cls grid-total) reads as
+              // bright ink, the rows above it stay at the tip idiom's dim.
+              readonly property bool grid: modelData.mib !== undefined && modelData.mib !== null
+              readonly property bool total: modelData.cls === "grid-total"
+
               Text {
                 text: tipRow.modelData.label
-                color: root.dim
+                color: tipRow.total ? root.fg : root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
-                Layout.preferredWidth: 56
+                font.bold: tipRow.total
+                elide: Text.ElideRight
+                Layout.fillWidth: tipRow.grid
+                Layout.preferredWidth: tipRow.grid ? 0 : 56
               }
 
               Text {
+                visible: !tipRow.grid
                 text: tipRow.modelData.text
                 color: tipRow.modelData.cls === "st-r" ? Quattro.PAL.redHot
                   : (tipRow.modelData.cls === "st-a" ? Quattro.PAL.amber : root.fg)
@@ -1535,6 +1561,30 @@ Panel {
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
+              }
+
+              Text {
+                visible: tipRow.grid
+                text: tipRow.modelData.mib
+                color: root.fg
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: tipRow.total
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                Layout.preferredWidth: 64
+              }
+
+              Text {
+                visible: tipRow.grid
+                text: tipRow.modelData.pct
+                color: tipRow.total ? root.fg : root.dim
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: tipRow.total
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                Layout.preferredWidth: 44
               }
             }
           }
@@ -1603,15 +1653,28 @@ Panel {
   property string tipHeaderText: ""
   property string tipSev: ""
   property var tipRows: []
+  // The VRAM process grid pins on click: one click holds the popover over the
+  // VRAM instrument, a second releases it to the plain hover rules. The owner
+  // (the item whose tip() made the content) and the last hover spot are kept
+  // so a fresh sample can re-render the open popover in place.
+  property bool tipPinned: false
+  property var tipOwner: null
+  property var tipSource: null
+  property real tipAtX: 0
+  property real tipAtY: 0
 
   readonly property color tipSevColor: tipSev === "r" ? Quattro.PAL.redHot
     : (tipSev === "a" ? Quattro.PAL.amber : root.fg)
 
-  function showTip(tip, sourceItem, px, py) {
+  function showTip(tip, sourceItem, owner, px, py) {
     if (tip === null || tip === undefined) return
     tipHeaderText = tip.header === undefined ? "" : tip.header
     tipSev = tip.sev === undefined ? "" : tip.sev
     tipRows = tip.rows === undefined ? [] : tip.rows
+    tipOwner = owner === undefined ? null : owner
+    tipSource = sourceItem
+    tipAtX = px
+    tipAtY = py
     var pos = sourceItem.mapToItem(tipLayer, px, py)
     var w = tipCard.width
     var tx = Math.max(6, Math.min(pos.x + 14, tipLayer.width - w - 6))
@@ -1623,7 +1686,31 @@ Panel {
   }
 
   function hideTip() {
+    if (root.tipPinned) return
     tipLayer.visible = false
+  }
+
+  // Click-to-pin on the VRAM grid. Releasing while the pointer is elsewhere
+  // closes the popover at once; releasing over the instrument leaves the
+  // ordinary hover in charge.
+  function pinTip(pin) {
+    tipPinned = pin
+    if (!pin && tipSource !== null && !tipSource.containsMouse) tipLayer.visible = false
+  }
+
+  // Closing the dash releases a pin, so no popover survives the popup and
+  // comes back stuck on the next open.
+  function releaseTipPin() {
+    tipPinned = false
+    if (typeof tipLayer !== "undefined" && tipLayer) tipLayer.visible = false
+  }
+
+  // A fresh VRAM sample re-renders whatever popover is open, so the grid and
+  // the dial never disagree while it shows. The other instruments recompute
+  // to the same content, so a shared refresh is harmless.
+  function refreshTip() {
+    if (!tipLayer.visible || tipOwner === null || tipSource === null) return
+    showTip(tipOwner.tip(), tipSource, tipOwner, tipAtX, tipAtY)
   }
 
   // ---------------------------------------------------------------------------
@@ -1808,7 +1895,7 @@ Panel {
         root.dispatchCode(codeRow.entry)
       }
       onContainsMouseChanged: if (!containsMouse) root.hideTip()
-      onPositionChanged: if (containsMouse) root.showTip(codeRow.tip(), codeRow, mouse.x, mouse.y)
+      onPositionChanged: if (containsMouse) root.showTip(codeRow.tip(), codeRow, codeRow, mouse.x, mouse.y)
     }
 
     RowLayout {
