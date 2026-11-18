@@ -377,11 +377,14 @@ seconds. The stressor never runs unbounded: if `systemd-run` or `python3` is
 missing, calibration refuses. Under 1 GiB of MemAvailable it refuses too —
 close something and try again.
 
-The run auto-aborts on memory PSI sustained at the wall class: three
-consecutive `some avg10` readings at or over 40, or two consecutive
-`some avg60` readings at or over 25. The avg60 bar arms only once the run
-itself is 60 seconds old — avg60 is the kernel's own 60 s window, so a
-younger run's readings still carry the minute before the run, and pre-run
+The run auto-aborts on sustained memory PSI: three consecutive `some avg10`
+readings at or over 40 (the wall class), or two consecutive `some avg60`
+readings at or over 25 (the sustained bar). The two stops speak their own
+sentences — the class hit says the class was hit, the sustained bar says
+pressure held at its bar — and the proposal's wall scan recognizes both
+signs, so a stop always has a wall to propose. The avg60 bar arms only once
+the run itself is 60 seconds old — avg60 is the kernel's own 60 s window, so
+a younger run's readings still carry the minute before the run, and pre-run
 PSI carryover never stops a fresh run. One- and two-sample transients are
 fault-in reclaim, not a wall — they land in the record's MAX column and
 never abort. The swap rate never aborts either: on zram-backed swap a
@@ -403,8 +406,9 @@ throughout; nothing is hidden, only the paging is held.
 
 The proposal screen shows the measured curve beside the proposed numbers: RAM
 amber/red as fractions (0.35 / 0.65) of the anchored wall — the greater of
-the wall grade's sustained average and the 40 PSI wall class, so a spike-found
-or swap-rate wall cannot talk the pair below the class — the swap
+the wall grade's sustained average and the 40 PSI wall class, so a
+spike-found, swap-rate or sustained-bar wall cannot talk the pair below the
+class — the swap
 reserve pair scaled between the knee and the wall in percent used, and — when
 the machine shrugged off the whole ladder — the fleet defaults as the honest
 floor. APPLY and KEEP DEFAULTS are equal citizens; APPLY writes through the

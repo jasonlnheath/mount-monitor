@@ -274,15 +274,17 @@ test("gradeAt walks the planned ladder by seconds", () => {
 // or over the sustained bar. The avg60 bar arms only once the run itself is
 // a full avg60 window (60 s) old: avg60 is the kernel's own 60 s window, so
 // a younger run's readings still carry the minute before the run, and
-// pre-run PSI carryover never stops a fresh run. One- and two-sample
-// transients are fault-in reclaim (the live probe caught a transient
-// micro-storm touch the class twice inside a grade the deeper ladders never
-// approached), so they land in the record's psiSome10Max and never abort.
-// Dirty pages and the swap rate are recorded curve data and never abort
-// triggers - on zram-backed swap a high rate is compression throughput, not
-// danger; PSI is the universal danger signal. Samples are the widget's own
-// 2 s readings, oldest first: { atMs, elapsedSec, psiSome10, psiSome60,
-// swapUsedKb, dirtyKb }.
+// pre-run PSI carryover never stops a fresh run. Each bar stops the run
+// under its own kind (psi-wall, psi-sustained), and the proposal's wall
+// scan recognizes both signs, so a stop always has a wall to show. One- and
+// two-sample transients are fault-in reclaim (the live probe caught a
+// transient micro-storm touch the class twice inside a grade the deeper
+// ladders never approached), so they land in the record's psiSome10Max and
+// never abort. Dirty pages and the swap rate are recorded curve data and
+// never abort triggers - on zram-backed swap a high rate is compression
+// throughput, not danger; PSI is the universal danger signal. Samples are
+// the widget's own 2 s readings, oldest first: { atMs, elapsedSec,
+// psiSome10, psiSome60, swapUsedKb, dirtyKb }.
 // ---------------------------------------------------------------------------
 
 function sample(elapsedSec, psiSome10, swapUsedKb, dirtyKb, psiSome60) {
@@ -379,7 +381,7 @@ test("two consecutive avg60 readings at the sustained bar abort", () => {
   ];
   const abort = Quattro.calibAbortFor(sustained, plan);
   assert.equal(abort.abort, true, "the sustained bar is the wall too");
-  assert.equal(abort.why, "psi-wall");
+  assert.equal(abort.why, "psi-sustained", "the sustained bar stops under its own kind, not the wall class");
 
   // One reading over, then back under: weather, not a wall.
   const weather = [
@@ -397,6 +399,43 @@ test("two consecutive avg60 readings at the sustained bar abort", () => {
     sample(64, 6, 100 * 1024, 50 * 1024, null),
   ];
   same(Quattro.calibAbortFor(blind, plan), { abort: false, why: null, grade: null });
+});
+
+test("a sustained-moderate wall stops under its own kind and still proposes a wall", () => {
+  const plan = Quattro.calibPlan(RIG);
+  // The sustained-moderate machine: every avg10 reading sits between 26 and
+  // 39, so the wall class is never touched; the kernel's 60 s avg60 crosses
+  // the sustained bar past the run-age gate; the swap reserve never storms.
+  // The sustained bar is the only stop this machine's wall can speak.
+  const calm = (t, psi10, psi60) => sample(t, psi10, 100 * 1024, 50 * 1024, psi60);
+  const samples = [
+    calm(2, 1, 0.4), calm(4, 1, 0.4), calm(6, 1, 0.5),
+    calm(22, 3, 1.0), calm(24, 3, 1.1), calm(26, 3, 1.2),
+    calm(42, 8, 3.0), calm(44, 8, 3.2), calm(46, 8, 3.4),
+    calm(60, 26, 23), calm(62, 30, 25), calm(64, 34, 26),
+  ];
+  const abort = Quattro.calibAbortFor(samples, plan);
+  assert.equal(abort.abort, true, "the sustained bar stops this machine");
+  assert.equal(abort.why, "psi-sustained", "not the wall class: no avg10 reading ever reached 40");
+  assert.equal(abort.grade, 3);
+
+  // The proposal must recognize its own stop sign: the panel would otherwise
+  // say the wall it found is real right above a NO WALL FOUND line.
+  const byGrade = [[], [], [], []];
+  for (const s of samples) byGrade[Math.floor(s.elapsedSec / 20)].push(s);
+  let cum = 0;
+  const records = byGrade.map((list, g) => {
+    cum += plan.grades[g].mib;
+    return Quattro.calibSampleRecord(g, cum, list);
+  });
+  const proposal = Quattro.calibProposalFor(records, plan, {
+    psi: { amber: 15, red: 28, critical: null },
+    batt: { amber: 30, red: 14 },
+  });
+  assert.equal(proposal.wallGrade, 3, "the scan reads the sustained sign its own stop left");
+  assert.equal(proposal.confidence, "wall");
+  assert.equal(proposal.psi.amber, 14, "the anchor stays the class: the grade's 30 average never talks the pair below it");
+  assert.equal(proposal.psi.red, 26);
 });
 
 test("a swap storm never aborts: the rate is recorded, never a trigger", () => {
@@ -543,7 +582,7 @@ function record(grade, psiSome10Avg, psiSome10Max, swapUsedPctEnd, swapKbPerMinM
     targetMib: 1000 + grade,
     psiSome10Avg,
     psiSome10Max,
-    psiSome60Last: psiSome10Avg / 2,
+    psiSome60Max: psiSome10Avg / 2,
     swapUsedPctEnd,
     swapKbPerMinMax,
     dirtyKbAvg: 100 * 1024,
@@ -811,24 +850,43 @@ test("the confirm copy carries the honest warning, and every CALIB string obeys 
   same(bad, [], `em dashes, en dashes and semicolons are banned: ${JSON.stringify(bad)}`);
 });
 
+test("the two internal stop sentences stay honest for their own bars", () => {
+  const wall = Quattro.CALIB.reasons.psiWall(3);
+  const sustained = Quattro.CALIB.reasons.psiSustained(3);
+  assert.ok(wall.includes("wall class"), "the class stop names the class it hit");
+  assert.ok(wall.includes("grade 4"), "the grade lands in the sentence");
+  assert.ok(!sustained.includes("wall class"), "the sustained bar fires at 25, so its sentence never claims the class");
+  assert.ok(sustained.includes("grade 4"), "the grade lands in this sentence too");
+  assert.ok(sustained.includes("review the proposal"), "the sustained stop keeps the promise: the wall it found is real");
+  for (const line of [wall, sustained]) {
+    assert.equal(/[\u2014\u2013;]/.test(line), false, `the language rule holds: ${line}`);
+  }
+});
+
 test("calibSampleRecord summarizes a grade's samples, skipping failed readings", () => {
   const samples = [
-    { atMs: 0, psiSome10: 2.0, psiSome60: 0.5, swapUsedKb: 100 * 1024, swapPct: 5, dirtyKb: 50 * 1024 },
-    { atMs: 2000, psiSome10: 4.0, psiSome60: 1.5, swapUsedKb: 100 * 1024 + 100 * 1024, swapPct: 7, dirtyKb: 150 * 1024 },
-    { atMs: 4000, psiSome10: null, psiSome60: 2.5, swapUsedKb: 100 * 1024 + 200 * 1024, swapPct: 9, dirtyKb: null },
+    { atMs: 62000, elapsedSec: 62, psiSome10: 2.0, psiSome60: 0.5, swapUsedKb: 100 * 1024, swapPct: 5, dirtyKb: 50 * 1024 },
+    { atMs: 64000, elapsedSec: 64, psiSome10: 4.0, psiSome60: 1.5, swapUsedKb: 100 * 1024 + 100 * 1024, swapPct: 7, dirtyKb: 150 * 1024 },
+    { atMs: 66000, elapsedSec: 66, psiSome10: null, psiSome60: 2.5, swapUsedKb: 100 * 1024 + 200 * 1024, swapPct: 9, dirtyKb: null },
   ];
   const record = Quattro.calibSampleRecord(1, 1638, samples);
   assert.equal(record.grade, 1);
   assert.equal(record.targetMib, 1638);
   assert.equal(record.psiSome10Avg, 3.0, "the failed PSI reading is skipped, never read as zero");
   assert.equal(record.psiSome10Max, 4.0);
-  assert.equal(record.psiSome60Last, 2.5);
+  assert.equal(record.psiSome60Max, 2.5, "the sustained sign is the highest post-gate avg60");
   assert.equal(record.swapUsedPctEnd, 9);
   // Last pair: 100 MiB over 2 s = 3000 MiB/min.
   assert.equal(record.swapKbPerMinMax, (100 * 1024) / (2 / 60));
   assert.equal(record.dirtyKbAvg, 100 * 1024);
+  // The same readings a window younger never serve as the sustained sign:
+  // pre-run carryover must not mark a young grade as the wall.
+  const young = Quattro.calibSampleRecord(
+    1, 1638, samples.map((s) => ({ ...s, elapsedSec: s.elapsedSec - 60 })),
+  );
+  assert.equal(young.psiSome60Max, null, "readings younger than the avg60 gate are not the sustained sign");
   same(Quattro.calibSampleRecord(0, 100, []), {
-    grade: 0, targetMib: 100, psiSome10Avg: null, psiSome10Max: null, psiSome60Last: null,
+    grade: 0, targetMib: 100, psiSome10Avg: null, psiSome10Max: null, psiSome60Max: null,
     swapUsedPctEnd: null, swapKbPerMinMax: null, dirtyKbAvg: null,
   }, "a grade with no samples reads unknown, never zero");
 });
