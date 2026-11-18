@@ -1353,9 +1353,12 @@ Panel {
                 enabled: !(root.calib !== null && root.calib.blocked)
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
+                  // The captain's 2026-11-18 ruling: no green confirmation
+                  // toast after APPLY. The proposal's numbers now sit in the
+                  // gauge row above, so the applied state is the panel's own
+                  // display; only a refusal speaks.
                   var refused = callMonitor("applyCalibration", [], null)
                   if (refused !== null && refused !== undefined) root.showToast(refused, true)
-                  else root.showToast(Quattro.CALIB.done.applied, false)
                 }
               }
             }
@@ -1384,8 +1387,9 @@ Panel {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
+                  // The twin ruling: KEEP DEFAULTS stays silent too - nothing
+                  // changed, so nothing announces itself.
                   callMonitor("dismissCalibration", [], null)
-                  root.showToast(Quattro.CALIB.done.kept, false)
                 }
               }
             }
