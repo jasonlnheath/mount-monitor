@@ -2087,10 +2087,12 @@ var SYMBOLS = {
 
 // --- the bounds -------------------------------------------------------------
 
-var CALIB_GRADE_SECS = 40;            // each grade holds about forty seconds
-var CALIB_GRADE_FRACS = [0.2, 0.4, 0.6, 0.8];
+var CALIB_GRADE_SECS = 20;            // each grade holds about twenty seconds
+var CALIB_GRADE_STEPS = 8;            // the ladder climbs in this many equal steps
+var CALIB_TOP_HEADROOM_MIB = 1536;    // the climb stops this far short of exhaustion
 var CALIB_GRADE_FLOOR_MIB = 256;      // cumulative-target floor
-var CALIB_GRADE_CAP_MIB = 8192;       // cumulative-target cap: the ladder never retains more
+var CALIB_GRADE_MAX_MIB = 32768;      // per-grade bound: the helper's own MAX_GRADE_MIB; oversized steps split, never shrink
+var CALIB_CAP_PHYS_FRAC = 0.8;        // cumulative-target cap: this fraction of physical RAM
 var CALIB_MIN_HEADROOM_KB = 1024 * 1024;   // refuse to start under 1 GiB available
 var CALIB_CAP_SEC = 180;              // the widget's own hard watchdog
 var CALIB_UNIT_RUNTIME_SEC = 200;     // systemd's cap: bounds an orphaned unit even if the shell dies
@@ -2116,10 +2118,19 @@ var CALIB_UNIT = "quattrodash-calib";
 //
 // Bounded and honest on any machine, from the sample the widget already holds.
 // The ladder RETAINS (each grade keeps its allocation), so the grades are the
-// DELTAS between clamped cumulative targets and the top of the climb is
-// 0.8x MemAvailable - never the 2.0x a naive per-grade fraction would plan,
+// DELTAS between consecutive targets. The ruling that replaced the round-10
+// fraction curve: the climb tops just above exhaustion - the machine holds
+// everything but CALIB_TOP_HEADROOM_MIB of what is free - so the ladder always
+// ends where reclaim and swap actually engage, and it never stops early at a
+// fixed fraction while the PSI curve is still flat and memory remains to
+// claim. The rails stay binding: never a target the ceiling cannot wall off,
 // and never a cgroup ceiling left at or above physical RAM, which is not a
 // wall but an invitation to the global oom killer.
+//
+// One step may outgrow the helper's own per-grade bound on a huge rig. The
+// step then SPLITS into consecutive sub-grades that together hold the same
+// memory in the same seconds - the ladder keeps its top and its clock, and
+// every grade the plan ships is a grade the helper's parser accepts.
 function calibPlan(meminfo) {
   const info = meminfo || {};
   const totalKb = asNumber(info.MemTotal);
@@ -2130,19 +2141,37 @@ function calibPlan(meminfo) {
   }
   const availMib = Math.floor(availKb / 1024);
   const physicalMib = Math.floor((totalKb - CALIB_CEILING_RESERVE_KB) / 1024);
-  const targetCap = Math.min(CALIB_GRADE_CAP_MIB, physicalMib - CALIB_CEILING_MARGIN_MIB);
+  // The rails survive the new climb: on a small or well-populated machine
+  // free-minus-headroom would ask for more than the ceiling can wall off, so
+  // the target still clamps under 80 percent of physical and below the
+  // ceiling's own margin. The global oom killer is never invited.
+  const targetCap = Math.min(
+    Math.floor(CALIB_CAP_PHYS_FRAC * physicalMib),
+    physicalMib - CALIB_CEILING_MARGIN_MIB,
+  );
   if (targetCap < CALIB_GRADE_FLOOR_MIB) {
     return { ok: false, why: "headroom" };
   }
   const clampTarget = (v) =>
     Math.max(CALIB_GRADE_FLOOR_MIB, Math.min(targetCap, Math.round(v)));
+  const top = clampTarget(availMib - CALIB_TOP_HEADROOM_MIB);
   let prev = 0;
   const grades = [];
-  for (const frac of CALIB_GRADE_FRACS) {
-    const target = clampTarget(frac * availMib);
+  for (let step = 1; step <= CALIB_GRADE_STEPS; step++) {
+    const target = Math.round((top / CALIB_GRADE_STEPS) * step);
     const delta = target - prev;
     prev = target;
-    if (delta > 0) grades.push({ mib: delta, secs: CALIB_GRADE_SECS });
+    if (delta <= 0) continue;
+    const parts = Math.ceil(delta / CALIB_GRADE_MAX_MIB);
+    const secs = Math.max(1, Math.floor(CALIB_GRADE_SECS / parts));
+    const base = Math.ceil(delta / parts);
+    let held = 0;
+    for (let k = 0; k < parts; k++) {
+      const piece = k === parts - 1 ? delta - held : base;
+      held += piece;
+      const subSecs = k === parts - 1 ? CALIB_GRADE_SECS - secs * (parts - 1) : secs;
+      grades.push({ mib: piece, secs: subSecs });
+    }
   }
   const totalMib = prev;
   return {

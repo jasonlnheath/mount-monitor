@@ -23,9 +23,12 @@ import json
 import sys
 import time
 
-# The plan law mirrors what quattro.js builds and what its tests pin: 1..4
-# grades, each between 1 and 32768 MiB held, each 1..60 seconds.
-MAX_GRADES = 4
+# The plan law mirrors what quattro.js builds and what its tests pin: eight
+# climbing steps, and a step that outgrows the per-grade bound splits into
+# sub-grades rather than shrinking - at most one sub-grade per second of the
+# step's twenty, because no sub-grade holds less than one second - so at most
+# 160 grades, each between 1 and 32768 MiB held, each 1..60 seconds.
+MAX_GRADES = 160
 MAX_GRADE_MIB = 32768
 MAX_GRADE_SECS = 60
 

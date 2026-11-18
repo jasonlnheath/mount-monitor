@@ -29,30 +29,43 @@ const RIG = {
   SwapFree: 4 * MIB - 2 * 1024 * 1024,
 };
 
+// The target cap mirrors calibPlan's own rails: 80 percent of physical RAM
+// (MemTotal minus the ceiling reserve), still clamped below the ceiling's
+// margin. Keep this the twin of the plan builder so a drift fails here.
+const physicalMibOf = (meminfo) =>
+  Math.floor((meminfo.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024);
+const targetCapOf = (meminfo) =>
+  Math.min(
+    Math.floor(Quattro.CALIB_CAP_PHYS_FRAC * physicalMibOf(meminfo)),
+    physicalMibOf(meminfo) - Quattro.CALIB_CEILING_MARGIN_MIB,
+  );
+
 // ---------------------------------------------------------------------------
-// The plan builder. Grades are DELTAS between clamped cumulative targets, so
-// the ladder retains and tops out at 0.8x available - never the 2.0x a naive
-// per-grade fraction plans. The ceiling is clamped below physical RAM, because
-// a cgroup limit at or above physical is not a wall: it is an invitation to the
-// global oom killer, which can shoot the browser instead of the helper.
+// The plan builder. Grades are DELTAS between consecutive targets, so the
+// ladder retains and tops out just short of exhaustion: free memory minus a
+// small fixed reserve, on every machine that clears the headroom gate. The
+// ceiling is clamped below physical RAM, because a cgroup limit at or above
+// physical is not a wall: it is an invitation to the global oom killer, which
+// can shoot the browser instead of the helper.
 // ---------------------------------------------------------------------------
 
-test("calibPlan builds four bounded grades as deltas of cumulative targets", () => {
+test("calibPlan builds an eight-step ladder topping just short of exhaustion", () => {
   const plan = Quattro.calibPlan(RIG);
   assert.equal(plan.ok, true, "the rig fixture clears the headroom gate");
-  assert.equal(plan.grades.length, 4);
+  assert.equal(plan.grades.length, 8);
   for (const g of plan.grades) assert.equal(g.secs, Quattro.CALIB_GRADE_SECS);
 
-  // Cumulative targets: clamp(round(frac * availMiB), floor, cap), fracs .2/.4/.6/.8.
-  const availMib = 8192;
-  const clamps = (v) => Math.max(Quattro.CALIB_GRADE_FLOOR_MIB, Math.min(Quattro.CALIB_GRADE_CAP_MIB, Math.round(v)));
-  const targets = [0.2, 0.4, 0.6, 0.8].map((f) => clamps(f * availMib));
+  // The climb tops at MemAvailable minus the fixed headroom reserve, in eight
+  // equal twenty-second steps: 8192 - 1536 = 6656 MiB on the rig, so the last
+  // grades sit where reclaim and swap actually engage.
+  const top = 8192 - Quattro.CALIB_TOP_HEADROOM_MIB;
   let prev = 0;
   plan.grades.forEach((g, i) => {
-    assert.equal(g.mib, targets[i] - prev, `grade ${i} mib is the delta between cumulative targets`);
-    prev = targets[i];
+    const target = Math.round((top / Quattro.CALIB_GRADE_STEPS) * (i + 1));
+    assert.equal(g.mib, target - prev, `grade ${i} mib is the delta between cumulative targets`);
+    prev = target;
   });
-  assert.equal(plan.totalMib, targets[3], "the plan tops out at 0.8x available, not at the fracs' sum");
+  assert.equal(plan.totalMib, 6656, "the plan tops at free memory minus the headroom reserve");
   assert.equal(plan.capSec, Quattro.CALIB_CAP_SEC);
   assert.equal(plan.grades.reduce((n, g) => n + g.secs, 0), 160, "the ladder itself stays inside the cap");
 });
@@ -65,10 +78,12 @@ test("calibPlan refuses a loaded rig instead of flooring over it", () => {
 });
 
 test("calibPlan clamps tiny and huge machines into honest ladders", () => {
-  // Tiny: 1.5 GiB available clears the headroom gate, the floor never binds,
-  // and every delta stays positive (the ladder still climbs).
+  // Tiny: 1.5 GiB available clears the headroom gate. Free minus the headroom
+  // reserve would go negative, so the cumulative-target floor binds and the
+  // ladder climbs at the floor: 256 MiB in eight positive steps.
   const small = Quattro.calibPlan({ MemTotal: 4 * MIB, MemAvailable: 1500 * 1024, SwapTotal: 0, SwapFree: 0 });
   assert.equal(small.ok, true);
+  assert.equal(small.totalMib, Quattro.CALIB_GRADE_FLOOR_MIB, "less free than the reserve still climbs, at the floor");
   let prev = 0;
   for (const g of small.grades) {
     assert.ok(g.mib > 0, "deltas stay positive on a small rig");
@@ -76,15 +91,17 @@ test("calibPlan clamps tiny and huge machines into honest ladders", () => {
   }
   assert.equal(small.totalMib, prev);
 
-  // Huge: the cap binds, so the ladder never retains more than 8 GiB whatever
-  // the machine has, and the ceiling still sits under physical RAM.
-  const huge = Quattro.calibPlan({ MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB });
+  // Huge: the climb tops at free-minus-reserve (100864 MiB), still under the
+  // physical rails, and far past the old fixed 8 GiB cap.
+  const hugeMachine = { MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB };
+  const huge = Quattro.calibPlan(hugeMachine);
   assert.equal(huge.ok, true);
-  assert.equal(huge.totalMib <= Quattro.CALIB_GRADE_CAP_MIB, true, "the cumulative top never exceeds the per-target cap");
+  assert.ok(huge.totalMib > 8192, "a huge machine's ladder scales past the old fixed 8 GiB cap");
+  assert.equal(huge.totalMib, 100 * 1024 - Quattro.CALIB_TOP_HEADROOM_MIB, "the huge ladder tops at free minus the reserve");
+  assert.ok(huge.totalMib <= targetCapOf(hugeMachine), "the cumulative top never exceeds the physical cap");
 
-  // A well-populated small machine: 0.8x MemAvailable would climb past the
-  // ceiling physical RAM allows (3120 MiB of ladder under a 3072 MiB MemoryMax),
-  // so the cumulative targets clamp below the ceiling's own bound.
+  // A well-populated small machine: free minus the reserve (2364 MiB) binds
+  // here, and the physical rails sit above it with margin to spare.
   const populated = { MemTotal: 4 * MIB, MemAvailable: 3900 * 1024, SwapTotal: 0, SwapFree: 0 };
   const idleSmall = Quattro.calibPlan(populated);
   assert.equal(idleSmall.ok, true);
@@ -94,19 +111,128 @@ test("calibPlan clamps tiny and huge machines into honest ladders", () => {
       Math.floor((populated.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024) - Quattro.CALIB_CEILING_MARGIN_MIB,
     "the ladder tops out with its margin to spare under the physical bound",
   );
+  assert.equal(
+    idleSmall.totalMib,
+    3900 - Quattro.CALIB_TOP_HEADROOM_MIB,
+    "free-minus-reserve binds on this rig, under the rails with margin to spare",
+  );
+
+  // One step more available and the rails bind first: 4000 MiB free would ask
+  // for 2464 MiB, the physical cap allows 2457, and the ladder lands on the
+  // rail - the ceiling can always wall off the ladder that ships.
+  const railBound = { MemTotal: 4 * MIB, MemAvailable: 4000 * 1024, SwapTotal: 0, SwapFree: 0 };
+  const railPlan = Quattro.calibPlan(railBound);
+  assert.equal(railPlan.ok, true);
+  assert.equal(railPlan.totalMib, targetCapOf(railBound), "the physical rails bind before the climb reaches its top");
+  assert.ok(
+    railPlan.totalMib <=
+      Math.floor((railBound.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024) - Quattro.CALIB_CEILING_MARGIN_MIB,
+    "the rail-bound ladder still leaves the ceiling its margin",
+  );
 
   // The ceiling is the kernel wall: above the ladder, below physical RAM.
   for (const { meminfo, plan } of [
     { meminfo: RIG, plan: Quattro.calibPlan(RIG) },
     { meminfo: { MemTotal: 4 * MIB, MemAvailable: 1500 * 1024, SwapTotal: 0, SwapFree: 0 }, plan: small },
-    { meminfo: { MemTotal: 128 * MIB, MemAvailable: 100 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB }, plan: huge },
+    { meminfo: hugeMachine, plan: huge },
     { meminfo: populated, plan: idleSmall },
+    { meminfo: railBound, plan: railPlan },
   ]) {
-    const physicalMib = Math.floor((meminfo.MemTotal - Quattro.CALIB_CEILING_RESERVE_KB) / 1024);
+    const physicalMib = physicalMibOf(meminfo);
     assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
     assert.ok(plan.ceilingMib <= physicalMib, "the ceiling never reaches physical RAM minus the reserve");
     assert.equal(plan.ceilingMib, Math.min(plan.totalMib + Quattro.CALIB_CEILING_MARGIN_MIB, physicalMib));
   }
+});
+
+test("calibPlan lets a roomy machine climb into the pressure zone", () => {
+  // The captain's rig: 64 GiB physical, 50 GiB free. The old fraction curve
+  // left 10 GiB free at the top - watermark-scale pressure never engaged. The
+  // climb now stops one reserve short of exhaustion: 50 GiB free minus 1.5 GiB
+  // held back, 49664 MiB of ladder, so the run ends where the wall lives.
+  const roomy = { MemTotal: 64 * MIB, MemAvailable: 50 * MIB, SwapTotal: 16 * MIB, SwapFree: 16 * MIB };
+  const plan = Quattro.calibPlan(roomy);
+  assert.equal(plan.ok, true);
+  assert.ok(plan.totalMib > 8192, "the top cumulative target clears the old fixed 8 GiB cap");
+  assert.equal(plan.totalMib, 50 * 1024 - Quattro.CALIB_TOP_HEADROOM_MIB, "the climb tops at the 50 GiB free minus the reserve");
+  assert.ok(plan.totalMib <= targetCapOf(roomy), "the ladder never retains more than the physical cap");
+  const physicalMib = physicalMibOf(roomy);
+  assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
+  assert.ok(plan.ceilingMib < physicalMib, "the ceiling stays below physical RAM minus the reserve");
+  assert.equal(plan.ceilingMib, Math.min(plan.totalMib + Quattro.CALIB_CEILING_MARGIN_MIB, physicalMib));
+});
+
+test("calibPlan caps every grade where the helper's own parser does", () => {
+  // A very large machine: 256 GiB physical, 200 GiB free. The eight steps plan
+  // ~25408 MiB each - still inside the helper's bound - but the law is the
+  // same either way: the builder and the helper enforce one per-grade bound,
+  // so no plan the builder ships can die at the helper's parse. The helper
+  // probes further down pin the helper's enforced bound to this same constant
+  // by exit code, from both sides of the line.
+  const big = { MemTotal: 256 * MIB, MemAvailable: 200 * MIB, SwapTotal: 32 * MIB, SwapFree: 32 * MIB };
+  const plan = Quattro.calibPlan(big);
+  assert.equal(plan.ok, true);
+  const bound = Quattro.CALIB_GRADE_MAX_MIB;
+  assert.ok(plan.grades.length > 0, "the ladder still climbs");
+  for (const g of plan.grades) {
+    assert.ok(g.mib >= 1 && g.mib <= bound, `a grade of ${g.mib} MiB stays inside the helper's 1..${bound}`);
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0),
+    "totalMib is the ladder actually held, never a phantom unclamped target");
+  const physicalMib = physicalMibOf(big);
+  assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
+  assert.ok(plan.ceilingMib <= physicalMib, "the ceiling never reaches physical RAM minus the reserve");
+});
+
+test("calibPlan splits an oversized step into sub-grades instead of shrinking the climb", () => {
+  // 384 GiB physical, 320 GiB free: the ceiling rail binds the top at 313753
+  // MiB, so each of the eight steps plans ~39219 MiB - over the helper's
+  // 32768 per-grade bound. The step SPLITS into two sub-grades holding the
+  // same memory in the same twenty seconds: the ladder keeps its top and its
+  // clock, and no grade the helper would refuse ever ships.
+  const big = { MemTotal: 384 * MIB, MemAvailable: 320 * MIB, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
+  const plan = Quattro.calibPlan(big);
+  assert.equal(plan.ok, true);
+  // The most grades a conforming plan can carry: every step splits into at
+  // most CALIB_GRADE_SECS sub-grades, because each holds at least one second
+  // of its step's window. The helper probes further down pin the helper's
+  // enforced count law to exactly this budget, from both sides of the line.
+  const gradeBudget = Quattro.CALIB_GRADE_STEPS * Quattro.CALIB_GRADE_SECS;
+  const bound = Quattro.CALIB_GRADE_MAX_MIB;
+  assert.ok(plan.grades.length > Quattro.CALIB_GRADE_STEPS, "the oversized steps split into more grades");
+  assert.ok(plan.grades.length <= gradeBudget, "the split ladder stays inside the helper's grade-count law");
+  assert.equal(plan.totalMib, 313753, "the physical rails bind the top, and splitting never lowers it");
+  for (const g of plan.grades) {
+    assert.ok(g.mib >= 1 && g.mib <= bound, `a split grade of ${g.mib} MiB stays inside the helper's 1..${bound}`);
+    assert.ok(g.secs >= 1, "a split grade still holds its seconds");
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0), "splitting moves no memory");
+  assert.equal(
+    plan.grades.reduce((n, g) => n + g.secs, 0),
+    Quattro.CALIB_GRADE_STEPS * Quattro.CALIB_GRADE_SECS,
+    "splitting moves no time: the ladder's clock survives the split",
+  );
+  const physicalMib = physicalMibOf(big);
+  assert.ok(plan.ceilingMib > plan.totalMib, "the ceiling sits above the ladder it bounds");
+  assert.ok(plan.ceilingMib <= physicalMib, "the ceiling never reaches physical RAM minus the reserve");
+});
+
+test("calibPlan climbs a busy machine by the same near-exhaustion contract", () => {
+  // The November 13 rigs, re-pinned under the ruling: the climb tops at free
+  // minus the reserve on ANY machine that clears the gate, loaded or idle -
+  // that is what makes the run reach pressure on a busy box too. 2 GiB free
+  // plans a 512 MiB ladder (8 x 64); 10 GiB free plans 8704 MiB (8 x 1088).
+  const busy = { MemTotal: 16 * MIB, MemAvailable: 2048 * 1024, SwapTotal: 4 * MIB, SwapFree: 4 * MIB };
+  const plan = Quattro.calibPlan(busy);
+  assert.equal(plan.ok, true);
+  assert.equal(plan.totalMib, 2048 - Quattro.CALIB_TOP_HEADROOM_MIB, "the busy rig tops at its free minus the reserve");
+  same(plan.grades.map((g) => g.mib), [64, 64, 64, 64, 64, 64, 64, 64]);
+
+  const tenFree = { MemTotal: 16 * MIB, MemAvailable: 10 * MIB, SwapTotal: 4 * MIB, SwapFree: 4 * MIB };
+  const ten = Quattro.calibPlan(tenFree);
+  assert.equal(ten.ok, true);
+  assert.equal(ten.totalMib, 10 * 1024 - Quattro.CALIB_TOP_HEADROOM_MIB, "the 10 GiB-free rig tops at its free minus the reserve");
+  same(ten.grades.map((g) => g.mib), [1088, 1088, 1088, 1088, 1088, 1088, 1088, 1088]);
 });
 
 test("calibPlan bounds the swap exposure at half the reserve", () => {
@@ -130,11 +256,15 @@ test("the plan survives a JSON round trip (it crosses a process boundary as argv
 test("gradeAt walks the planned ladder by seconds", () => {
   const plan = Quattro.calibPlan(RIG);
   assert.equal(Quattro.gradeAt(plan, 0), 0);
-  assert.equal(Quattro.gradeAt(plan, 39), 0);
-  assert.equal(Quattro.gradeAt(plan, 40), 1);
-  assert.equal(Quattro.gradeAt(plan, 80), 2);
-  assert.equal(Quattro.gradeAt(plan, 120), 3);
-  assert.equal(Quattro.gradeAt(plan, 159), 3);
+  assert.equal(Quattro.gradeAt(plan, 19), 0);
+  assert.equal(Quattro.gradeAt(plan, 20), 1);
+  assert.equal(Quattro.gradeAt(plan, 40), 2);
+  assert.equal(Quattro.gradeAt(plan, 60), 3);
+  assert.equal(Quattro.gradeAt(plan, 80), 4);
+  assert.equal(Quattro.gradeAt(plan, 100), 5);
+  assert.equal(Quattro.gradeAt(plan, 120), 6);
+  assert.equal(Quattro.gradeAt(plan, 140), 7);
+  assert.equal(Quattro.gradeAt(plan, 159), 7);
   assert.equal(Quattro.gradeAt(plan, 160), null, "past the ladder there is no grade");
 });
 
@@ -584,6 +714,177 @@ test("the helper really allocates the plan it is given, and writes only stdout",
   });
   assert.equal(bad.status, 3, "a bad plan exits 3 and never allocates");
   assert.equal(bad.stdout.trim(), "", "a refused plan never printed progress");
+});
+
+// The test box's own free window, in MiB. The boundary probes below hand the
+// real helper a plan whose first grade is tens of GiB: the box must be able to
+// take that allocation, or the probe skips - the same law the live tests above
+// already follow for python3, systemd-run and qml6.
+function boxAvailMib() {
+  const m = readFileSync("/proc/meminfo", "utf8").match(/^MemAvailable:\s+(\d+) kB$/m);
+  return m ? Math.floor(Number(m[1]) / 1024) : null;
+}
+
+// The most grades a conforming plan can carry: eight steps, each splitting into
+// at most twenty one-second sub-grades, because no sub-grade holds less than
+// one second of its step's twenty.
+const gradeBudget = () => Quattro.CALIB_GRADE_STEPS * Quattro.CALIB_GRADE_SECS;
+
+// Handshake probe: spawn the real helper on a plan and take its first grade
+// line - a plan the parser refuses prints nothing and exits 3, so the line IS
+// the proof of acceptance - then cancel the run the way `systemctl stop` would.
+// Returns the first grade event.
+async function helperHandshake(plan) {
+  const child = spawn("python3", [HELPER, "--plan", JSON.stringify(plan)], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let childErr = "";
+  child.stderr.on("data", (chunk) => { childErr += chunk; });
+  const first = await new Promise((resolve, reject) => {
+    child.stdout.once("data", (chunk) => resolve(JSON.parse(chunk.toString().split("\n")[0])));
+    child.once("exit", (code) => reject(new Error(`the helper exited ${code} before its first grade line (stderr: ${childErr.trim()})`)));
+  });
+  let killTimer = null;
+  const outcome = await new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.kill("SIGTERM");
+    killTimer = setTimeout(() => resolve(null), 5000);
+  });
+  clearTimeout(killTimer);
+  assert.ok(outcome, "the probe's run dies rather than hanging");
+  assert.equal(outcome.signal, "SIGTERM");
+  return first;
+}
+
+test("the helper refuses one grade over either plan law before allocating", () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // Over the per-grade bound: one MiB past CALIB_GRADE_MAX_MIB.
+  const overMib = spawnSync("python3", [HELPER, "--plan",
+    JSON.stringify([{ mib: Quattro.CALIB_GRADE_MAX_MIB + 1, secs: 1 }])], {
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(overMib.status, 3, "a grade one MiB over the bound exits 3");
+  assert.equal(overMib.stdout.trim(), "", "a refused plan never printed progress");
+
+  // Over the grade-count law: one one-MiB grade past the builder's own budget.
+  const overCount = spawnSync("python3", [HELPER, "--plan",
+    JSON.stringify(Array.from({ length: gradeBudget() + 1 }, () => ({ mib: 1, secs: 1 })))], {
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(overCount.status, 3, "a plan one grade over the count law exits 3");
+  assert.equal(overCount.stdout.trim(), "", "a refused plan never printed progress");
+});
+
+test("the helper accepts plans exactly at both plan-law bounds", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // Exactly at the per-grade bound the plan runs for real and finishes. The
+  // grade holds the bound's full MiB for a second, so the probe skips on a box
+  // without the window to hold it.
+  const avail = boxAvailMib();
+  if (avail === null || avail < Quattro.CALIB_GRADE_MAX_MIB + 2048) {
+    return test.skip("this box cannot hold a grade at the per-grade bound");
+  }
+  const atBound = spawnSync("python3", [HELPER, "--plan",
+    JSON.stringify([{ mib: Quattro.CALIB_GRADE_MAX_MIB, secs: 1 }])], {
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  assert.equal(atBound.status, 0, `the helper finishes a grade exactly at the bound (stderr: ${atBound.stderr})`);
+  const events = atBound.stdout.split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l));
+  assert.equal(events.length, 2, "one grade line, plus the done line");
+  assert.equal(events[0].event, "grade");
+  assert.equal(events[0].mib, Quattro.CALIB_GRADE_MAX_MIB);
+  assert.equal(events[1].event, "done");
+  assert.equal(events[1].cumMib, Quattro.CALIB_GRADE_MAX_MIB);
+
+  // Exactly at the count law the plan is accepted too. Every grade holds at
+  // least one second, so a full budget-sized run is minutes of clock: the
+  // first grade line is the handshake that the parse accepted the count - a
+  // refused plan prints nothing and exits 3 - and SIGTERM ends the probe.
+  const first = await helperHandshake(Array.from({ length: gradeBudget() }, () => ({ mib: 1, secs: 1 })));
+  assert.equal(first.event, "grade");
+  assert.equal(first.grade, 0);
+  assert.equal(first.mib, 1, "the budget-sized plan started grading: the count law accepted it");
+});
+
+test("the split plan calibPlan ships on a huge rig clears the real helper's parse", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // A huge rig well inside the law: 1.5 TiB physical, mostly idle. The rail
+  // binds the top at 1257472 MiB, every one of the eight steps splits into
+  // five sub-grades, and the plan ships 40 of the law's 160 grades. The split
+  // leaves a remainder piece per step (four 31437s and a 31436), which the
+  // uniform budget-filling plan below never exercises.
+  const titan = { MemTotal: 1610612736, MemAvailable: 1300000 * 1024, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
+  const plan = Quattro.calibPlan(titan);
+  assert.equal(plan.ok, true);
+  assert.ok(plan.grades.length > Quattro.CALIB_GRADE_STEPS, "the huge rig's oversized steps split");
+  assert.ok(plan.grades.length < gradeBudget(), "the split plan stays well inside the grade-count law");
+  for (const g of plan.grades) {
+    assert.ok(g.mib >= 1 && g.mib <= Quattro.CALIB_GRADE_MAX_MIB, `a split grade of ${g.mib} MiB stays inside the helper's 1..${Quattro.CALIB_GRADE_MAX_MIB}`);
+    assert.ok(g.secs >= 1 && g.secs <= 60, `a split grade's ${g.secs} s stays inside the helper's 1..60`);
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0), "splitting moves no memory");
+
+  // The first grade is tens of GiB: the box must be able to take its
+  // allocation for the handshake, or the probe skips.
+  const avail = boxAvailMib();
+  if (avail === null || avail < plan.grades[0].mib + 2048) {
+    return test.skip("this box cannot hold the huge plan's first grade");
+  }
+  const first = await helperHandshake(plan.grades);
+  assert.equal(first.event, "grade", "the real helper accepted the split plan and started grading it");
+  assert.equal(first.grade, 0);
+  assert.equal(first.mib, plan.grades[0].mib);
+  assert.equal(first.cumMib, plan.grades[0].mib);
+});
+
+test("the top-of-rails plan fills the grade budget exactly and the real helper takes it", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // The boundary of the delivered law: 6.25 TiB physical, avail just past the
+  // rail. The rail binds the top at 5242880 MiB, every step's 655360 MiB
+  // delta splits into exactly twenty pieces of the per-grade bound, and the
+  // plan ships the whole budget: 160 grades, every one at 32768 MiB and one
+  // second, the builder's maximal legal plan.
+  const boundary = { MemTotal: 6553600 * 1024 + 1024 * 1024, MemAvailable: 5244416 * 1024, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
+  const plan = Quattro.calibPlan(boundary);
+  assert.equal(plan.ok, true);
+  assert.equal(plan.grades.length, gradeBudget(), "the plan fills the grade-count law exactly, with nothing left over");
+  assert.equal(plan.totalMib, 5242880, "the physical rail binds the top");
+  for (const g of plan.grades) {
+    assert.equal(g.mib, Quattro.CALIB_GRADE_MAX_MIB, "every piece of every split sits exactly at the per-grade bound");
+    assert.equal(g.secs, 1, "twenty one-second sub-grades fill each step's window");
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0), "splitting moves no memory");
+
+  // The first grade is the bound's full MiB: the same window the at-bound
+  // probe above needs, the same skip where the box cannot hold it.
+  const avail = boxAvailMib();
+  if (avail === null || avail < plan.grades[0].mib + 2048) {
+    return test.skip("this box cannot hold the boundary plan's first grade");
+  }
+  const first = await helperHandshake(plan.grades);
+  assert.equal(first.event, "grade", "the real helper accepted the budget-filling plan and started grading it");
+  assert.equal(first.grade, 0);
+  assert.equal(first.mib, plan.grades[0].mib);
+  assert.equal(first.cumMib, plan.grades[0].mib);
 });
 
 test("the runner-to-helper seam composes: the unit argv's own --plan payload runs in the real helper", async () => {
