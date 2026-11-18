@@ -271,14 +271,18 @@ test("gradeAt walks the planned ladder by seconds", () => {
 // ---------------------------------------------------------------------------
 // The abort conditions. A sustained wall aborts: THREE consecutive avg10
 // readings at or over the wall class, or TWO consecutive avg60 readings at
-// or over the sustained bar. One- and two-sample transients are fault-in
-// reclaim (the live probe caught a transient micro-storm touch the class
-// twice inside a grade the deeper ladders never approached), so they land
-// in the record's psiSome10Max and never abort. Dirty pages and the swap
-// rate are recorded curve data and never abort triggers - on zram-backed
-// swap a high rate is compression throughput, not danger; PSI is the
-// universal danger signal. Samples are the widget's own 2 s readings, oldest
-// first: { atMs, elapsedSec, psiSome10, psiSome60, swapUsedKb, dirtyKb }.
+// or over the sustained bar. The avg60 bar arms only once the run itself is
+// a full avg60 window (60 s) old: avg60 is the kernel's own 60 s window, so
+// a younger run's readings still carry the minute before the run, and
+// pre-run PSI carryover never stops a fresh run. One- and two-sample
+// transients are fault-in reclaim (the live probe caught a transient
+// micro-storm touch the class twice inside a grade the deeper ladders never
+// approached), so they land in the record's psiSome10Max and never abort.
+// Dirty pages and the swap rate are recorded curve data and never abort
+// triggers - on zram-backed swap a high rate is compression throughput, not
+// danger; PSI is the universal danger signal. Samples are the widget's own
+// 2 s readings, oldest first: { atMs, elapsedSec, psiSome10, psiSome60,
+// swapUsedKb, dirtyKb }.
 // ---------------------------------------------------------------------------
 
 function sample(elapsedSec, psiSome10, swapUsedKb, dirtyKb, psiSome60) {
@@ -337,13 +341,41 @@ test("three consecutive samples at the wall class abort", () => {
     "the three readings must be consecutive");
 });
 
+test("pre-run avg60 carryover never aborts a run younger than the avg60 window", () => {
+  const plan = Quattro.calibPlan(RIG);
+  // The rig thrashed the minute before the run; MemAvailable recovered and
+  // avg10 is calm, but the kernel's 60 s avg60 window still carries that
+  // history. Until the run itself has lived a whole window, its avg60
+  // readings are mostly the minute before the run, so the sustained bar is
+  // not armed.
+  const carryover = [
+    sample(2, 2, 100 * 1024, 50 * 1024, 26),
+    sample(4, 3, 100 * 1024, 50 * 1024, 27),
+    sample(6, 2, 100 * 1024, 50 * 1024, 26),
+  ];
+  same(Quattro.calibAbortFor(carryover, plan), { abort: false, why: null, grade: null },
+    "PSI history from before the run cannot stop a fresh run at grade 1");
+
+  // Just under the gate the bar is still not armed: the latest sample has
+  // not yet lived a full avg60 window.
+  const notYet = [
+    sample(54, 3, 100 * 1024, 50 * 1024, 2),
+    sample(56, 6, 100 * 1024, 50 * 1024, 26),
+    sample(58, 6, 100 * 1024, 50 * 1024, 27),
+  ];
+  same(Quattro.calibAbortFor(notYet, plan), { abort: false, why: null, grade: null },
+    "the sustained bar arms only at a full avg60 window of run age");
+});
+
 test("two consecutive avg60 readings at the sustained bar abort", () => {
   const plan = Quattro.calibPlan(RIG);
-  // avg10 never neared the class; avg60 holds the sustained pressure.
+  // avg10 never neared the class; avg60 holds the sustained pressure. Past
+  // the avg60 window gate (elapsed 62/64/66), the run's own samples dominate
+  // the kernel's 60 s window, so the sustained bar is armed.
   const sustained = [
-    sample(4, 3, 100 * 1024, 50 * 1024, 2),
-    sample(6, 6, 100 * 1024, 50 * 1024, 26),
-    sample(8, 6, 100 * 1024, 50 * 1024, 27),
+    sample(62, 3, 100 * 1024, 50 * 1024, 2),
+    sample(64, 6, 100 * 1024, 50 * 1024, 26),
+    sample(66, 6, 100 * 1024, 50 * 1024, 27),
   ];
   const abort = Quattro.calibAbortFor(sustained, plan);
   assert.equal(abort.abort, true, "the sustained bar is the wall too");
@@ -351,9 +383,9 @@ test("two consecutive avg60 readings at the sustained bar abort", () => {
 
   // One reading over, then back under: weather, not a wall.
   const weather = [
-    sample(4, 3, 100 * 1024, 50 * 1024, 2),
-    sample(6, 6, 100 * 1024, 50 * 1024, 26),
-    sample(8, 6, 100 * 1024, 50 * 1024, 10),
+    sample(62, 3, 100 * 1024, 50 * 1024, 2),
+    sample(64, 6, 100 * 1024, 50 * 1024, 26),
+    sample(66, 6, 100 * 1024, 50 * 1024, 10),
   ];
   same(Quattro.calibAbortFor(weather, plan), { abort: false, why: null, grade: null },
     "the two avg60 readings must be consecutive");
@@ -361,8 +393,8 @@ test("two consecutive avg60 readings at the sustained bar abort", () => {
   // A cycle that failed to read avg60 breaks the pair: missing data aborts
   // nothing.
   const blind = [
-    sample(4, 3, 100 * 1024, 50 * 1024, 26),
-    sample(6, 6, 100 * 1024, 50 * 1024, null),
+    sample(62, 3, 100 * 1024, 50 * 1024, 26),
+    sample(64, 6, 100 * 1024, 50 * 1024, null),
   ];
   same(Quattro.calibAbortFor(blind, plan), { abort: false, why: null, grade: null });
 });

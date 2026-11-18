@@ -379,7 +379,10 @@ close something and try again.
 
 The run auto-aborts on memory PSI sustained at the wall class: three
 consecutive `some avg10` readings at or over 40, or two consecutive
-`some avg60` readings at or over 25. One- and two-sample transients are
+`some avg60` readings at or over 25. The avg60 bar arms only once the run
+itself is 60 seconds old — avg60 is the kernel's own 60 s window, so a
+younger run's readings still carry the minute before the run, and pre-run
+PSI carryover never stops a fresh run. One- and two-sample transients are
 fault-in reclaim, not a wall — they land in the record's MAX column and
 never abort. The swap rate never aborts either: on zram-backed swap a
 high rate is compression throughput, not danger (the rig probe measured

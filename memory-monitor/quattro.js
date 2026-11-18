@@ -2101,6 +2101,7 @@ var CALIB_CEILING_MARGIN_MIB = 512;   // MemoryMax sits this far above the ladde
 var CALIB_CEILING_RESERVE_KB = 1024 * 1024;  // and never within 1 GiB of physical RAM
 var CALIB_PSI_WALL = 40.0;            // the wall class: sustained some avg10 at or over this
 var CALIB_PSI_AVG60_WALL = 25.0;      // the sustained bar: two consecutive some avg60 readings at or over this are the wall too
+var CALIB_PSI_AVG60_WINDOW_SECS = 60.0;  // the kernel's own avg60 window length: the sustained bar arms only once the run is this old
 var CALIB_KNEE_PSI = 5.0;             // the knee: the first grade with measurable sustained stalls
 var CALIB_SWAP_WALL_KB_PER_MIN = 3 * 1024 * 1024;  // twice the round-8 climb telltale's own rate
 var CALIB_SWAP_MAX_GAP_MS = 20000;    // a wider sample gap is a gap, not a rate
@@ -2263,6 +2264,10 @@ function calibPreflightArgvs() {
 // one- or two-sample transient is fault-in reclaim (the live probe caught a
 // micro-storm touch the class twice inside a grade whose deeper ladders never
 // saw sustained PSI), it lands in the record's psiSome10Max and never aborts.
+// The avg60 bar arms only once the latest sample is
+// CALIB_PSI_AVG60_WINDOW_SECS into the run: avg60 is the kernel's own 60 s
+// window, so a younger run's readings still carry the minute before the run,
+// and pre-run PSI carryover never stops a fresh run.
 // Dirty pages and the swap rate are RECORDED, never abort triggers - on
 // zram-backed swap a high rate is compression throughput, not danger (the
 // probe measured 16 GB/min of swap-in at PSI 1.4), and PSI is the universal
@@ -2292,7 +2297,11 @@ function calibAbortFor(samples, plan) {
   }
   const a60 = asNumber(a.psiSome60);
   const b60 = asNumber(b.psiSome60);
-  if (a60 !== null && b60 !== null && a60 >= CALIB_PSI_AVG60_WALL && b60 >= CALIB_PSI_AVG60_WALL) {
+  const runAgeSec = asNumber(a.elapsedSec);
+  if (
+    runAgeSec !== null && runAgeSec >= CALIB_PSI_AVG60_WINDOW_SECS &&
+    a60 !== null && b60 !== null && a60 >= CALIB_PSI_AVG60_WALL && b60 >= CALIB_PSI_AVG60_WALL
+  ) {
     return { abort: true, why: "psi-wall", grade: grade };
   }
   return none;
