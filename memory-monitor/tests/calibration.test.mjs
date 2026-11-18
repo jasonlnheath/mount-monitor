@@ -730,6 +730,32 @@ function boxAvailMib() {
 // one second of its step's twenty.
 const gradeBudget = () => Quattro.CALIB_GRADE_STEPS * Quattro.CALIB_GRADE_SECS;
 
+// Handshake probe: spawn the real helper on a plan and take its first grade
+// line - a plan the parser refuses prints nothing and exits 3, so the line IS
+// the proof of acceptance - then cancel the run the way `systemctl stop` would.
+// Returns the first grade event.
+async function helperHandshake(plan) {
+  const child = spawn("python3", [HELPER, "--plan", JSON.stringify(plan)], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let childErr = "";
+  child.stderr.on("data", (chunk) => { childErr += chunk; });
+  const first = await new Promise((resolve, reject) => {
+    child.stdout.once("data", (chunk) => resolve(JSON.parse(chunk.toString().split("\n")[0])));
+    child.once("exit", (code) => reject(new Error(`the helper exited ${code} before its first grade line (stderr: ${childErr.trim()})`)));
+  });
+  let killTimer = null;
+  const outcome = await new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.kill("SIGTERM");
+    killTimer = setTimeout(() => resolve(null), 5000);
+  });
+  clearTimeout(killTimer);
+  assert.ok(outcome, "the probe's run dies rather than hanging");
+  assert.equal(outcome.signal, "SIGTERM");
+  return first;
+}
+
 test("the helper refuses one grade over either plan law before allocating", () => {
   const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
   if (probe.error && probe.error.code === "ENOENT") {
@@ -785,26 +811,10 @@ test("the helper accepts plans exactly at both plan-law bounds", async () => {
   // least one second, so a full budget-sized run is minutes of clock: the
   // first grade line is the handshake that the parse accepted the count - a
   // refused plan prints nothing and exits 3 - and SIGTERM ends the probe.
-  const child = spawn("python3", [HELPER, "--plan",
-    JSON.stringify(Array.from({ length: gradeBudget() }, () => ({ mib: 1, secs: 1 })))], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let childErr = "";
-  child.stderr.on("data", (chunk) => { childErr += chunk; });
-  const first = await new Promise((resolve, reject) => {
-    child.stdout.once("data", (chunk) => resolve(JSON.parse(chunk.toString().split("\n")[0])));
-    child.once("exit", (code) => reject(new Error(`the helper exited ${code} before its first grade line (stderr: ${childErr.trim()})`)));
-  });
+  const first = await helperHandshake(Array.from({ length: gradeBudget() }, () => ({ mib: 1, secs: 1 })));
   assert.equal(first.event, "grade");
   assert.equal(first.grade, 0);
   assert.equal(first.mib, 1, "the budget-sized plan started grading: the count law accepted it");
-  const outcome = await new Promise((resolve) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
-    child.kill("SIGTERM");
-    setTimeout(() => resolve(null), 5000);
-  });
-  assert.ok(outcome, "the probe's run dies rather than hanging");
-  assert.equal(outcome.signal, "SIGTERM");
 });
 
 test("the split plan calibPlan ships on a huge rig clears the real helper's parse", async () => {
@@ -813,15 +823,16 @@ test("the split plan calibPlan ships on a huge rig clears the real helper's pars
     return test.skip("python3 is absent on this box");
   }
 
-  // The huge-rig boundary: 1.5 TiB physical, mostly idle. The physical rail
+  // A huge rig well inside the law: 1.5 TiB physical, mostly idle. The rail
   // binds the top at 1257472 MiB, every one of the eight steps splits into
-  // five sub-grades, and the plan ships 40 grades - the exact shape that must
-  // clear the helper's grade-count law whole, not die at its parse.
+  // five sub-grades, and the plan ships 40 of the law's 160 grades. The split
+  // leaves a remainder piece per step (four 31437s and a 31436), which the
+  // uniform budget-filling plan below never exercises.
   const titan = { MemTotal: 1610612736, MemAvailable: 1300000 * 1024, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
   const plan = Quattro.calibPlan(titan);
   assert.equal(plan.ok, true);
   assert.ok(plan.grades.length > Quattro.CALIB_GRADE_STEPS, "the huge rig's oversized steps split");
-  assert.ok(plan.grades.length <= gradeBudget(), "the split plan stays inside the grade-count law");
+  assert.ok(plan.grades.length < gradeBudget(), "the split plan stays well inside the grade-count law");
   for (const g of plan.grades) {
     assert.ok(g.mib >= 1 && g.mib <= Quattro.CALIB_GRADE_MAX_MIB, `a split grade of ${g.mib} MiB stays inside the helper's 1..${Quattro.CALIB_GRADE_MAX_MIB}`);
     assert.ok(g.secs >= 1 && g.secs <= 60, `a split grade's ${g.secs} s stays inside the helper's 1..60`);
@@ -832,28 +843,48 @@ test("the split plan calibPlan ships on a huge rig clears the real helper's pars
   // allocation for the handshake, or the probe skips.
   const avail = boxAvailMib();
   if (avail === null || avail < plan.grades[0].mib + 2048) {
-    return test.skip("this box cannot hold the boundary plan's first grade");
+    return test.skip("this box cannot hold the huge plan's first grade");
   }
-  const child = spawn("python3", [HELPER, "--plan", JSON.stringify(plan.grades)], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let childErr = "";
-  child.stderr.on("data", (chunk) => { childErr += chunk; });
-  const first = await new Promise((resolve, reject) => {
-    child.stdout.once("data", (chunk) => resolve(JSON.parse(chunk.toString().split("\n")[0])));
-    child.once("exit", (code) => reject(new Error(`the helper exited ${code} on calibPlan's own payload (stderr: ${childErr.trim()})`)));
-  });
+  const first = await helperHandshake(plan.grades);
   assert.equal(first.event, "grade", "the real helper accepted the split plan and started grading it");
   assert.equal(first.grade, 0);
   assert.equal(first.mib, plan.grades[0].mib);
   assert.equal(first.cumMib, plan.grades[0].mib);
-  const outcome = await new Promise((resolve) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
-    child.kill("SIGTERM");
-    setTimeout(() => resolve(null), 5000);
-  });
-  assert.ok(outcome, "the probe's run dies rather than hanging");
-  assert.equal(outcome.signal, "SIGTERM");
+});
+
+test("the top-of-rails plan fills the grade budget exactly and the real helper takes it", async () => {
+  const probe = spawnSync("python3", ["-V"], { encoding: "utf8" });
+  if (probe.error && probe.error.code === "ENOENT") {
+    return test.skip("python3 is absent on this box");
+  }
+
+  // The boundary of the delivered law: 6.25 TiB physical, avail just past the
+  // rail. The rail binds the top at 5242880 MiB, every step's 655360 MiB
+  // delta splits into exactly twenty pieces of the per-grade bound, and the
+  // plan ships the whole budget: 160 grades, every one at 32768 MiB and one
+  // second, the builder's maximal legal plan.
+  const boundary = { MemTotal: 6553600 * 1024 + 1024 * 1024, MemAvailable: 5244416 * 1024, SwapTotal: 64 * MIB, SwapFree: 64 * MIB };
+  const plan = Quattro.calibPlan(boundary);
+  assert.equal(plan.ok, true);
+  assert.equal(plan.grades.length, gradeBudget(), "the plan fills the grade-count law exactly, with nothing left over");
+  assert.equal(plan.totalMib, 5242880, "the physical rail binds the top");
+  for (const g of plan.grades) {
+    assert.equal(g.mib, Quattro.CALIB_GRADE_MAX_MIB, "every piece of every split sits exactly at the per-grade bound");
+    assert.equal(g.secs, 1, "twenty one-second sub-grades fill each step's window");
+  }
+  assert.equal(plan.totalMib, plan.grades.reduce((n, g) => n + g.mib, 0), "splitting moves no memory");
+
+  // The first grade is the bound's full MiB: the same window the at-bound
+  // probe above needs, the same skip where the box cannot hold it.
+  const avail = boxAvailMib();
+  if (avail === null || avail < plan.grades[0].mib + 2048) {
+    return test.skip("this box cannot hold the boundary plan's first grade");
+  }
+  const first = await helperHandshake(plan.grades);
+  assert.equal(first.event, "grade", "the real helper accepted the budget-filling plan and started grading it");
+  assert.equal(first.grade, 0);
+  assert.equal(first.mib, plan.grades[0].mib);
+  assert.equal(first.cumMib, plan.grades[0].mib);
 });
 
 test("the runner-to-helper seam composes: the unit argv's own --plan payload runs in the real helper", async () => {
