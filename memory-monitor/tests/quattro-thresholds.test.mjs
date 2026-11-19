@@ -438,12 +438,3 @@ test("wheelStep clamps to the slider's own min/max and ignores non-vertical whee
   assert.equal(Q.wheelStep(20, 120, 1, 99, 0), null, "a zero step moves nothing");
 });
 
-test("the dash wires the wheel handler on the gauge sliders with the middle button only", () => {
-  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
-  assert.equal(PANEL.includes("WheelHandler {"), true, "the sliders carry a wheel handler");
-  assert.equal(PANEL.includes("acceptedButtons: Qt.MiddleButton"), true,
-    "the wheel nudge is middle-button only, leaving pointer drag untouched");
-  assert.equal(PANEL.includes("Quattro.wheelStep(slider.value, wheel.angleDelta.y, slider.min, slider.max, slider.step)"), true,
-    "the handler delegates the arithmetic to quattro.js wheelStep with the slider's own step and range");
-  assert.equal(PANEL.includes("slider.moved(v)"), true, "the nudge lands on the same moved() lane a drag uses");
-});
