@@ -90,10 +90,10 @@ already alerting on — so one drive produces one toast, not two.
   per-process breakdown `nvidia-smi` can see, and an explicit **desktop /
   compositor (unattributed)** row — clamped at zero — because `nvidia-smi` cannot
   see the compositor, and the desktop is what the red band exists to protect.
-  The per-process breakdown also surfaces on the dash: hovering the VRAM
-  instrument shows the top three processes by MiB held (percent of total VRAM
-  beside each), an "Other" remainder row, and the Total row matching the dial;
-  a fresh sample refreshes the open popover in place.
+  The per-process breakdown also surfaces on the dash: hover the VRAM
+  instrument and you see the top three GPU-memory processes plus one row
+  labelled "Other" and a Total row matching the dial - nothing more; a fresh
+  sample refreshes the open popover in place.
   First card only, and the detail window says so.
 
 ## Alerts

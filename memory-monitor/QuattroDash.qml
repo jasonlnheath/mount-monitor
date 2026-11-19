@@ -960,7 +960,10 @@ Panel {
         Item {
           id: settingsHeader
           Layout.fillWidth: true
-          implicitHeight: 18
+          // The captain's 2026-11-19 hitbox ruling: the click target for the
+          // gauge settings dropdown is twice the old 18 px row height, so the
+          // hitbox area doubles across the full row width.
+          implicitHeight: 36
 
           Text {
             anchors.left: parent.left
@@ -979,7 +982,9 @@ Panel {
             text: content.settingsOpen ? "\u25be" : "\u25b8"
             color: root.dim
             font.family: Style.font.family
-            font.pixelSize: Style.font.caption
+            // The captain asked for an arrow three times the old caption
+            // glyph; it stays vertically centered in the doubled row.
+            font.pixelSize: Style.font.caption * 3
           }
 
           MouseArea {
