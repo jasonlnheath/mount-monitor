@@ -93,7 +93,7 @@ already alerting on — so one drive produces one toast, not two.
   The per-process breakdown also surfaces on the dash: hovering the VRAM
   instrument shows the top three processes by MiB held (percent of total VRAM
   beside each), an "Other" remainder row, and the Total row matching the dial;
-  click pins the popover, click again releases.
+  a fresh sample refreshes the open popover in place.
   First card only, and the detail window says so.
 
 ## Alerts
@@ -214,9 +214,8 @@ tells the same story the values popup's SWAP row tells: `Now: 61% Free
 current compute processes), the VRAM hover becomes the per-process grid
 instead: the top three processes by MiB held, sorted descending, each with its
 percent of total VRAM, then one remainder row labelled "Other", then a Total
-row matching the dial's own used number. A click pins the popover so it stays
-up while you read it (a fresh sample refreshes it in place, so the grid and the
-dial never disagree); a second click releases it to the ordinary hover rules.
+row matching the dial's own used number. A fresh sample refreshes the open
+popover in place, so the grid and the dial never disagree while it shows.
 With no per-process list - an idle GPU or no NVML - the hover keeps the plain
 free-percent line, never a broken or empty grid. Under the cluster, the
 codes area: ONE column under one check-engine head, always most critical at

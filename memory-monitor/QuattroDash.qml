@@ -107,7 +107,7 @@ Panel {
   readonly property var swaps: mon("swaps", null)
   readonly property var rootDrive: mon("rootReading", null)
   readonly property var vram: mon("vramReading", null)
-  // The open popover re-renders in place on every fresh sample.
+  // The open VRAM popover re-renders in place on every fresh sample.
   onVramChanged: root.refreshTip()
   readonly property var devices: mon("hdDevices", [])
   readonly property var hdRows: mon("hdRows", [])
@@ -337,7 +337,7 @@ Panel {
   // edge the popup takes - open or close - the section is folded first, so an
   // expanded settings block can never survive a screen exit and mis-render on
   // the way back.
-  onOpenedChanged: { if (typeof content !== "undefined" && content) content.settingsOpen = false; if (!opened) root.releaseTipPin() }
+  onOpenedChanged: if (typeof content !== "undefined" && content) content.settingsOpen = false
 
   CardBar { id: cardBar; api: root.bar }
 
@@ -786,11 +786,8 @@ Panel {
                 id: vramArea
                 anchors.fill: parent
                 hoverEnabled: true
-                // The VRAM grid is the one instrument with a click: it pins
-                // the popover so it survives the pointer leaving the square.
-                acceptedButtons: Qt.LeftButton
+                acceptedButtons: Qt.NoButton
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.pinTip(!root.tipPinned)
                 onContainsMouseChanged: if (!containsMouse) root.hideTip()
                 onPositionChanged: if (containsMouse) root.showTip(vramBox.tip(), vramArea, vramBox, mouse.x, mouse.y)
               }
@@ -1653,11 +1650,8 @@ Panel {
   property string tipHeaderText: ""
   property string tipSev: ""
   property var tipRows: []
-  // The VRAM process grid pins on click: one click holds the popover over the
-  // VRAM instrument, a second releases it to the plain hover rules. The owner
-  // (the item whose tip() made the content) and the last hover spot are kept
-  // so a fresh sample can re-render the open popover in place.
-  property bool tipPinned: false
+  // The owner (the item whose tip() made the content) and the last hover spot
+  // are kept so a fresh sample can re-render the open popover in place.
   property var tipOwner: null
   property var tipSource: null
   property real tipAtX: 0
@@ -1686,30 +1680,15 @@ Panel {
   }
 
   function hideTip() {
-    if (root.tipPinned) return
     tipLayer.visible = false
   }
 
-  // Click-to-pin on the VRAM grid. Releasing while the pointer is elsewhere
-  // closes the popover at once; releasing over the instrument leaves the
-  // ordinary hover in charge.
-  function pinTip(pin) {
-    tipPinned = pin
-    if (!pin && tipSource !== null && !tipSource.containsMouse) tipLayer.visible = false
-  }
-
-  // Closing the dash releases a pin, so no popover survives the popup and
-  // comes back stuck on the next open.
-  function releaseTipPin() {
-    tipPinned = false
-    if (typeof tipLayer !== "undefined" && tipLayer) tipLayer.visible = false
-  }
-
-  // A fresh VRAM sample re-renders whatever popover is open, so the grid and
-  // the dial never disagree while it shows. The other instruments recompute
-  // to the same content, so a shared refresh is harmless.
+  // A fresh VRAM sample re-renders the open VRAM popover, so the grid and the
+  // dial never disagree while it shows. The VRAM box is the only owner that
+  // may be re-asked: the other hoverable owners include Repeater delegates a
+  // fresh sample can destroy between one poll and the next.
   function refreshTip() {
-    if (!tipLayer.visible || tipOwner === null || tipSource === null) return
+    if (!tipLayer.visible || tipOwner !== vramBox) return
     showTip(tipOwner.tip(), tipSource, tipOwner, tipAtX, tipAtY)
   }
 

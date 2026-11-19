@@ -7,8 +7,8 @@
 // exactly "Other", then the total row matching the dial), the shortened
 // process names, the honest fallback (an empty or unsupported list is NO grid,
 // so the panel keeps the plain free-percent tip), and the panel wiring (the
-// popover renders quattro.js rows in the existing tip card, click pins, a
-// fresh sample re-renders the open popover, closing the dash releases a pin).
+// popover renders quattro.js rows in the existing tip card; a fresh sample
+// re-renders the open popover in place, and the hover is the whole feature).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -133,37 +133,39 @@ test("memory.js really samples the apps list the grid reads", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Panel wiring: the popover is the existing tip card with number columns,
-// the click pins it, and the fallback stays the plain free-percent tip.
+// Panel wiring (delegation guards: QuattroDash.qml imports QuickShell and
+// cannot load under node, so the panel side is pinned by the repo convention -
+// the tests above execute quattro.js, these only name the delegation).
 // ---------------------------------------------------------------------------
 
 test("QuattroDash.qml renders the grid through quattro.js and keeps the plain fallback", () => {
   const PANEL = repoFile("memory-monitor/QuattroDash.qml");
-  assert.match(PANEL, /Quattro\.vramAppsGrid\(/, "the grid assembly is a quattro.js decision");
-  assert.match(PANEL, /Quattro\.coolantTipWith\(/, "the fallback is the plain free-percent tip");
-  assert.match(PANEL, /if \(grid !== null\) return grid/, "a grid wins; null falls through to the plain tip");
+  assert.equal(PANEL.includes("Quattro.vramAppsGrid("), true,
+    "the per-process grid is assembled by quattro.js; the panel only renders its rows");
+  assert.equal(PANEL.includes("Quattro.coolantTipWith("), true,
+    "the fallback is the plain free-percent tip, assembled by quattro.js");
+  assert.equal(PANEL.includes("if (grid !== null) return grid"), true,
+    "a grid from the sample wins; only a null grid falls through to the plain tip");
   // No fixed sentence lives in the panel: the grid's words are quattro.js's.
   const longLiterals = PANEL.split("\n").filter(line =>
     /"[^"\n]{40,}"/.test(line) && !/console\.(warn|log|info|error)/.test(line));
   assert.deepEqual(longLiterals, []);
 });
 
-test("the click pins the popover and closing the dash releases the pin", () => {
+test("a fresh sample re-renders the open VRAM popover in place, and no other instrument's", () => {
   const PANEL = repoFile("memory-monitor/QuattroDash.qml");
-  assert.match(PANEL, /property bool tipPinned: false/, "the pin starts released");
-  assert.match(PANEL, /function pinTip\(pin\)/, "the pin is one function, not scattered state");
-  assert.match(PANEL, /function releaseTipPin\(\)/, "the release is one function");
-  assert.match(PANEL, /onClicked: root\.pinTip\(!root\.tipPinned\)/, "a click toggles the pin");
-  assert.equal((PANEL.match(/root\.pinTip\(/g) || []).length, 1,
-    "exactly one area claims the pin: the VRAM instrument");
-  const vramArea = /MouseArea \{[\s\S]*?id: vramArea[\s\S]*?\n            \}/.exec(PANEL);
-  assert.notEqual(vramArea, null, "the vramArea block is findable");
-  assert.match(vramArea[0], /acceptedButtons: Qt\.LeftButton/, "the VRAM area accepts the click");
-  assert.match(vramArea[0], /onClicked: root\.pinTip\(!root\.tipPinned\)/);
-  assert.match(PANEL, /if \(root\.tipPinned\) return/, "a pinned popover ignores pointer-out");
-  assert.match(PANEL, /onOpenedChanged:[^\n]*releaseTipPin\(\)/,
-    "closing the dash releases the pin");
-  assert.match(PANEL, /onVramChanged:[^\n]*refreshTip\(\)/,
-    "a fresh sample re-renders the open popover in place");
-  assert.match(PANEL, /function refreshTip\(\)/, "the refresh is one function");
+  assert.equal(PANEL.includes("onVramChanged: root.refreshTip()"), true,
+    "a fresh VRAM sample re-renders the open popover in place, so the grid never disagrees with the dial");
+  assert.equal(PANEL.includes("tipOwner !== vramBox"), true,
+    "only the VRAM box may be re-asked: another instrument's popover can be owned by a Repeater delegate a fresh sample destroys, and calling into a destroyed object throws");
+});
+
+test("the popover is hover-only: the click-to-pin mode stays out", () => {
+  // The pin was beyond the approved hover spec, and its panel-global flag let
+  // a pinned popover stick to whatever instrument was hovered next. This is
+  // the removal guard: the VRAM hover is the whole feature.
+  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
+  for (const gone of ["tipPinned", "pinTip", "releaseTipPin"]) {
+    assert.equal(PANEL.includes(gone), false, `the ${gone} machinery stays out of the panel`);
+  }
 });
