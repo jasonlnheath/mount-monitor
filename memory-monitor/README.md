@@ -498,7 +498,10 @@ grade plan, the wall-abort and quiet-window decisions, the proposal math, the
 copy) and executes the runner-to-helper seam for real: the unit argv's own
 `--plan` payload runs in `calibrate.py` and a cancelled run dies in seconds,
 and systemd itself accepts every property that argv builds (the live checks
-skip where `python3` or `systemd-run` is absent). There is no CI in
+skip where `python3` or `systemd-run` is absent). `tests/vram-grid.test.mjs`
+pins the VRAM hover grid (the top-three/Other/Total rows, the shortened
+process names, the no-list fallback to the plain free-percent tip) and guards
+that the popover stays hover-only. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 

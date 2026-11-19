@@ -48,8 +48,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`,
   with the QuattroDash popup's own decisions (LED bands, dial geometry, the
   gauge threshold slider model and its settings-row copy, code taxonomy plus
-  the round-9 system fault codes (bar, kernel, GPU, layer, disk), cluster
-  copy, the ISO symbol artwork) in `memory-monitor/quattro.js`,
+  the round-9 system fault codes (bar, kernel, GPU, layer, disk), the VRAM
+  per-process hover grid, cluster copy, the ISO symbol artwork) in
+  `memory-monitor/quattro.js`,
   rendered by `QuattroDash.qml` / `QuattroSymbol.qml` under the same
   plain-module law.
 - `skills/` holds the agent skills `install.sh` copies to `~/.agents/skills/`:
@@ -120,7 +121,7 @@ the 0-35 pressure face), and an offscreen
 skips where `qml6` is absent) and over `memory-monitor/quattro.js` (the
 QuattroDash LED, PSI/fuel and coolant bands, the gauge threshold slider model
 and its live-band tests, code taxonomy, the round-9 system fault code rules
-and copy, and the no-em-dash copy rule) plus the
+and copy, the VRAM per-process hover grid, and the no-em-dash copy rule) plus the
 RingKit conformance check that runs
 `ringkit.js`, `mounts.js bandFor` and `memory.js` against one set of band cases.
 
