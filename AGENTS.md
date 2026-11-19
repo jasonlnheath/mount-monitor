@@ -350,6 +350,15 @@ RingKit conformance check that runs
   inset on all four sides, the artwork's own aspect and each tint; re-render all
   three together, and never hand the daemon an asset whose ink touches a canvas
   edge.
+- **A gauge-settings slider owns the mouse wheel while it is hovered** (the
+  captain's 2026-11-19 ruling): a plain scroll nudges the threshold by the row's
+  own step — scroll up increments, scroll down decrements, clamped to the
+  slider's min/max — with no button and no modifier, because the wheel over a
+  slider belongs to the slider, not to scrolling the page behind it. Do not
+  gate it behind a modifier or hand the wheel back to the page. `quattro.js
+  wheelStep` owns the arithmetic (a non-vertical wheel returns `null` and moves
+  nothing) and `memory-monitor/tests/quattro-thresholds.test.mjs` runs it; the
+  QML only wires the handler.
 
 ## Release
 

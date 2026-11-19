@@ -323,7 +323,9 @@ so the reset cannot bounce the card shut mid-click. The VRAM sliders move in
 priced against its own measured swap total (and shown as the percent they really
 store when the swap is too small for two ordered 5 GiB handles, or when there is
 no swap at all), and the RAM pressure sliders drag across the dial's own 0-35
-face. The pairs move the drawn
+face. The mouse wheel works on any of them while hovered: a plain scroll nudges
+the value by that row's own step — up increments, down decrements — with no
+button or modifier. The pairs move the drawn
 bands live — the RAM and ROOT DRIVE dials redraw their zones, and the battery
 under SWAP RESERVE recolors its bars: each bar takes its color from its own
 center percentage against the drawn pair, two red bars at 20, three at 30,
