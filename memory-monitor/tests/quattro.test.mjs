@@ -100,6 +100,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "psiZoneWith", "psiTipWith", "battTipWith", "fuelTipWith", "coolantTipWith",
     "ceilingBlockedToast", "tierFromState", "tierFromStateWith",
     "allCodes", "sysCode", "memIdSys", "hex32", "sanitizeText",
+    "shortAppName", "vramGridRow", "vramAppsGrid",
     "journalDeltaArgs", "gpuWedgeArgs", "layerUnitsArgs", "barArgs", "ioPsiArgs",
     "parseJournalLines", "kernelModuleOf", "parseBarProbe", "parseUnitShow", "parseIoPsi",
     "barSysCode", "kernelSysCode", "gpuSysCode", "layerSysCode", "diskSysCode", "layerSubject",
@@ -1339,6 +1340,22 @@ test("the language rule holds over every string the popup copy can produce", () 
   for (const freeMib of [0, 1000, 3399, 3400, 3800, 4211, 8186]) {
     pushTip(Quattro.coolantTip({ present: true, usedMib: 8186 - freeMib, freeMib, totalMib: 8186 }, 3400));
   }
+  // The VRAM process grid: the header, the row labels, and the MiB and
+  // percent texts all ride the language law. Process names are machine data
+  // (like the journal lines below) but the names pushed here are ordinary
+  // ones; the hostile-name handling is pinned in tests/vram-grid.test.mjs.
+  const GRID_APPS = [
+    { pid: 101, processName: "chrome", usedMib: 3000 },
+    { pid: 102, processName: "blender", usedMib: 2200 },
+    { pid: 103, processName: "codex", usedMib: 900 },
+    { pid: 104, processName: "python3", usedMib: 210 },
+  ];
+  for (const pair of [null, { amber: 70, red: 90 }]) {
+    pushTip(Quattro.vramAppsGrid(GRID_APPS, { vramTotalMib: 8186, vramUsedMib: 6311, vramFreeMib: 1875 },
+      pair === null ? null : pair.amber, pair === null ? null : pair.red));
+    pushTip(Quattro.vramAppsGrid(GRID_APPS.slice(0, 2), { vramTotalMib: 8186, vramUsedMib: 5200, vramFreeMib: 2986 },
+      pair === null ? null : pair.amber, pair === null ? null : pair.red));
+  }
   // The live-threshold variants the settings row drives, over junk and real
   // pairs, so every ranges line keeps the language rule at any slider spot.
   for (const pair of [null, {}, { amber: 70, red: 90 }, { amber: 55, red: 95 }, { amber: 30, red: 10 }, { amber: 6000, red: 800 }]) {
@@ -1509,6 +1526,9 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     // and memory.js decisions. The panel writes no system copy of its own.
     "Quattro.allCodes(", "Quattro.systemDiagnosisJson(",
     "Memory.systemAgentPrompt(",
+    // The VRAM hover's per-process grid: the assembly is quattro.js, the
+    // panel only renders the rows and falls back to the plain coolant tip.
+    "Quattro.vramAppsGrid(",
   ]) {
     assert.equal(PANEL.includes(call), true, `QuattroDash.qml must ask ${call} instead of deciding locally`);
   }
@@ -1552,7 +1572,11 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
   // call needs a `function tip()` declared on the <id> object itself, so the
   // search stays inside that object's own braces.
   const declared = new Set([...PANEL.matchAll(/^\s*id:\s*(\w+)/gm)].map(m => m[1]));
-  const called = [...PANEL.matchAll(/\b(\w+)\.tip\(\)/g)].map(m => m[1]);
+  // tipOwner is the panel's own property holding whichever instrument's box
+  // made the open popover; refreshTip's tipOwner.tip() re-asks THAT box, so it
+  // is the declared-id guard by indirection, not a bare id call. Everything
+  // else named before .tip() must be an id declaring its own tip.
+  const called = [...PANEL.matchAll(/\b(\w+)\.tip\(\)/g)].map(m => m[1]).filter(id => id !== "tipOwner");
   assert.equal(called.length >= 4, true, "psi, batt, fuel and the coolant all hover for their decode");
   for (const id of called) {
     assert.equal(tipDeclaredOn(PANEL, id), true,

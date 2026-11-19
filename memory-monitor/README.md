@@ -90,6 +90,10 @@ already alerting on — so one drive produces one toast, not two.
   per-process breakdown `nvidia-smi` can see, and an explicit **desktop /
   compositor (unattributed)** row — clamped at zero — because `nvidia-smi` cannot
   see the compositor, and the desktop is what the red band exists to protect.
+  The per-process breakdown also surfaces on the dash: hovering the VRAM
+  instrument shows the top three processes by MiB held (percent of total VRAM
+  beside each), an "Other" remainder row, and the Total row matching the dial;
+  a fresh sample refreshes the open popover in place.
   First card only, and the detail window says so.
 
 ## Alerts
@@ -206,7 +210,14 @@ defaults, the coolant light follows the VRAM floor until its sliders are
 touched, and the row moves them all live.
 Hovering the instrument reads the standard free format, and hovering the reserve
 tells the same story the values popup's SWAP row tells: `Now: 61% Free
-(39/64 GiB).` Under the cluster, the
+(39/64 GiB).` When the VRAM sample carries a per-process list (nvidia-smi saw
+current compute processes), the VRAM hover becomes the per-process grid
+instead: the top three processes by MiB held, sorted descending, each with its
+percent of total VRAM, then one remainder row labelled "Other", then a Total
+row matching the dial's own used number. A fresh sample refreshes the open
+popover in place, so the grid and the dial never disagree while it shows.
+With no per-process list - an idle GPU or no NVML - the hover keeps the plain
+free-percent line, never a broken or empty grid. Under the cluster, the
 codes area: ONE column under one check-engine head, always most critical at
 the top, rows stretched across the full card so each code carries its reading
 and its status. The doctrine is round 2's: RAM monitoring is PRESSURE + SWAP
@@ -487,7 +498,10 @@ grade plan, the wall-abort and quiet-window decisions, the proposal math, the
 copy) and executes the runner-to-helper seam for real: the unit argv's own
 `--plan` payload runs in `calibrate.py` and a cancelled run dies in seconds,
 and systemd itself accepts every property that argv builds (the live checks
-skip where `python3` or `systemd-run` is absent). There is no CI in
+skip where `python3` or `systemd-run` is absent). `tests/vram-grid.test.mjs`
+pins the VRAM hover grid (the top-three/Other/Total rows, the shortened
+process names, the no-list fallback to the plain free-percent tip) and guards
+that the popover stays hover-only. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 

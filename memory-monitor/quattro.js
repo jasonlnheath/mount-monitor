@@ -861,6 +861,82 @@ function coolantTipWith(reading, redMib, amberMib) {
   };
 }
 
+// --- the VRAM per-process grid (the hover popover on the VRAM lane) ---------
+//
+// The plugin already collects per-process GPU memory inside every VRAM sample
+// (memory.js parseNvidiaApps, pid + process name + used MiB); this surfaces it.
+// The approved shape: the top three processes by MiB held, sorted descending,
+// then one remainder row labelled exactly "Other", then the total row matching
+// the dial - the GPU's own used number, never the apps' sum, because shared
+// contexts and double-counted processes can push the sum past used. An empty
+// or unsupported list is no grid at all: the panel falls back to the plain
+// free-percent tip, never a broken or empty popover. Process names are machine
+// data the way journal lines are: sanitized (control characters, bidi and
+// angle brackets out) and shortened, but never rewritten into copy.
+var VRAM_GRID = {
+  header: "VRAM BY PROCESS",
+  top: 3,
+  other: "Other",
+  total: "Total",
+  unknown: "unknown",
+  nameMax: 24,
+};
+
+function shortAppName(name) {
+  let s = sanitizeText(name, 4096);
+  const slash = s.lastIndexOf("/");
+  if (slash >= 0) s = s.slice(slash + 1);
+  if (s.length === 0) return VRAM_GRID.unknown;
+  if (s.length > VRAM_GRID.nameMax) s = s.slice(0, VRAM_GRID.nameMax - 3) + "...";
+  return s;
+}
+
+// One grid row: the shortened name, the MiB held, the percent of TOTAL VRAM
+// (not of used), one decimal, dash when the numbers will not make one.
+function vramGridRow(name, usedMib, totalMib) {
+  const used = asNumber(usedMib);
+  const total = asNumber(totalMib);
+  return {
+    label: name,
+    mib: used === null ? "-" : String(Math.round(used)) + " MiB",
+    pct: used === null || total === null || total <= 0 ? "-"
+      : ((used / total) * 100).toFixed(1) + "%",
+  };
+}
+
+function vramAppsGrid(apps, reading, redMib, amberMib) {
+  const r = reading || null;
+  const total = r === null ? null : asNumber(r.vramTotalMib);
+  if (total === null || total <= 0) return null;
+  const raw = asList(apps) || [];
+  const list = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const app = raw[i] || {};
+    const used = asNumber(app.usedMib);
+    if (used === null) continue;
+    list.push({ name: shortAppName(app.processName), used: used });
+  }
+  if (list.length === 0) return null;
+  list.sort((a, b) => b.used - a.used);
+  const rows = [];
+  const top = Math.min(VRAM_GRID.top, list.length);
+  for (let i = 0; i < top; i += 1) rows.push(vramGridRow(list[i].name, list[i].used, total));
+  if (list.length > top) {
+    let rest = 0;
+    for (let i = top; i < list.length; i += 1) rest += list[i].used;
+    rows.push(vramGridRow(VRAM_GRID.other, rest, total));
+  }
+  const totalRow = vramGridRow(VRAM_GRID.total, asNumber(r.vramUsedMib), total);
+  totalRow.cls = "grid-total";
+  rows.push(totalRow);
+  const band = coolantBandWith(asNumber(r.vramFreeMib), total, asNumber(redMib), asNumber(amberMib));
+  return {
+    header: VRAM_GRID.header,
+    sev: band === 2 ? "r" : (band === 1 ? "a" : ""),
+    rows: rows,
+  };
+}
+
 // --- the settings row (the captain's round-1 ruling: one sentence per
 // --- setting lives HERE, in the row, not in a popup inside the dashboard) ----
 
