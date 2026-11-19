@@ -1,3 +1,35 @@
+# QUATTRO DASH 🏁
+### the instrument cluster that bolts into your omarchy bar
+
+omarchy is stupid fast. featherweight. a kick-ass distribution that stays out of your way. quattro dash is the plugin for people who want to wring everything out of it.
+
+**🟥 STALL GAUGE**
+rpm tells you how fast you're going. this tells you if the engine is STRUGGLING. the kernel literally snitches on itself — the needle shows how much of your machine's work is stuck waiting on memory. pedal flat with a model loaded and the needle's asleep? full throttle. needle climbing? that's your knock sensor. back off before you spin a bearing — the oom killer does not leave a note.
+
+**🔧 DYNO STRESS TEST**
+you wouldn't race on someone else's tune. one button, and this thing does a full pull on your RAM — climbs grade by grade to the wall, finds the exact point where YOUR machine taps out, then paints amber and red lines that are real. not factory guesses. not vibes. your tune.
+and it's done safe: the pull takes your rig right up to the limit and backs off before anything bad happens. your machine never sees the cliff.
+
+**🎮 THE VRAM DIAL**
+your card has a fuel gauge. amber and red lines for free memory, set where YOU want them — so you know the card's running dry before your generation chokes, not after. hover the dial and it names names: top three hogs on the card, one line for everything else, total always matches the needle. live, not a snapshot.
+
+**🔋 SWAP MONITOR**
+your reserve light. when the kernel starts leaning on zram to keep going, it lights up. not a panic button — a "battery's low now, plan your stop."
+
+**⚠️ CHECK ENGINE CODES**
+check-engine lights for linux. five telltales — bar, kernel, gpu, layer, disk. something wedges mid-generation, the dash tells you which system coughed.
+
+**🧑‍🔧 TOASTS**
+every warning is one click from answers. tap the alert and your agent opens with the reading AND the dash's own diagnosis already in its hands. on a critical, the dash arms a spotter to guard against the big one — and it never claims it did unless it really did.
+
+**🛡️ IT NEVER GRABS THE WHEEL**
+this is a monitor, not a backseat driver. it doesn't kill, throttle, or touch your system, period. crossing a line is your call, made with your crew. the scary band doesn't even exist until you set it. your lines, your tune, your car.
+
+**🎓 FIRST LAP ONBOARDING**
+bolt it on and it asks for your ceilings like a good crew chief. drive a bit and the recommendations start coming from your machine's real resting numbers. it suggests. you decide.
+
+## Keep Omarchy fast. Quattro Dash. 🏁
+
 # Quattro Dash
 
 An [Omarchy](https://omarchy.org) bar plugin that watches **System RAM, VRAM,
@@ -291,7 +323,9 @@ so the reset cannot bounce the card shut mid-click. The VRAM sliders move in
 priced against its own measured swap total (and shown as the percent they really
 store when the swap is too small for two ordered 5 GiB handles, or when there is
 no swap at all), and the RAM pressure sliders drag across the dial's own 0-35
-face. The pairs move the drawn
+face. The mouse wheel works on any of them while hovered: a plain scroll nudges
+the value by that row's own step — up increments, down decrements — with no
+button or modifier. The pairs move the drawn
 bands live — the RAM and ROOT DRIVE dials redraw their zones, and the battery
 under SWAP RESERVE recolors its bars: each bar takes its color from its own
 center percentage against the drawn pair, two red bars at 20, three at 30,

@@ -975,6 +975,21 @@ function sliderStep(key, swapTotals) {
   return 1;
 }
 
+// The plain hover wheel on a gauge settings slider (the captain's
+// 2026-11-19 touch, settled by his 15:33 ruling): scroll up increments,
+// scroll down decrements, by the same minimum step a drag quantizes to,
+// clamped to the slider's own min/max. No button, no modifier. A wheel that
+// is not a vertical scroll (zero or only horizontal delta) moves nothing -
+// null says "not mine", and the caller keeps its value. Ordering with the
+// sibling threshold stays the monitor's setGaugePair law, exactly as a
+// drag's does.
+function wheelStep(value, angleDelta, min, max, step) {
+  if (!(angleDelta > 0) && !(angleDelta < 0)) return null;
+  if (!(step > 0)) return null;
+  var raw = value + (angleDelta > 0 ? step : -step);
+  return Math.max(min, Math.min(max, raw));
+}
+
 // --- the gigabyte view of the swap reserve pair (round 8 ruling 4) ----------
 //
 // What the row SHOWS and what a drag SENDS are gigabytes, priced against this

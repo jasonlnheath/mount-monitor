@@ -960,7 +960,10 @@ Panel {
         Item {
           id: settingsHeader
           Layout.fillWidth: true
-          implicitHeight: 18
+          // The captain's 2026-11-19 hitbox ruling: the click target for the
+          // gauge settings dropdown is twice the old 18 px row height, so the
+          // hitbox area doubles across the full row width.
+          implicitHeight: 36
 
           Text {
             anchors.left: parent.left
@@ -979,7 +982,9 @@ Panel {
             text: content.settingsOpen ? "\u25be" : "\u25b8"
             color: root.dim
             font.family: Style.font.family
-            font.pixelSize: Style.font.caption
+            // The captain asked for an arrow three times the old caption
+            // glyph; it stays vertically centered in the doubled row.
+            font.pixelSize: Style.font.caption * 3
           }
 
           MouseArea {
@@ -2015,6 +2020,20 @@ Panel {
       onPositionChanged: function(mouse) {
         var v = valueAt(mouse.x)
         if (v !== Math.round(slider.value)) slider.moved(v)
+      }
+    }
+
+    // The captain's 2026-11-19 touch, settled by his 15:33 ruling: plain
+    // hover wheel over a threshold slider nudges it - scroll up increments,
+    // scroll down decrements - by the row's own minimum step, clamped to the
+    // same min/max the bars clamp to. No button, no modifier: the panel
+    // needs no wheel scrolling of its own, so wheel over a slider belongs to
+    // the slider. Pointer drag is untouched, and quattro.js wheelStep owns
+    // the arithmetic.
+    WheelHandler {
+      onWheel: function(wheel) {
+        var v = Quattro.wheelStep(slider.value, wheel.angleDelta.y, slider.min, slider.max, slider.step)
+        if (v !== null && v !== Math.round(slider.value)) slider.moved(v)
       }
     }
   }

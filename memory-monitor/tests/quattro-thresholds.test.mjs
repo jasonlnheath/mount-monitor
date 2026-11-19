@@ -417,3 +417,25 @@ test("the widget returns quattro.js's toast on a blocked write and the dash show
   assert.equal(PANEL.includes("root.showToast(refused, true)"), true,
     "the dash surfaces the refused write through its own toast lane");
 });
+
+// The captain's 2026-11-19 touch, settled by the 15:33 ruling: plain hover
+// wheel over a gauge settings slider (no button, no modifier) nudges the
+// threshold by the row's own minimum step, scroll up incrementing and scroll
+// down decrementing, clamped to the same min/max the bars clamp to. The
+// arithmetic is quattro.js's wheelStep, so the tests run the function, not
+// the file's words.
+test("wheelStep nudges by the step, up increments and down decrements", () => {
+  assert.equal(Q.wheelStep(20, 120, 1, 99, 1), 21, "scroll up increments by the step");
+  assert.equal(Q.wheelStep(20, -120, 1, 99, 1), 19, "scroll down decrements by the step");
+  assert.equal(Q.wheelStep(45, 120, 1, 64, 5), 50, "the swap row's 5 GiB step is the nudge");
+  assert.equal(Q.wheelStep(45, -120, 1, 64, 5), 40, "and it decrements by the same step");
+});
+
+test("wheelStep clamps to the slider's own min/max and ignores non-vertical wheels", () => {
+  assert.equal(Q.wheelStep(1, 120, 1, 99, 1), 2, "the floor is the slider's min");
+  assert.equal(Q.wheelStep(99, 120, 1, 99, 1), 99, "scroll up at max stays at max");
+  assert.equal(Q.wheelStep(1, -120, 1, 99, 1), 1, "scroll down at min stays at min");
+  assert.equal(Q.wheelStep(20, 0, 1, 99, 1), null, "a zero delta moves nothing");
+  assert.equal(Q.wheelStep(20, 120, 1, 99, 0), null, "a zero step moves nothing");
+});
+
