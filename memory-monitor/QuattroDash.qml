@@ -1551,7 +1551,10 @@ Panel {
 
               Text {
                 visible: !tipRow.grid
-                text: tipRow.modelData.text
+                // Guarded: a grid row carries no sentence, and an unguarded
+                // undefined-to-QString assignment logs an engine warning for
+                // every freshly created row of the other kind.
+                text: tipRow.grid ? "" : tipRow.modelData.text
                 color: tipRow.modelData.cls === "st-r" ? Quattro.PAL.redHot
                   : (tipRow.modelData.cls === "st-a" ? Quattro.PAL.amber : root.fg)
                 font.family: Style.font.family
@@ -1562,7 +1565,7 @@ Panel {
 
               Text {
                 visible: tipRow.grid
-                text: tipRow.modelData.mib
+                text: tipRow.grid ? tipRow.modelData.mib : ""
                 color: root.fg
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
@@ -1574,7 +1577,7 @@ Panel {
 
               Text {
                 visible: tipRow.grid
-                text: tipRow.modelData.pct
+                text: tipRow.grid ? tipRow.modelData.pct : ""
                 color: tipRow.total ? root.fg : root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
