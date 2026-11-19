@@ -2022,19 +2022,6 @@ Panel {
         if (v !== Math.round(slider.value)) slider.moved(v)
       }
     }
-
-    // The captain's 2026-11-19 touch: middle-button wheel over a threshold
-    // slider nudges it by the row's own minimum step, up or down, clamped to
-    // the same min/max the bars clamp to. Pointer drag is untouched - the
-    // handler accepts the middle button only, and quattro.js wheelStep owns
-    // the arithmetic.
-    WheelHandler {
-      acceptedButtons: Qt.MiddleButton
-      onWheel: function(wheel) {
-        var v = Quattro.wheelStep(slider.value, wheel.angleDelta.y, slider.min, slider.max, slider.step)
-        if (v !== null && v !== Math.round(slider.value)) slider.moved(v)
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------

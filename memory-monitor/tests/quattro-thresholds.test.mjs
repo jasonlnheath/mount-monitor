@@ -417,33 +417,3 @@ test("the widget returns quattro.js's toast on a blocked write and the dash show
   assert.equal(PANEL.includes("root.showToast(refused, true)"), true,
     "the dash surfaces the refused write through its own toast lane");
 });
-
-// The captain's 2026-11-19 touch: middle-mouse wheel over a gauge settings
-// slider nudges the threshold by the row's own minimum step, scroll up
-// incrementing and scroll down decrementing, clamped to the same min/max the
-// bars clamp to. The arithmetic is quattro.js's wheelStep, so the tests run
-// the function, not the file's words.
-test("wheelStep nudges by the step, up increments and down decrements", () => {
-  assert.equal(Q.wheelStep(20, 120, 1, 99, 1), 21, "scroll up increments by the step");
-  assert.equal(Q.wheelStep(20, -120, 1, 99, 1), 19, "scroll down decrements by the step");
-  assert.equal(Q.wheelStep(45, 120, 1, 64, 5), 50, "the swap row's 5 GiB step is the nudge");
-  assert.equal(Q.wheelStep(45, -120, 1, 64, 5), 40, "and it decrements by the same step");
-});
-
-test("wheelStep clamps to the slider's own min/max and ignores non-vertical wheels", () => {
-  assert.equal(Q.wheelStep(1, 120, 1, 99, 1), 2, "the floor is the slider's min");
-  assert.equal(Q.wheelStep(99, 120, 1, 99, 1), 99, "scroll up at max stays at max");
-  assert.equal(Q.wheelStep(1, -120, 1, 99, 1), 1, "scroll down at min stays at min");
-  assert.equal(Q.wheelStep(20, 0, 1, 99, 1), null, "a zero delta moves nothing");
-  assert.equal(Q.wheelStep(20, 120, 1, 99, 0), null, "a zero step moves nothing");
-});
-
-test("the dash wires the wheel handler on the gauge sliders with the middle button only", () => {
-  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
-  assert.equal(PANEL.includes("WheelHandler {"), true, "the sliders carry a wheel handler");
-  assert.equal(PANEL.includes("acceptedButtons: Qt.MiddleButton"), true,
-    "the wheel nudge is middle-button only, leaving pointer drag untouched");
-  assert.equal(PANEL.includes("Quattro.wheelStep(slider.value, wheel.angleDelta.y, slider.min, slider.max, slider.step)"), true,
-    "the handler delegates the arithmetic to quattro.js wheelStep with the slider's own step and range");
-  assert.equal(PANEL.includes("slider.moved(v)"), true, "the nudge lands on the same moved() lane a drag uses");
-});
