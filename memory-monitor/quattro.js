@@ -882,6 +882,20 @@ var VRAM_GRID = {
   nameMax: 24,
 };
 
+// The MiB column must hold value + unit without clipping, at any width the
+// panel supports. The QML sizes the column from the row's own text through
+// vramMibColWidth, so the unit never elides; this owns the arithmetic so the
+// tests pin it. The per-character budget is generous for the shell's caption
+// face, and the 64px floor is the column's fixed width before this fix, so
+// today's values keep their rhythm and only wider numbers grow the column.
+var VRAM_MIB_COL_MIN_PX = 64;
+var VRAM_MIB_CHAR_PX = 8;
+
+function vramMibColWidth(mib) {
+  const s = typeof mib === "string" ? mib : String(mib === null || mib === undefined ? "" : mib);
+  return Math.max(VRAM_MIB_COL_MIN_PX, s.length * VRAM_MIB_CHAR_PX);
+}
+
 function shortAppName(name) {
   let s = sanitizeText(name, 4096);
   const slash = s.lastIndexOf("/");
