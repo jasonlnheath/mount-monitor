@@ -1577,7 +1577,10 @@ Panel {
                 font.bold: tipRow.total
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
-                Layout.preferredWidth: 64
+                // vramMibColWidth sizes the column to the row's own text, so
+                // a 5- or 6-digit MiB value keeps its unit on-screen instead
+                // of eliding it off a fixed 64px column.
+                Layout.preferredWidth: Quattro.vramMibColWidth(tipRow.modelData.mib)
               }
 
               Text {

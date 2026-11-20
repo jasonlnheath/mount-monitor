@@ -169,3 +169,32 @@ test("the popover is hover-only: the click-to-pin mode stays out", () => {
     assert.equal(PANEL.includes(gone), false, `the ${gone} machinery stays out of the panel`);
   }
 });
+
+test("vramMibColWidth: the MiB column holds value + unit for 5- and 6-digit values", () => {
+  // The captain's report: a 5-digit MiB value clipped the unit off the fixed
+  // 64px column. The column now sizes to the row's own text, so value + unit
+  // always fit; the 64px floor keeps today's widths unchanged.
+  const width = (s) => Quattro.vramMibColWidth(s);
+  assert.equal(width("5200 MiB"), 64, "a 4-digit value keeps the old fixed width");
+  assert.equal(width("12345 MiB"), 72, "a 5-digit value grows past the floor, unit on-screen");
+  assert.equal(width("123456 MiB"), 80, "a 6-digit value grows further, unit still on-screen");
+  for (const s of ["12345 MiB", "123456 MiB"]) {
+    assert.ok(width(s) > 8 * s.length - 8,
+      `${s} (${s.length} chars) fits the width the helper asks for`);
+    assert.ok(s.endsWith("MiB") && width(s) >= 64, "the unit is accounted for, never clipped away");
+  }
+  assert.equal(Quattro.vramMibColWidth(""), 64, "an empty value falls to the floor");
+  assert.equal(Quattro.vramMibColWidth(null), 64, "null falls to the floor");
+  assert.equal(Quattro.vramMibColWidth("-"), 64, "the dash row keeps the floor");
+});
+
+test("the MiB column width decision lives in quattro.js; the panel wires it", () => {
+  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
+  assert.equal(PANEL.includes("Quattro.vramMibColWidth("), true,
+    "the panel asks quattro.js for the column width instead of a fixed 64");
+  assert.equal(/Layout\.preferredWidth: 64\b/.test(PANEL), false,
+    "no fixed 64px value column remains to clip a unit off a wide number");
+  const QUATTRO = repoFile("memory-monitor/quattro.js");
+  assert.equal(/var VRAM_MIB_COL_MIN_PX = 64;/.test(QUATTRO), true, "the floor is quattro.js's own constant");
+  assert.equal(/function vramMibColWidth\(/.test(QUATTRO), true, "the arithmetic is a plain quattro.js function");
+});
