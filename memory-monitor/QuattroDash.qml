@@ -203,21 +203,22 @@ Panel {
     sentCodes = next
   }
 
-  // The click path is the plugin's own typed argv: a fixed prompt memory.js
-  // builds (a drive code's is the same prompt its toast sends; a system
-  // fault's is systemAgentPrompt - it has no toast), with the dash's own
-  // pre-computed diagnosis (quattro.js: round 2 for drive codes, round 9 for
-  // system faults) appended as a fenced JSON block.
-  // One paragraph in one argv element, run detached, with the same
-  // agentInline setting every other click path honors. No shell, no sentence
-  // built here. A critical-band code is a critical dispatch, so it never
-  // launches an agent of its own: it asks the monitor to put it through the
-  // arm's gate and launch, and a refused click says so.
+  // The click path is the plugin's own typed argv: an inbox note to firstmate
+  // (memory.js), with the dash's own pre-computed payload (quattro.js: one
+  // line, the issue and the summarized diagnosis) as the body. The old
+  // default-agent spawn died silently on a rig with no agent configured; the
+  // note is the send that actually arrives, and the toast says so. The home is
+  // the monitor's resolution (the firstmateHome setting, else the Work seat
+  // the startup probe found); unresolved, the click refuses and the code
+  // stays lit - no note, no gray, no success toast that lies. No shell, no
+  // sentence built here. A critical-band code is a critical dispatch, so it
+  // never becomes a note of its own: it asks the monitor to put it through
+  // the arm's gate and launch, and a refused click says so.
   function dispatchCode(code) {
-    var diagnosis = code.alert !== undefined && code.alert.type === "sys"
-      ? Quattro.systemDiagnosisJson(code)
-      : Quattro.diagnosisJson(code, hdRows)
     if (Memory.isArmNotice(code.alert)) {
+      var diagnosis = code.alert !== undefined && code.alert.type === "sys"
+        ? Quattro.systemDiagnosisJson(code)
+        : Quattro.diagnosisJson(code, hdRows)
       var decision = callMonitor("dispatchCriticalCode", [code.alert, diagnosis], null)
       if (decision === null || decision.started !== true) {
         showToast(Quattro.dispatchRefused(code.code, decision === null ? "" : decision.why), true)
@@ -227,16 +228,12 @@ Panel {
       showToast(Quattro.dispatchToast(code.code, true))
       return
     }
-    var base = code.alert.type === "sys"
-      ? Memory.systemAgentPrompt(code.alert)
-      : Memory.agentPrompt(code.alert,
-          callMonitor("readingFor", [code.alert.type, code.alert], null),
-          mon("oomd", null), mon("baselinePath", ""))
-    var prompt = Memory.promptWithDiagnosis(base, diagnosis)
-    var argv = Memory.normalizeBool(callMonitor("setting", ["agentInline", false], false), false)
-      ? Memory.agentArgvWithInline(prompt, callMonitor("agentCommandArgv", [], null))
-      : Memory.agentArgv(prompt, callMonitor("agentCommandArgv", [], null))
-    Quickshell.execDetached(argv)
+    var fmHome = callMonitor("firstmateHome", [], null)
+    if (fmHome === null || fmHome === undefined) {
+      showToast(Quattro.dispatchRefused(code.code, "no-firstmate-home"), true)
+      return
+    }
+    Quickshell.execDetached(Memory.codeNoteArgv(Quattro.codeNotePayload(code, hdRows), fmHome))
     markSent(code.code)
     showToast(Quattro.dispatchToast(code.code, code.sev === "r"))
   }

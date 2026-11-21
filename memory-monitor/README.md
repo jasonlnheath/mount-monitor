@@ -48,13 +48,19 @@ already alerting on — so one drive produces one toast, not two.
 ## What the bar shows
 
 - **No alerts:** the QuattroDash emblem — the standard check-engine telltale
-  (ISO 2575 artwork) in plain white. Monochrome means all systems go, just like
-  an instrument cluster.
+  (ISO 2575 artwork) in plain white. Monochrome means all systems go — no live
+  resource over a line and no unacknowledged latched crash code sitting under
+  the icon — just like an instrument cluster.
 - **Amber / red / critical:** the same check-engine telltale, tinted by the
   most severe alert across the three types (amber, then red, then critical's
   red with a breathing pulse), chosen by a deterministic rule (severity, then
   the smallest headroom to its own critical line, then a fixed type order). A
-  resource that is not on the machine is never named.
+  resource that is not on the machine is never named. An unacknowledged
+  **latched crash code** lights the same telltale at its own band — amber for
+  the moderate signatures (oom-kill, unclean power), red for the severe ones
+  (lockup, RCU stall, hung task, watchdog, NVRM Xid) — until you acknowledge
+  it, and the history only ever raises the tint: it never downgrades a live
+  fault.
 - **Click opens the QuattroDash** instrument cluster. The tooltip is the
   popup's compact form: a centered "Quattro Dash" title, the RAM / VRAM /
   Drive names in one aligned left column, and a status column that is a
@@ -298,8 +304,8 @@ after a crash the dash showed nothing. **CRASH** reads the system journal for
 the wedge signatures across the current boot AND the previous one - soft
 lockup, RCU stall, hung task, watchdog BUG, NVRM Xid, oom-kill - and latches
 one code per signature with the evidence: the hit count, the culprit or victim
-name, and the exact journal lines, visible on the code's hover and in the
-click payload's diagnosis. Each code is seeded from the signatures' own
+name, and the exact journal lines, visible on the code's hover; the click's
+note carries the diagnosis with those lines summarized to a count. Each code is seeded from the signatures' own
 kernel text (kernel messages only, so userspace chatter cannot forge one),
 scanned as bounded deltas (a journal cursor, plus one bounded grep of the
 previous boot per session) so the sample cycle never blocks. The latches live
@@ -323,16 +329,21 @@ genuine.
 A system read that cannot be taken (the journal unreadable, systemd
 unreadable, no pressure file) renders the honest unknown row, never a fake
 clean zero. The visible rows stay terse - subject, count, culprit name, never
-a raw PID - while the click payload carries the full detail. An empty column reads "ENGINE CLEAR" under
+a raw PID - while the code's hover carries its evidence line and the
+critical-band dispatch's prompt carries the full detail. An empty column reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
-code sends its fixed prompt to your default agent (a drive code's is the same
-prompt its toast sends; a system fault has no toast; inline
-when `agentInline` is set) with the dashboard's own pre-computed diagnosis
-appended as a fenced JSON block (code, severity, cause, top consumers,
-recommendation - for a system fault: subject, cause and the exact detail,
-journal lines, unit names and counts), so the agent explains from the
-dashboard's numbers, and
-lights the green toast, red codes with the "processing now" wording added.
+code queues an inbox note to firstmate: the note is the send that actually
+arrives (the old default-agent spawn exited silently on a machine with no
+default agent configured, while the toast claimed a send). The note is one
+line - the code, its one-line issue, and the dashboard's own pre-computed
+diagnosis as JSON (code, severity, cause, top consumers, recommendation - for
+a system fault: subject, cause and the detail, with the evidence journal
+lines summarized to a count) - and the green toast says what really happens:
+"to firstmate" for red codes, "queued to firstmate, processing on next wake"
+for the rest. The firstmate home is resolved, never hardcoded: the
+`firstmateHome` setting first, then `~/Work/firstmate` when that directory
+exists; when neither resolves, the click refuses - the red "not sent. no
+firstmate home found." toast, nothing grayed, the code stays lit.
 Only a code at the critical band goes through the guard's arm gate first - the
 same single-flight, budget-gated check that owns every critical-band agent
 launch; its prompt carries the diagnosis too. Armed, the agent starts;
@@ -532,6 +543,7 @@ On the widget's entry in `shell.json`:
 | `mounts` | Mount Monitor's `mounts` list | The HD watch list, used only when no Mount Monitor widget is present. An empty list means no drive rows, not garbage. |
 | `agentCommand` | `["omarchy", "agent", "prompt"]` | The agent an amber or red click opens. |
 | `agentInline` | `false` | `true` passes `--inline` to `omarchy agent prompt`, skipping the terminal the agent normally opens. |
+| `firstmateHome` | unset | Where the dash's engine-code click delivers its firstmate inbox note. Unset falls back to `~/Work/firstmate` when that directory exists; when neither resolves, the click refuses ("not sent. no firstmate home found.") and the code stays lit. |
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical, and round 8's 2-second watch lane, poll at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
 | `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. The light follows it until the dash's gauge settings row sets the coolant thresholds. |

@@ -124,13 +124,16 @@ the 0-35 pressure face), and an offscreen
 skips where `qml6` is absent) and over `memory-monitor/quattro.js` (the
 QuattroDash LED, PSI/fuel and coolant bands, the gauge threshold slider model
 and its live-band tests, code taxonomy, the system fault code rules
-and copy, the VRAM per-process hover grid, and the no-em-dash copy rule) plus the
+and copy, round 12's engine-code note payload and firstmate-home resolution
+and refusal copy, the VRAM per-process hover grid, and the no-em-dash copy rule) plus the
 RingKit conformance check that runs
 `ringkit.js`, `mounts.js bandFor` and `memory.js` against one set of band cases.
-`tests/crash.test.mjs` is round 11's contract: the crash argvs, the signature
-classifier and its precedence, the wtmp unclean-boundary rule, the latch
-round trip across a simulated restart, the acknowledge rule, and the
-sustained-PSI latch/no-latch/clear matrix against the rig's own fixture lines.
+`tests/crash.test.mjs` is rounds 11 and 12's contract: the crash argvs, the
+signature classifier and its precedence, the wtmp unclean-boundary rule, the
+latch round trip across a simulated restart, the acknowledge rule, the
+sustained-PSI latch/no-latch/clear matrix against the rig's own fixture
+lines, and round 12's emblem truth — the latched codes lighting the bar icon
+at their own bands until the acknowledge ends the light.
 
 ## Contracts worth not breaking
 
@@ -366,6 +369,19 @@ sustained-PSI latch/no-latch/clear matrix against the rig's own fixture lines.
   wheelStep` owns the arithmetic (a non-vertical wheel returns `null` and moves
   nothing) and `memory-monitor/tests/quattro-thresholds.test.mjs` runs it; the
   QML only wires the handler.
+- **Round 12: the plain engine-code click is a firstmate note, and the latch
+  lights the emblem.** The click spawns no agent — it queues a one-line
+  firstmate inbox note (`memory.js codeNoteArgv`, payload from `quattro.js
+  codeNotePayload`, the evidence journal lines summarized to a count), and
+  the home it delivers to is resolved at runtime, never hardcoded: the
+  `firstmateHome` setting, else `~/Work/firstmate` when the widget's startup
+  `test -d` probe finds it, else a truthful "not sent. no firstmate home
+  found." refusal that grays nothing (`agentCommand` / `agentInline` stay on
+  the toast clicks and the critical-band arm, which keeps its agent). No
+  user's home is ever hardcoded in shipped runtime. An unacknowledged
+  latched crash code lights the bar emblem at its own band
+  (`quattro.js barBadgeWithCrash`); the history only ever raises the tint,
+  never downgrading a live fault.
 
 ## Release
 

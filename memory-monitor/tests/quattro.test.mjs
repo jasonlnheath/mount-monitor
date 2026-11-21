@@ -91,6 +91,7 @@ test("quattro.js is a plain QML module: no export, no import, no pragma", () => 
     "ledBand", "litSegments", "reserveReading", "psiZone", "psiNeedleFrac",
     "fuelNeedleFrac", "needleAngleDeg", "psiTip", "battTip", "fuelTip",
     "codeTip", "codesFromReadings", "dispatchToast", "dispatchRefused", "gbFromKb",
+    "codeNotePayload",
     "coolantBand", "coolantTip", "codesHeadToken", "codesEmptyText",
     "gibFromMib", "diagnosisSeverity", "diagnosisRecommendation",
     "diagnosisConsumers", "diagnosisJson",
@@ -1197,13 +1198,94 @@ test("Memory.promptWithDiagnosis: the fence and the trust sentence ride one prom
 // Dispatch toast (the approved copy, verbatim)
 // ---------------------------------------------------------------------------
 
-test("dispatchToast: the approved toast copy, with the processing words on severe", () => {
+test("dispatchToast: the truthful queue copy, the note processing on firstmate's next wake", () => {
   const mild = Quattro.dispatchToast("P0420", false);
   assert.equal(mild.mark, "\u2713");
   assert.equal(mild.code, "P0420");
-  assert.equal(mild.text, "to firstmate (default agent)");
+  assert.equal(mild.text, "queued to firstmate, processing on next wake");
   const severe = Quattro.dispatchToast("C1500", true);
-  assert.equal(severe.text, "to firstmate (default agent), processing now");
+  assert.equal(severe.text, "to firstmate");
+});
+
+// ---------------------------------------------------------------------------
+// The engine-code click's real send (round 12): an inbox note to firstmate.
+// ---------------------------------------------------------------------------
+
+test("codeNoteArgv: the note rides the resolved firstmate home, typed argv, no shell", () => {
+  // The setting the captain set wins, wherever this machine keeps firstmate.
+  const set = Memory.resolveFirstmateHome("/opt/fleet/firstmate",
+    Memory.firstmateFallbackPath("/home/jane"), true);
+  assert.equal(set, "/opt/fleet/firstmate", "a set firstmateHome setting is the home, full stop");
+  same(Memory.codeNoteArgv("quattro engine code C0001: test.", set), [
+    "env", "FM_HOME=/opt/fleet/firstmate",
+    "/opt/fleet/firstmate/bin/fm-inbox.sh", "note", "--",
+    "quattro engine code C0001: test.",
+  ]);
+
+  // The HOME fallback: no setting, the Work seat the startup probe found.
+  const seat = Memory.firstmateFallbackPath("/home/jane");
+  assert.equal(seat, "/home/jane/Work/firstmate", "the fallback is HOME/Work/firstmate, built not hardcoded");
+  assert.equal(Memory.resolveFirstmateHome(null, seat, true), seat);
+  assert.equal(Memory.resolveFirstmateHome("", seat, true), seat, "an empty setting is an unset setting");
+  same(Memory.codeNoteArgv("payload with spaces kept as one argument", seat), [
+    "env", "FM_HOME=/home/jane/Work/firstmate",
+    "/home/jane/Work/firstmate/bin/fm-inbox.sh", "note", "--",
+    "payload with spaces kept as one argument",
+  ]);
+
+  // Neither resolves: null, never a guessed home and never a captain path.
+  assert.equal(Memory.firstmateFallbackPath(""), null, "no HOME, no seat");
+  assert.equal(Memory.resolveFirstmateHome(null, seat, false), null,
+    "a seat the probe did not find is not a home");
+  assert.equal(Memory.resolveFirstmateHome(null, null, true), null);
+  const argv = Memory.codeNoteArgv("p", seat);
+  assert.equal(argv.includes("omarchy"), false, "no omarchy-agent spawn rides the note");
+  assert.equal(argv[argv.length - 1], "p", "the payload is one argv element");
+  assert.equal(argv.includes("/home/jason"), false, "no captain path rides the argv");
+});
+
+test("codeNotePayload: one scrubbed line, the evidence summarized to a count", () => {
+  const entry = Quattro.crashRecordEntry({
+    sig: "lockup", boot: -1, firstEpoch: 1795255994.037357, lastEpoch: 1795256022.037356,
+    count: 2,
+    lines: [
+      { epoch: 1, message: "kernel: watchdog: BUG: soft lockup - CPU#3 stuck for 22s! [kcompactd0:225]" },
+      { epoch: 2, message: "kernel: watchdog: BUG: soft lockup - CPU#19 stuck for 21s! [kcompactd0:225]" },
+    ],
+  });
+  const note = Quattro.codeNotePayload(entry);
+  assert.equal(note.includes("\n"), false, "the note is one line");
+  assert.match(note, /^quattro engine code C\d{4}: Soft lockup: 2 hits\. Culprit: kcompactd0\. - diagnosis: \{/,
+    "the fixed frame names the code and the issue, then the diagnosis JSON");
+  const doc = JSON.parse(note.slice(note.indexOf("{")));
+  assert.equal(doc.code, entry.code);
+  assert.equal(doc.system, "crash");
+  assert.equal(doc.detail.evidenceLines, 2, "the evidence rides as a count");
+  assert.equal(doc.detail.lines, undefined, "never every line");
+  assert.equal(note.includes("`"), false, "no backtick survives the scrub");
+  assert.equal(note.includes("<"), false, "no angle bracket survives the scrub");
+
+  // Hostile issue text cannot break the single line or forge the frame.
+  const hostile = Quattro.codeNotePayload({
+    code: "C1234",
+    sev: "a", band: 1,
+    issue: "Drive /mnt/my stick reading 91 percent.\nsecond line `quoted` <angle> \u202eoverride",
+    alert: { type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05", band: 1, target: "/mnt/my stick", pct: 91 },
+  }, []);
+  assert.equal(hostile.includes("\n"), false, "a newline in the issue cannot break the line");
+  assert.equal(hostile.includes("`"), false);
+  assert.equal(hostile.includes("<"), false);
+  assert.match(hostile, /^quattro engine code C1234: /);
+
+  // A drive code rides its own diagnosis: bounded top consumers, no lines.
+  const drive = Quattro.codesFromReadings([
+    { type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05", band: 1, pct: 91, target: "/mnt/models", ro: false },
+  ])[0];
+  const driveNote = Quattro.codeNotePayload(drive,
+    [{ key: "partuuid:aabb", target: "/mnt/models", pct: 91, usedKb: 1, availKb: 2 }]);
+  assert.match(driveNote, /^quattro engine code C\d{4}: Drive \/mnt\/models reading 91 percent\. - diagnosis: \{/);
+  const driveDoc = JSON.parse(driveNote.slice(driveNote.indexOf("{")));
+  assert.equal(driveDoc.topConsumers.length, 1, "the bounded consumers ride the note");
 });
 
 test("dispatchRefused: a refused severe click names why, on shouldStartArm's own tokens", () => {
@@ -1211,6 +1293,12 @@ test("dispatchRefused: a refused severe click names why, on shouldStartArm's own
   assert.equal(Quattro.dispatchRefused("C1500", "arm-live").text, "not sent. an agent is already on it.");
   assert.equal(Quattro.dispatchRefused("C1500", "no-headroom").text, "not sent. no memory headroom.");
   assert.equal(Quattro.dispatchRefused("C1500", "not-writer").text, "not sent. another screen owns the guard.");
+  // The note click's own gate: no firstmate home resolved, so no note exists
+  // to queue and the refusal says so in the same plain-word register.
+  const noHome = Quattro.dispatchRefused("C1500", "no-firstmate-home");
+  assert.equal(noHome.mark, "\u2717");
+  assert.equal(noHome.code, "C1500");
+  assert.equal(noHome.text, "not sent. no firstmate home found.");
   const unknown = Quattro.dispatchRefused("C1500", "");
   assert.equal(unknown.mark, "\u2717");
   assert.equal(unknown.code, "C1500");
@@ -1397,7 +1485,7 @@ test("the language rule holds over every string the popup copy can produce", () 
 
   texts.push(Quattro.dispatchToast("P0420", false).text);
   texts.push(Quattro.dispatchToast("C1500", true).text);
-  for (const why of ["guard-off", "arm-live", "no-headroom", "not-writer", ""]) {
+  for (const why of ["guard-off", "arm-live", "no-headroom", "not-writer", "no-firstmate-home", ""]) {
     texts.push(Quattro.dispatchRefused("C1500", why).text);
   }
   texts.push(Quattro.SPARES.caption);
@@ -1469,6 +1557,13 @@ test("the language rule holds over every string the popup copy can produce", () 
     { text: "", exit: 2, done: true }, { text: "", exit: 0, done: true },
     { text: "", exit: 1 }, null, {}).entries[0].issue);
   texts.push(Quattro.crashAckToast({ code: "C0001" }), Quattro.crashAckToast(null));
+  // The engine-code click's note payload: the same language law over the
+  // fixed frame and the diagnosis the note carries.
+  for (const entry of langCrash.entries) {
+    texts.push(Quattro.codeNotePayload(entry));
+  }
+  texts.push(Quattro.codeNotePayload({ code: "C1234", sev: "a", band: 1, issue: "Drive /mnt/models reading 91 percent.",
+    alert: { type: "hd", key: "partuuid:aabb", id: "mem-2b4e1c05", band: 1, target: "/mnt/models", pct: 91 } }, []));
   const langPsiState = { aboveSinceMs: 1000, belowSinceMs: null, latched: true, atMs: 61000 };
   const langPsi = Quattro.psiPressureSysCode(31.4, { amber: 15, red: 28 }, langPsiState, 63000, -1, false).entry;
   texts.push(langPsi.issue, langPsi.status, langPsi.fix,
@@ -1543,7 +1638,6 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     "Quattro.needleAngleDeg(", "Quattro.psiNeedleFrac(", "Quattro.fuelNeedleFrac(",
     "Quattro.reserveReading(", "Quattro.coolantBandWith(", "Quattro.diagnosisJson(",
     "Quattro.tierFromStateWith(",
-    "Memory.promptWithDiagnosis(",
     "Quattro.codesHeadToken(", "Quattro.codesEmptyText(",
     // The gauge threshold settings row (the captain's 2026-11-07 ruling): the
     // pairs, the ranges, the push model's law and the row's sentences are all
@@ -1555,7 +1649,6 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
     // Round 9: the merged column and the system click payload stay quattro.js
     // and memory.js decisions. The panel writes no system copy of its own.
     "Quattro.allCodes(", "Quattro.systemDiagnosisJson(",
-    "Memory.systemAgentPrompt(",
     // The VRAM hover's per-process grid: the assembly is quattro.js, the
     // panel only renders the rows and falls back to the plain coolant tip.
     "Quattro.vramAppsGrid(",
@@ -1620,10 +1713,30 @@ test("QuattroDash.qml asks Quattro.* for every decision and writes no sentence o
   assert.equal(SYMBOL_FILE.includes("Quattro.SYMBOLS"), true, "the symbol artwork is quattro.js data");
   assert.equal(/"[MmLlHhVvCcSsQqTtAaZz] ?[-\d.]/.test(SYMBOL_FILE), false,
     "no path geometry lives in the QML: the artwork has one source");
-  // The dispatch runs the same fixed agent prompt the toasts send, through
-  // memory.js. The panel builds no prompt words of its own.
-  assert.equal(PANEL.includes("Memory.agentArgv("), true);
-  assert.equal(PANEL.includes("Memory.agentPrompt("), true);
+  // The dispatch runs as an inbox note to firstmate through memory.js's
+  // typed argv, with the payload quattro.js assembles. The panel builds no
+  // prompt words of its own, and the dead default-agent spawn is gone from
+  // the click path (the arm still launches through the monitor's startArm).
+  assert.equal(PANEL.includes("Memory.codeNoteArgv("), true);
+  assert.equal(PANEL.includes("Quattro.codeNotePayload("), true);
+  assert.equal(PANEL.includes("Memory.agentArgv("), false, "the dead agent spawn is off the click path");
+  assert.equal(PANEL.includes("Memory.agentPrompt("), false, "the plain click sends a note, not a prompt");
+  assert.equal(PANEL.includes("Memory.promptWithDiagnosis("), false, "no prompt assembly on the note path");
+  // The note needs a firstmate home: the dash asks the monitor for the
+  // RESOLVED home, and an unresolved one refuses before anything is sent or
+  // grayed - the refusal toast rides dispatchRefused, and markSent (the gray)
+  // sits only after the note argv, never on the refusal path.
+  assert.equal(PANEL.includes('callMonitor("firstmateHome", [], null)'), true,
+    "the dash asks the monitor for the resolved firstmate home");
+  assert.equal(PANEL.includes('Quattro.dispatchRefused(code.code, "no-firstmate-home")'), true,
+    "an unresolved home is a refusal in the plugin's own words");
+  const refuseAt = PANEL.indexOf('Quattro.dispatchRefused(code.code, "no-firstmate-home")');
+  const noteAt = PANEL.indexOf("Memory.codeNoteArgv(");
+  assert.equal(refuseAt >= 0 && refuseAt < noteAt, true,
+    "the refusal comes before any note is queued");
+  const refusalBlock = PANEL.slice(refuseAt, PANEL.indexOf("return", refuseAt));
+  assert.equal(refusalBlock.includes("markSent"), false,
+    "the refusal path never grays the code: it stays lit to be clicked again");
   // A severe code's click dispatches through the widget's arm gate, not around
   // it: the arm's single-flight check is what keeps a second agent off the
   // machine while one is armed.
@@ -1677,9 +1790,36 @@ test("round 9 wiring: the panel merges the families through allCodes and branche
   const PANEL = repoFile("memory-monitor/QuattroDash.qml");
   assert.equal(PANEL.includes("Quattro.allCodes(Quattro.codesFromReadings(devices), mon(\"sysCodes\", null))"), true);
   assert.equal(PANEL.includes("Quattro.systemDiagnosisJson(code)"), true);
-  assert.equal(PANEL.includes("Memory.systemAgentPrompt(code.alert)"), true);
+  // Round 12: the plain click queues the inbox note, so the prompt words
+  // moved off the panel with the dead agent spawn. The arm path still rides
+  // the monitor's startArm, which builds its own prompt.
+  assert.equal(PANEL.includes("Memory.systemAgentPrompt(code.alert)"), false);
   // No system sentence in the panel: the no-fixed-sentence guard above holds,
   // and the row copy comes from the entries the monitor built.
+});
+
+test("round 12 wiring: the widget resolves the firstmate home, the dash never hardcodes one", () => {
+  const QML = repoFile("memory-monitor/MemoryMonitor.qml");
+  const PANEL = repoFile("memory-monitor/QuattroDash.qml");
+  // The resolution order is memory.js's decision: the widget only supplies
+  // the setting, HOME and the probe verdict.
+  assert.match(QML, /function firstmateHome\(\): var \{/,
+    "the widget exposes the resolved home to the dash");
+  assert.equal(QML.includes("Memory.resolveFirstmateHome(setting(\"firstmateHome\", null),"),
+    true, "the setting is read through the plugin's normal plumbing");
+  assert.equal(QML.includes("Memory.firstmateFallbackPath(home), firstmateSeatExists)"),
+    true, "the fallback and the cached probe verdict are the other two inputs");
+  // The existence check is a typed test -d probe, run once at startup.
+  assert.equal(QML.includes('firstmateProbeProc.command = ["test", "-d", firstmateSeat]'), true,
+    "the seat exists question is a typed argv test -d, no shell");
+  assert.match(QML, /Component\.onCompleted:[^]*?firstmateProbeProc\.running = true/,
+    "the probe runs at startup, once");
+  // No captain path anywhere in the runtime code: the home is resolved or the
+  // click refuses.
+  for (const file of [QML, PANEL, repoFile("memory-monitor/memory.js"), repoFile("memory-monitor/quattro.js")]) {
+    assert.equal(file.includes("/home/jason"), false,
+      "a user's home is never hardcoded in the shipped runtime");
+  }
 });
 
 test("the bar widget mounts the dashboard and the badge opens it", () => {
