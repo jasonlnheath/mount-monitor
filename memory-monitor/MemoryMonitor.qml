@@ -290,6 +290,23 @@ BarWidget {
   property var sysKernelCursor: null
   property var sysLayerPrev: null
   property var sysDiskPrev: null
+  // Round 11: the crash forensics reads (prev-boot wedge grep and the wtmp
+  // boundary once per session, the boot-0 wedge grep every cycle) and the
+  // sustained-pressure code's session state. The LATCH persists: it is the
+  // crash file's content, mirrored here, what survives a crash and restarts.
+  property string crashPrevText: ""
+  property int crashPrevExit: 0
+  property bool crashPrevDone: false
+  property string crashLastText: ""
+  property int crashLastExit: 0
+  property bool crashLastDone: false
+  property string crashBootText: ""
+  property int crashBootExit: 0
+  property var sysCrashCursor: null
+  property var sysPsiPrev: null
+  property var crashLatched: ({})
+  property bool crashStateLoaded: false
+  readonly property string crashStatePath: Memory.crashPath(home)
   // The merged system code entries the dashboard reads.
   property var sysCodes: []
   // Round 10: the io PSI some avg60 the last cycle decoded, so the quiet
@@ -313,7 +330,7 @@ BarWidget {
   property bool calibWasQuiet: false
   property bool calibOrphanChecked: false
 
-  readonly property var readNames: ["meminfo", "psi", "swaps", "zram", "findmnt", "gpu", "apps", "bar", "kernel", "wedge", "units", "iopsi"]
+  readonly property var readNames: ["meminfo", "psi", "swaps", "zram", "findmnt", "gpu", "apps", "bar", "kernel", "wedge", "units", "iopsi", "crashboot", "crashprev", "crashlast"]
 
   function startSample(): void {
     if (cycleRunning) return;
@@ -332,6 +349,12 @@ BarWidget {
     wedgeProc.running = true;
     unitsProc.running = true;
     ioPsiProc.running = true;
+    crashbootProc.running = true;
+    // The previous boot and the wtmp boundary never change during a session,
+    // so their scans run once; a satisfied reader is marked done right here so
+    // the cycle gate stays exact.
+    if (root.crashPrevDone) root.markDone("crashprev"); else crashprevProc.running = true;
+    if (root.crashLastDone) root.markDone("crashlast"); else crashlastProc.running = true;
   }
 
   function markDone(name): void {
@@ -369,6 +392,9 @@ BarWidget {
     if (wedgeProc.running) wedgeProc.running = false;
     if (unitsProc.running) unitsProc.running = false;
     if (ioPsiProc.running) ioPsiProc.running = false;
+    if (crashbootProc.running) crashbootProc.running = false;
+    if (crashprevProc.running) crashprevProc.running = false;
+    if (crashlastProc.running) crashlastProc.running = false;
     console.warn("memory-monitor:", Memory.degradationSurface("wedged-process"), reason)
     for (var k = 0; k < readNames.length; k++) markDone(readNames[k]);
   }
@@ -417,7 +443,32 @@ BarWidget {
     sysKernelCursor = merged.cursor;
     sysLayerPrev = merged.layerNext;
     sysDiskPrev = merged.diskNext;
-    sysCodes = merged.entries;
+    // Round 11: the crash forensics latch and the sustained-pressure code.
+    // Crash entries pass through a calibration quiet window (a crash is never
+    // calibration noise); the pressure entry is held by it (psiPressureSysCode
+    // decides that, quiet freezes its windows) because a run induces the very
+    // pressure the code watches.
+    var crash = Quattro.crashSysUpdate(
+      { text: root.crashPrevText, exit: root.crashPrevExit, done: root.crashPrevDone },
+      { text: root.crashLastText, exit: root.crashLastExit, done: root.crashLastDone },
+      { text: root.crashBootText, exit: root.crashBootExit },
+      root.sysCrashCursor,
+      root.crashLatched);
+    sysCrashCursor = crash.cursor;
+    if (crash.changed) {
+      crashLatched = crash.latched;
+      if (root.isWriter && root.crashStateLoaded) root.writeCrashState();
+    }
+    var psiSome10 = psi !== null && psi.some_avg10 !== undefined ? psi.some_avg10 : null;
+    var psiCode = Quattro.psiPressureSysCode(
+      psiSome10,
+      Memory.thresholdsFor(state, "ram"),
+      root.sysPsiPrev,
+      new Date().getTime(),
+      Memory.normalizeNumber(setting("psiPressureSustainSec", -1), -1),
+      root.calibQuiet());
+    sysPsiPrev = psiCode.next;
+    sysCodes = merged.entries.concat(crash.entries).concat(psiCode.entry === null ? [] : [psiCode.entry]);
   }
 
   function buildReadings(): void {
@@ -1043,6 +1094,46 @@ BarWidget {
     var next = JSON.parse(JSON.stringify(state));
     if (!next.firstRunAt) next.firstRunAt = new Date().toISOString();
     writeState(next);
+  }
+
+  // --- Round 11: the crash latch file. The in-memory map is the working
+  // --- truth; the file is the persistence that carries a latch across a
+  // --- restart. Only the writer instance writes, only on change.
+  function loadCrashState(raw): void {
+    var text = String(raw === undefined || raw === null ? "" : raw).trim();
+    var parsed = {};
+    if (text !== "") {
+      try {
+        parsed = JSON.parse(text);
+      } catch (e) {
+        console.warn("memory-monitor: crash state is unreadable, falling back to the journal scans");
+        parsed = {};
+      }
+    }
+    var normalized = Quattro.normalizeCrashLatched(parsed);
+    crashLatched = Quattro.crashMergeLatched(normalized.codes, root.crashLatched);
+    crashStateLoaded = true;
+  }
+
+  function writeCrashState(): void {
+    crashFile.setText(JSON.stringify({ codes: root.crashLatched }));
+  }
+
+  // The dash's right-click acknowledge: quattro decides ackability, the map
+  // loses exactly the acknowledged signature, and the once-per-session scans
+  // that carried it are retired with it - their cached text would rebuild the
+  // record on the next cycle, and only a scan that runs after the ack may
+  // latch the signature again. Return shape mirrors dispatchCriticalCode's
+  // decision object.
+  function ackCrashCode(entry): var {
+    if (!Quattro.codeAckable(entry)) return { cleared: false, why: "not-crash" };
+    if (!isWriter) return { cleared: false, why: "not-writer" };
+    var sig = Quattro.crashSigOf(entry);
+    crashLatched = Quattro.ackCrashRecord(root.crashLatched, sig);
+    crashPrevText = "";
+    crashLastText = "";
+    root.writeCrashState();
+    return { cleared: true };
   }
 
   // ---------------------------------------------------------------------------
@@ -1843,6 +1934,57 @@ BarWidget {
     }
   }
 
+  // Round 11: the crash forensics readers. Every argv is quattro.js's; exit 1
+  // is a clean scan (no matches), anything past it is an unreadable journal
+  // and renders the honest unknown row. The boot-0 scan rebuilds its command
+  // from the cursor like kernelProc does; the prev-boot scan and the wtmp read
+  // run once per session and are marked satisfied only by a readable exit -
+  // an unreadable one (a watchdog kill, a failed journalctl) stays unsatisfied
+  // and the reader runs again next cycle.
+  Process {
+    id: crashbootProc
+    command: Quattro.crashWedgeArgs(root.sysCrashCursor)
+    stdout: StdioCollector {
+      onStreamFinished: root.crashBootText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.crashBootExit = exitCode;
+      if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: journalctl crash grep unreadable, exit", exitCode)
+      root.markDone("crashboot");
+    }
+  }
+
+  Process {
+    id: crashprevProc
+    command: Quattro.crashWedgePrevArgs()
+    stdout: StdioCollector {
+      onStreamFinished: root.crashPrevText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.crashPrevExit = exitCode;
+      root.crashPrevDone = exitCode === 0 || exitCode === 1;
+      if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: journalctl prev-boot crash grep unreadable, exit", exitCode)
+      root.markDone("crashprev");
+    }
+  }
+
+  Process {
+    id: crashlastProc
+    command: Quattro.crashLastArgs()
+    stdout: StdioCollector {
+      onStreamFinished: root.crashLastText = this.text
+    }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.crashLastExit = exitCode;
+      root.crashLastDone = exitCode === 0 || exitCode === 1;
+      if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: last unreadable, exit", exitCode)
+      root.markDone("crashlast");
+    }
+  }
+
   // --- Round 10: the calibration runner plumbing. Four processes and one
   //     watchdog timer. The run process is a long-running CLIENT of the
   //     transient unit (systemd-run --pipe --wait): its stdout streams the
@@ -2076,6 +2218,7 @@ BarWidget {
       if (exitCode !== 0) console.warn("memory-monitor: could not create the state dir, state stays in memory");
       root.stateDirDone = true;
       stateFile.reload();
+      crashFile.reload();
     }
   }
 
@@ -2102,6 +2245,19 @@ BarWidget {
     onLoaded: root.dnd = Memory.parseDnd(text())
     onFileChanged: reload()
     onLoadFailed: root.dnd = null
+  }
+
+  // Round 11: the crash latch's own file. The widget owns it (no watch, the
+  // writes are atomic), and losing it is self-healing: the first prev-boot
+  // scan re-derives everything still inside -b -1.
+  FileView {
+    id: crashFile
+    path: root.crashStatePath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadCrashState(text())
+    onLoadFailed: root.loadCrashState("")
   }
 
   FileView {

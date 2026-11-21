@@ -1,0 +1,5 @@
+1795280100.100000 omarchy kernel: NVRM: Xid (PCI:0000:01:00): 13, Graphics Exception on node 0
+1795280200.200000 omarchy kernel: INFO: task jbd2/sda2-8:826 blocked for more than 120 seconds.
+1795280300.300000 omarchy kernel: watchdog: BUG: kernel hang in qemu-system-x86_64 (for 5s!)
+-- Boot 66235c1525214960a0b67784b8962a29 --
+1795280400.400000 omarchy kernel: usb 1-2: new high-speed USB device number 5 using xhci_hcd

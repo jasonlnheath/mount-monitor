@@ -1880,8 +1880,23 @@ Panel {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: {
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      onClicked: function(mouse) {
         if (codeRow.entry === null) return
+        // Round 11: a crash latch clears by acknowledge, not by condition
+        // (a reboot never clears it). Left click still dispatches the
+        // diagnosis to the agent; right click asks the monitor to clear, and
+        // quattro decides which entries are clearable at all.
+        if (mouse.button === Qt.RightButton) {
+          if (!Quattro.codeAckable(codeRow.entry)) return
+          var decision = callMonitor("ackCrashCode", [codeRow.entry], null)
+          if (decision === null || decision.cleared !== true) {
+            showToast("not cleared here.", true)
+            return
+          }
+          showToast(Quattro.crashAckToast(codeRow.entry), false)
+          return
+        }
         root.dispatchCode(codeRow.entry)
       }
       onContainsMouseChanged: if (!containsMouse) root.hideTip()

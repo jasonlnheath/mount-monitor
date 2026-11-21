@@ -1,0 +1,4 @@
+reboot   system boot  7.3.0-2-cachyos* 2026-11-08T02:24:39-05:00   still running
+shutdown system down  7.3.0-2-cachyos* 2026-11-08T02:23:41-05:00 - 2026-11-08T02:24:39-05:00  (00:00)
+reboot   system boot  7.3.0-2-cachyos* 2026-11-08T00:50:48-05:00 - 2026-11-08T02:23:41-05:00  (01:32)
+wtmp begins Fri Oct 24 16:05:23 2026

@@ -1,0 +1,8 @@
+1795256022.037356 omarchy kernel: watchdog: BUG: soft lockup - CPU#19 stuck for 49s! [kcompactd0:225]
+1795256016.389362 omarchy kernel: rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:
+1795255994.037357 omarchy kernel: watchdog: BUG: soft lockup - CPU#19 stuck for 23s! [kcompactd0:225]
+1795255843.354353 omarchy kernel: rcu: INFO: rcu_preempt detected expedited stalls on CPUs/tasks: { P3723481 } 60826 jiffies s: 494521 root: 0x1/.
+1795255836.384365 omarchy kernel: rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:
+1794980704.823759 omarchy kernel: Memory cgroup out of memory: Killed process 87209 (python3) total-vm:33573972kB, anon-rss:486764kB, file-rss:7104kB, shmem-rss:0kB, UID:1000 pgtables:33864kB oom_score_adj:200
+1794980704.823747 omarchy kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=user.slice,mems_allowed=0,oom_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/quattrodash-calib.service,task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/quattrodash-calib.service,task=python3,pid=87209,uid=1000
+1794980704.822354 omarchy kernel: python3 invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=200

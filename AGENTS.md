@@ -48,7 +48,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `memory-monitor/memory.js` exactly as Mount Monitor's live in `mounts.js`,
   with the QuattroDash popup's own decisions (LED bands, dial geometry, the
   gauge threshold slider model and its settings-row copy, code taxonomy plus
-  the round-9 system fault codes (bar, kernel, GPU, layer, disk), the VRAM
+  the system fault codes - round 9's bar/kernel/GPU/layer/disk and round 11's
+  crash forensics (journal wedge signatures latched with evidence, persisted
+  to `crash-codes.json`, cleared by acknowledge) and the sustained RAM
+  pressure code, the VRAM
   per-process hover grid, cluster copy, the ISO symbol artwork) in
   `memory-monitor/quattro.js`,
   rendered by `QuattroDash.qml` / `QuattroSymbol.qml` under the same
@@ -120,10 +123,14 @@ the 0-35 pressure face), and an offscreen
 `qml6` pixel probe that loads `QuattroSymbol.qml` in a real Qt runtime and
 skips where `qml6` is absent) and over `memory-monitor/quattro.js` (the
 QuattroDash LED, PSI/fuel and coolant bands, the gauge threshold slider model
-and its live-band tests, code taxonomy, the round-9 system fault code rules
+and its live-band tests, code taxonomy, the system fault code rules
 and copy, the VRAM per-process hover grid, and the no-em-dash copy rule) plus the
 RingKit conformance check that runs
 `ringkit.js`, `mounts.js bandFor` and `memory.js` against one set of band cases.
+`tests/crash.test.mjs` is round 11's contract: the crash argvs, the signature
+classifier and its precedence, the wtmp unclean-boundary rule, the latch
+round trip across a simulated restart, the acknowledge rule, and the
+sustained-PSI latch/no-latch/clear matrix against the rig's own fixture lines.
 
 ## Contracts worth not breaking
 

@@ -32,6 +32,12 @@
 // pre-computed diagnosis (diagnosisJson) as a fenced JSON block in the agent
 // prompt, so Hermes explains from the dashboard's numbers instead of
 // re-diagnosing from scratch.
+// Round 11 revision (the captain's ruling after the 2026-11-20 wedge): RAM
+// AMOUNT high is still never a code, but RAM PRESSURE held over the red
+// ceiling is (psiPressureSysCode, the sys|ram subject), and crash evidence
+// from the journal is (crashSysUpdate, the sys|crash:<sig> family). Pressure
+// is stall time, not footprint: a spike and a cache-resident machine stay
+// gauge-only.
 //
 // Round 2 also replaced the VRAM COOLANT tank card with the STANDARD ISO
 // coolant warning light: the thermometer-in-liquid artwork this file already
@@ -1360,11 +1366,16 @@ var SYS_SUBJECTS = {
   gpu: "sys|gpu",
   layer: "sys|layer",
   disk: "sys|disk",
+  crash: "sys|crash",
+  ram: "sys|ram",
 };
 
 function layerSubject(unit) {
   return SYS_SUBJECTS.layer + ":" + String(unit);
 }
+
+// The crash signature's own subject, the layer precedent: stable digits over
+// "sys|crash:<sig>", so each wedge signature keeps its own code.
 
 // The layer unit watch list: a small built-in list of the background units
 // this rig and Omarchy run. Absent units drop out of the readings; the list
@@ -1592,6 +1603,8 @@ var SYS_STATUS = {
   moderate: "moderate, system fault showing.",
   severe: "severe, system fault showing.",
   unknown: "unknown. the reading could not be taken.",
+  crashModerate: "moderate, crash evidence in the journal.",
+  crashSevere: "severe, crash evidence in the journal.",
 };
 
 var SYS_FIX = {
@@ -1805,6 +1818,548 @@ function diskSysCode(psi, readable, prev) {
   return { next: { amberRuns: 0 }, entry: null };
 }
 
+// --- round 11: crash forensics ----------------------------------------------
+//
+// The captain's ruling after the 2026-11-20 wedge: "i should be able to go
+// back into quattro dash after a crash and it should throw a code. it should
+// be monitoring the logs that you're looking at." The round-9 codes are
+// live-only; they die with the bar and a restart re-baselines them, so the
+// night's evidence never reached the dash. This family reads the journal for
+// the wedge signatures (current AND previous boot), latches one code per
+// signature with the exact evidence lines, and the widget persists the latch
+// to the state dir so it survives restarts. Measured on the rig before a
+// line moved (docs/plans/2026-11-21-quattro-crash-forensics.md): the grep
+// answers boot -1 in 158 ms, --grep exit 1 is a clean scan, and the unclean
+// shutdown question is answered by wtmp, not the journal (journald is stopped
+// before the final shutdown targets land).
+//
+// One code per signature, subject sys|crash:<sig>, the layer precedent. The
+// kernel-text trust law holds: a journal line is data. Culprit names are
+// extracted through sanitizeText into the terse visible row; the exact lines
+// ride the diagnosis JSON, never a prompt sentence.
+
+var CRASH_MAX_LINES = 80;
+
+// The wedge alternation, one fixed PCRE for both journal greps. Case folded
+// here and matched case-insensitively in the classifier, in step: --grep is
+// case-sensitive without the (?i) prefix (measured). Kernel messages only
+// (-k): the full journal matches userspace noise like a Discord heartbeat
+// warning that says "blocked for more than 10 seconds".
+var CRASH_GREP_PATTERN =
+  "(?i)(soft lockup|softlockup|rcu.*(stall|starv)|blocked for more than|hung task|hung_task|watchdog: BUG|NVRM:.*(Xid|RmInitAdapter failed)|Out of memory: Killed process|oom-kill|invoked oom-killer|Memory cgroup out of memory)";
+
+// Precedence order for the classifier and the codes column. The real wedge
+// line "watchdog: BUG: soft lockup ..." is lockup evidence: first match wins,
+// one line never lights two codes.
+var CRASH_SIGS = ["lockup", "rcu", "hung", "watchdog", "nvrm", "oom", "power"];
+
+// The wedge family is severe: a soft lockup, an RCU stall, a hung task, a
+// watchdog BUG or an NVRM Xid is the machine wedging or the driver falling
+// over. An oom kill is moderate evidence (a process died, the machine
+// handled it). An unclean boundary is moderate evidence (a hard cycle or a
+// power loss; the kernel signatures carry the severity).
+var CRASH_BANDS = { lockup: 2, rcu: 2, hung: 2, watchdog: 2, nvrm: 2, oom: 1, power: 1 };
+
+// Evidence kept per record: the newest lines, the same cap the diagnosis
+// detail uses.
+var CRASH_LINES_MAX = SYS_DETAIL_MAX_LINES;
+
+function crashSubject(sig) {
+  return SYS_SUBJECTS.crash + ":" + String(sig);
+}
+
+// --- argvs. Boot 0 rides the cursor (deltas only); the previous boot never
+// --- changes during a session, so it is one bounded grep per session.
+function crashWedgeArgs(cursor) {
+  const args = ["journalctl", "-k", "-b", "--output=short-unix", "--no-pager",
+    "--grep", CRASH_GREP_PATTERN, "-n", String(CRASH_MAX_LINES)];
+  const c = asNumber(cursor);
+  if (c !== null) args.push("--since=@" + c);
+  return args;
+}
+
+function crashWedgePrevArgs() {
+  return ["journalctl", "-k", "-b", "-1", "--output=short-unix", "--no-pager",
+    "--grep", CRASH_GREP_PATTERN, "-n", String(CRASH_MAX_LINES)];
+}
+
+// The unclean-shutdown read: wtmp, world readable, no root. A clean boundary
+// pairs reboot with shutdown; a hard cycle leaves no shutdown row.
+function crashLastArgs() {
+  return ["last", "-x", "--time-format=iso", "shutdown", "reboot"];
+}
+
+// --- classification. Case-folded indexOf in the same order as the grep's
+// --- alternation, so a line journalctl matched is a line the classifier
+// --- names, and first match wins.
+function classifyCrashLine(message) {
+  const m = String(message === undefined || message === null ? "" : message).toLowerCase();
+  if (m.indexOf("soft lockup") >= 0 || m.indexOf("softlockup") >= 0) return "lockup";
+  const rcuAt = m.indexOf("rcu");
+  if (rcuAt >= 0 && (m.indexOf("stall", rcuAt) >= 0 || m.indexOf("starv", rcuAt) >= 0)) return "rcu";
+  if (m.indexOf("blocked for more than") >= 0 || m.indexOf("hung task") >= 0 || m.indexOf("hung_task") >= 0) return "hung";
+  if (m.indexOf("watchdog: bug") >= 0) return "watchdog";
+  if (m.indexOf("nvrm:") >= 0 && (m.indexOf("xid") >= 0 || m.indexOf("rminitadapter failed") >= 0)) return "nvrm";
+  if (m.indexOf("out of memory: killed process") >= 0 || m.indexOf("oom-kill") >= 0 || m.indexOf("invoked oom-killer") >= 0) return "oom";
+  return null;
+}
+
+function crashScanBySig(lines) {
+  const bySig = {};
+  for (const line of lines === null || lines === undefined ? [] : lines) {
+    const sig = classifyCrashLine(line.message);
+    if (sig === null) continue;
+    if (bySig[sig] === undefined) bySig[sig] = [];
+    bySig[sig].push(line);
+  }
+  return bySig;
+}
+
+// --- wtmp. Rows of { kind, iso, raw }, newest first; every line that is not
+// --- a reboot or shutdown row (user rows, the wtmp begins footer) is noise.
+function parseLastBoots(text) {
+  const rows = [];
+  const lines = String(text === undefined || text === null ? "" : text).split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const parts = trimmed.split(/\s+/);
+    const kind = parts[0] === "reboot" || parts[0] === "shutdown" ? parts[0] : null;
+    if (kind === null || parts[1] !== "system") continue;
+    const isoMatch = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?/.exec(trimmed.slice(trimmed.search(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)));
+    if (isoMatch === null) continue;
+    rows.push({ kind: kind, iso: isoMatch[0], raw: sanitizeText(trimmed, 200) });
+  }
+  return rows;
+}
+
+// The ordinal boundary rule: the newest row is the current boot; the first
+// older row says how the previous boot ended. shutdown follows reboot on a
+// clean boundary; reboot follows reboot when the previous boot never ended
+// cleanly (the hard cycle: no shutdown row, the reboot row still says "still
+// running"). No date parsing: the ISO timestamp stays text evidence.
+function uncleanShutdown(rows) {
+  const list = rows === null || rows === undefined ? [] : rows;
+  if (list.length < 2 || !list[0] || list[0].kind !== "reboot") return null;
+  const prevRow = list[1];
+  if (!prevRow) return null;
+  if (prevRow.kind === "shutdown") return { unclean: false, iso: null, raw: null };
+  if (prevRow.kind === "reboot") return { unclean: true, iso: prevRow.iso, raw: prevRow.raw };
+  return null;
+}
+
+// --- the latch. Records carry facts only; the copy is derived at render.
+// --- Counts are dedup-honest: only lines strictly past the record's
+// --- lastEpoch add to the count, so the once-per-session prev scan and the
+// --- per-cycle boot deltas never double-count the same line across restarts.
+function crashMergeScan(latched, bySig, boot, scanSaturated) {
+  const next = {};
+  let changed = false;
+  for (const k in latched) next[k] = latched[k];
+  for (const sig in bySig) {
+    const lines = bySig[sig];
+    const base = latched[sig] && typeof latched[sig] === "object"
+      ? latched[sig]
+      : { sig: sig, boot: boot, firstEpoch: null, lastEpoch: null, count: 0, saturated: false, bootIso: null, lines: [] };
+    const epochs = [];
+    for (const l of lines) {
+      const e = asNumber(l.epoch);
+      if (e !== null) epochs.push(e);
+    }
+    const oldest = epochs.length === 0 ? null : Math.min.apply(null, epochs);
+    const newest = epochs.length === 0 ? null : Math.max.apply(null, epochs);
+    let added = 0;
+    for (const l of lines) {
+      const e = asNumber(l.epoch);
+      if (e !== null && base.lastEpoch !== null && base.lastEpoch !== undefined && e <= base.lastEpoch) continue;
+      added += 1;
+    }
+    const seen = {};
+    const union = [];
+    for (const l of (asList(base.lines) || []).concat(lines)) {
+      const e = asNumber(l.epoch);
+      const msg = sanitizeText(l.message, 200);
+      const key = String(e) + "|" + msg;
+      if (seen[key]) continue;
+      seen[key] = true;
+      union.push({ epoch: e, message: msg });
+    }
+    union.sort(function (a, b) { return (a.epoch === null ? 0 : a.epoch) - (b.epoch === null ? 0 : b.epoch); });
+    const cand = {
+      sig: sig,
+      boot: base.boot === undefined ? boot : base.boot,
+      firstEpoch: base.firstEpoch !== null && base.firstEpoch !== undefined && (oldest === null || base.firstEpoch <= oldest)
+        ? base.firstEpoch : oldest,
+      lastEpoch: newest !== null && (base.lastEpoch === null || base.lastEpoch === undefined || newest > base.lastEpoch)
+        ? newest : base.lastEpoch,
+      count: Math.max(1, (asNumber(base.count) || 0) + added),
+      saturated: base.saturated === true || scanSaturated === true,
+      bootIso: base.bootIso === undefined ? null : base.bootIso,
+      lines: union.slice(-CRASH_LINES_MAX),
+    };
+    if (JSON.stringify(cand) === JSON.stringify(base)) continue;
+    next[sig] = cand;
+    changed = true;
+  }
+  return { next: next, changed: changed };
+}
+
+// The power latch freezes the freshest unclean boundary and its evidence. A
+// clean boundary never clears it (persistence is the point); a second unclean
+// boundary refreshes the evidence.
+function crashMergePower(latched, boundary) {
+  if (boundary === null || boundary.unclean !== true) return { next: latched, changed: false };
+  const base = latched.power && typeof latched.power === "object"
+    ? latched.power
+    : { sig: "power", boot: -1, firstEpoch: null, lastEpoch: null, count: 0, saturated: false, bootIso: null, lines: [] };
+  const cand = {
+    sig: "power",
+    boot: -1,
+    firstEpoch: base.firstEpoch === undefined ? null : base.firstEpoch,
+    lastEpoch: base.lastEpoch === undefined ? null : base.lastEpoch,
+    count: (asNumber(base.count) || 0) + (base.bootIso === boundary.iso ? 0 : 1),
+    saturated: base.saturated === true,
+    bootIso: sanitizeText(boundary.iso, 64) || null,
+    lines: boundary.raw === null ? [] : [{ epoch: null, message: sanitizeText(boundary.raw, 200) }],
+  };
+  if (JSON.stringify(cand) === JSON.stringify(base)) return { next: latched, changed: false };
+  const next = {};
+  for (const k in latched) next[k] = latched[k];
+  next.power = cand;
+  return { next: next, changed: true };
+}
+
+// The per-cycle decode. prev and last are { text, exit, done } (once per
+// session, done only once they have answered readably); boot is { text, exit }
+// (every cycle). Exit past 1 is an unreadable scan: the honest unknown row
+// for the cycle, never a confident clean zero - and for prev/last, a lane
+// that is not done and runs again.
+function crashSysUpdate(prev, last, boot, cursor, latched) {
+  let next = latched && typeof latched === "object" ? latched : {};
+  let changed = false;
+  let unknown = false;
+  let maxEpoch = asNumber(cursor);
+
+  const p = prev && typeof prev === "object" ? prev : {};
+  const pExit = asNumber(p.exit);
+  if (pExit === null || (pExit !== 0 && pExit !== 1)) unknown = true;
+  else if (p.done === true) {
+    const lines = parseJournalLines(p.text);
+    const m = crashMergeScan(next, crashScanBySig(lines), -1, lines.length >= CRASH_MAX_LINES);
+    if (m.changed) { next = m.next; changed = true; }
+    for (const line of lines) {
+      const e = asNumber(line.epoch);
+      if (e !== null && (maxEpoch === null || e > maxEpoch)) maxEpoch = e;
+    }
+  }
+  const l = last && typeof last === "object" ? last : {};
+  const lExit = asNumber(l.exit);
+  if (lExit === null || (lExit !== 0 && lExit !== 1)) unknown = true;
+  else if (l.done === true) {
+    const m = crashMergePower(next, uncleanShutdown(parseLastBoots(l.text)));
+    if (m.changed) { next = m.next; changed = true; }
+  }
+  const b = boot && typeof boot === "object" ? boot : {};
+  const bExit = asNumber(b.exit);
+  if (bExit !== null && bExit !== 0 && bExit !== 1) unknown = true;
+  else if (bExit !== null) {
+    const lines = parseJournalLines(b.text);
+    const m = crashMergeScan(next, crashScanBySig(lines), 0, lines.length >= CRASH_MAX_LINES);
+    if (m.changed) { next = m.next; changed = true; }
+    for (const line of lines) {
+      const e = asNumber(line.epoch);
+      if (e !== null && (maxEpoch === null || e > maxEpoch)) maxEpoch = e;
+    }
+  }
+
+  const entries = crashSysCodes(next);
+  if (unknown) entries.push(crashUnknownEntry());
+  return { cursor: maxEpoch, latched: next, entries: entries, changed: changed };
+}
+
+function crashUnknownEntry() {
+  return sysCode("crash", SYS_SUBJECTS.crash, 1,
+    "Crash log unreadable, forensic state unknown.",
+    SYS_STATUS.unknown, SYS_FIX.moderate, { readable: false });
+}
+
+function crashSysCodes(latched) {
+  const map = latched && typeof latched === "object" ? latched : {};
+  const out = [];
+  for (const sig of CRASH_SIGS) {
+    const r = map[sig];
+    if (!r || typeof r !== "object") continue;
+    if (CRASH_BANDS[sig] === undefined) continue;
+    out.push(crashRecordEntry(r));
+  }
+  return out;
+}
+
+// The entry a latch renders. The issue line carries the terse count and the
+// culprit the evidence names; the detail carries the facts for the diagnosis
+// JSON and the tooltip.
+function crashRecordEntry(record) {
+  const r = record && typeof record === "object" ? record : {};
+  const sig = sanitizeText(r.sig, 16);
+  const band = CRASH_BANDS[sig] === undefined ? 1 : CRASH_BANDS[sig];
+  const count = asNumber(r.count);
+  const countText = count === null ? "some" : (r.saturated === true ? count + "+" : String(count));
+  const issue = crashIssue(sig, countText, r);
+  const status = band >= 2 ? SYS_STATUS.crashSevere : SYS_STATUS.crashModerate;
+  const fix = band >= 2 ? SYS_FIX.severe : SYS_FIX.moderate;
+  return sysCode("crash", crashSubject(sig), band, issue, status, fix,
+    {
+      sig: sig,
+      boot: asNumber(r.boot),
+      firstEpoch: asNumber(r.firstEpoch),
+      lastEpoch: asNumber(r.lastEpoch),
+      count: count,
+      saturated: r.saturated === true,
+      bootIso: sanitizeText(r.bootIso, 64) || null,
+      lines: asList(r.lines) || [],
+    });
+}
+
+function crashIssue(sig, countText, r) {
+  const hits = countText === "1" ? "1 hit" : countText + " hits";
+  if (sig === "power") return "The last boot did not end cleanly.";
+  if (sig === "nvrm") return "NVRM error: " + hits + " in the log.";
+  if (sig === "oom") return "OOM kill: " + hits + ". Victim: " + crashCulprit(sig, r) + ".";
+  if (sig === "rcu") return "RCU stall: " + hits + ". Culprit: " + crashCulprit(sig, r) + ".";
+  if (sig === "lockup") return "Soft lockup: " + hits + ". Culprit: " + crashCulprit(sig, r) + ".";
+  if (sig === "hung") return "Hung task: " + hits + ". Culprit: " + crashCulprit(sig, r) + ".";
+  if (sig === "watchdog") return "Watchdog BUG: " + hits + ". Culprit: " + crashCulprit(sig, r) + ".";
+  return "Crash signature " + sig + ": " + hits + ".";
+}
+
+// The culprit a signature's evidence names, newest line first, sanitized like
+// every visible word: the bracketed task of a soft lockup, the task after
+// "INFO: task ", the oom victim, the kernel module otherwise.
+function crashCulprit(sig, r) {
+  const lines = asList(r.lines) || [];
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const c = crashCulpritOf(sig, lines[i] && lines[i].message);
+    if (c !== null) return c;
+  }
+  if (sig === "nvrm") return "NVRM";
+  return "kernel";
+}
+
+function crashCulpritOf(sig, message) {
+  const m = String(message === undefined || message === null ? "" : message);
+  if (sig === "lockup") {
+    const at = m.indexOf("[");
+    const close = at >= 0 ? m.indexOf("]", at) : -1;
+    if (at >= 0 && close > at) {
+      const inner = m.slice(at + 1, close);
+      const colon = inner.indexOf(":");
+      const clean = sanitizeText(colon >= 0 ? inner.slice(0, colon) : inner, 24);
+      if (clean.length > 0) return clean;
+    }
+    return null;
+  }
+  if (sig === "hung") {
+    const at = m.indexOf("INFO: task ");
+    if (at >= 0) {
+      const rest = m.slice(at + "INFO: task ".length);
+      let end = rest.length;
+      const colon = rest.indexOf(":");
+      const space = rest.indexOf(" ");
+      if (colon >= 0) end = Math.min(end, colon);
+      if (space >= 0) end = Math.min(end, space);
+      const clean = sanitizeText(rest.slice(0, end).trim(), 24);
+      if (clean.length > 0) return clean;
+    }
+    return null;
+  }
+  if (sig === "oom") {
+    const k = /Killed process \d+ \(([^)]+)\)/.exec(m);
+    if (k !== null) {
+      const clean = sanitizeText(k[1], 24);
+      if (clean.length > 0) return clean;
+    }
+    const t = /task=([^,]+)/.exec(m);
+    if (t !== null) {
+      const clean = sanitizeText(t[1], 24);
+      if (clean.length > 0) return clean;
+    }
+    return null;
+  }
+  const mod = kernelModuleOf(m);
+  return mod === "kernel" ? null : mod;
+}
+
+// Acknowledge: the map minus one signature, pure. The dash asks codeAckable
+// before it offers the clear; the monitor performs it and writes the file.
+function ackCrashRecord(latched, sig) {
+  const map = latched && typeof latched === "object" ? latched : {};
+  const s = sanitizeText(sig, 16);
+  if (map[s] === undefined) return map;
+  const next = {};
+  for (const k in map) if (k !== s) next[k] = map[k];
+  return next;
+}
+
+function crashSigOf(entry) {
+  const e = entry || {};
+  const a = e.alert || {};
+  if (a.type !== "sys" || a.sys !== "crash") return null;
+  const key = sanitizeText(a.key, 32);
+  const prefix = SYS_SUBJECTS.crash + ":";
+  if (key.indexOf(prefix) !== 0) return null;
+  const sig = sanitizeText(key.slice(prefix.length), 16);
+  return CRASH_BANDS[sig] === undefined ? null : sig;
+}
+
+function codeAckable(entry) {
+  return crashSigOf(entry) !== null;
+}
+
+// The latch file's shape, sanitized: unknown signatures and junk records drop,
+// evidence lines clamp to the record cap and the text cap.
+function normalizeCrashLatched(raw) {
+  const map = raw && typeof raw === "object" ? raw : {};
+  const codes = map.codes && typeof map.codes === "object" ? map.codes : {};
+  const out = {};
+  for (const sig of CRASH_SIGS) {
+    const r = codes[sig];
+    if (!r || typeof r !== "object") continue;
+    const count = asNumber(r.count);
+    const lines = [];
+    const rawLines = asList(r.lines) || [];
+    for (const l of rawLines) {
+      if (!l || typeof l !== "object") continue;
+      lines.push({ epoch: asNumber(l.epoch), message: sanitizeText(l.message, 200) });
+      if (lines.length >= CRASH_LINES_MAX) break;
+    }
+    out[sig] = {
+      sig: sig,
+      boot: asNumber(r.boot),
+      firstEpoch: asNumber(r.firstEpoch),
+      lastEpoch: asNumber(r.lastEpoch),
+      count: count === null ? 1 : Math.max(1, Math.floor(count)),
+      saturated: r.saturated === true,
+      bootIso: sanitizeText(r.bootIso, 64) || null,
+      lines: lines,
+    };
+  }
+  return { codes: out };
+}
+
+// Merging the file back over what this session already latched (or the other
+// way around): the record with the newer lastEpoch wins; ties go to the
+// overlay, so the fresh scan's power evidence beats the file's older copy.
+function crashMergeLatched(base, overlay) {
+  const b = normalizeCrashLatched({ codes: base && typeof base === "object" ? base : {} }).codes;
+  const o = normalizeCrashLatched({ codes: overlay && typeof overlay === "object" ? overlay : {} }).codes;
+  const out = {};
+  for (const sig of CRASH_SIGS) {
+    const br = b[sig];
+    const or = o[sig];
+    if (!br && !or) continue;
+    if (!br) { out[sig] = or; continue; }
+    if (!or) { out[sig] = br; continue; }
+    const bl = asNumber(br.lastEpoch);
+    const ol = asNumber(or.lastEpoch);
+    if (bl === null && ol === null) out[sig] = or;
+    else if (ol === null) out[sig] = br;
+    else if (bl === null) out[sig] = or;
+    else out[sig] = ol >= bl ? or : br;
+  }
+  return out;
+}
+
+// --- round 11: the sustained RAM-pressure code -------------------------------
+//
+// The captain's revision of the round-2 ruling: RAM high is still never a
+// code, but pressure held over the red ceiling is. Pressure is stall time:
+// the code reads PSI some avg10 and nothing else, so a single spike stays
+// gauge-only and a cache-resident machine at PSI 0 cannot light it by any
+// path. Red and amber are the alert ceilings the user already set
+// (thresholdsFor(state, "ram")), not new numbers.
+
+var PSI_CODE_SUSTAIN_SEC = 180;
+var PSI_CODE_CLEAR_SEC = 300;
+// A clock gap bigger than this (sleep, a suspended bar) restarts both
+// windows instead of latching across the jump.
+var PSI_CODE_GAP_MS = 120000;
+
+function psiPressureSysCode(psi, thresholds, prev, nowMs, sustainSecOverride, quiet) {
+  const pair = thresholds && typeof thresholds === "object" ? thresholds : {};
+  const amberNum = asNumber(pair.amber);
+  const redNum = asNumber(pair.red);
+  const amber = amberNum === null ? PSI_AMBER_AT : amberNum;
+  const red = redNum === null ? PSI_RED_AT : redNum;
+  const override = asNumber(sustainSecOverride);
+  const sustainMs = (override !== null && override > 0 ? override : PSI_CODE_SUSTAIN_SEC) * 1000;
+  const clearMs = PSI_CODE_CLEAR_SEC * 1000;
+  const memory = prev && typeof prev === "object" ? prev : {};
+  const state = {
+    aboveSinceMs: asNumber(memory.aboveSinceMs),
+    belowSinceMs: asNumber(memory.belowSinceMs),
+    latched: memory.latched === true,
+    atMs: asNumber(memory.atMs),
+  };
+  const value = asNumber(psi);
+  const now = asNumber(nowMs);
+
+  // A calibration run (or its hot aftermath) induces the very pressure this
+  // code watches: freeze, show a latch that predates the run, decide nothing.
+  if (quiet === true) {
+    return { next: state, entry: state.latched ? psiPressureEntry(value, state, now) : null };
+  }
+  if (value === null) {
+    // An unreadable reading decides nothing: the state is kept, and a latch
+    // that predates it stays visible until real calm clears it.
+    return { next: state, entry: state.latched ? psiPressureEntry(null, state, now) : null };
+  }
+
+  if (state.atMs !== null && now - state.atMs > PSI_CODE_GAP_MS) {
+    state.aboveSinceMs = null;
+    state.belowSinceMs = null;
+  }
+  state.atMs = now;
+
+  if (value >= red) {
+    state.belowSinceMs = null;
+    if (state.aboveSinceMs === null) state.aboveSinceMs = now;
+    if (!state.latched && now - state.aboveSinceMs >= sustainMs) state.latched = true;
+  } else if (value >= amber) {
+    // Between the lines: the sustain window restarts, the clear window
+    // restarts, the latch holds.
+    state.aboveSinceMs = null;
+    state.belowSinceMs = null;
+  } else {
+    state.aboveSinceMs = null;
+    if (state.latched) {
+      if (state.belowSinceMs === null) state.belowSinceMs = now;
+      else if (now - state.belowSinceMs >= clearMs) {
+        state.latched = false;
+        state.belowSinceMs = null;
+      }
+    } else {
+      state.belowSinceMs = null;
+    }
+  }
+  return { next: state, entry: state.latched ? psiPressureEntry(value, state, now) : null };
+}
+
+function psiPressureEntry(value, state, nowMs) {
+  const v = asNumber(value);
+  const above = asNumber(state.aboveSinceMs);
+  const now = asNumber(nowMs);
+  const held = v !== null && above !== null && now !== null
+    ? Math.max(1, Math.round((now - above) / 60000))
+    : null;
+  const issue = v === null
+    ? "RAM pressure sustained: PSI unknown."
+    : "RAM pressure sustained: " + v.toFixed(1) + " PSI held " +
+      Math.max(1, held) + (held === 1 ? " minute." : " minutes.");
+  return sysCode("ram", SYS_SUBJECTS.ram, 2, issue,
+    SYS_STATUS.severe, SYS_FIX.severe,
+    { psiSomeAvg10: v, aboveSinceMs: above, atMs: asNumber(state.atMs) });
+}
+
 // The codes column, drives and system faults merged. One column, most
 // critical at the top, code ascending inside the same band: the sort is the
 // one codesFromReadings applies, now over both families.
@@ -1861,6 +2416,12 @@ function systemDiagnosisRecommendation(sys, sev) {
   }
   if (sys === "disk") {
     return "name the processes behind the io stalls, ranked. do not kill or throttle anything yourself.";
+  }
+  if (sys === "crash") {
+    return "report what wedged, which boot carried it, and the evidence lines. propose only what the user can confirm. do not reboot, format, unmount, or delete anything yourself.";
+  }
+  if (sys === "ram") {
+    return "name the processes stalling the machine, ranked. pressure is stall time, not memory used. do not kill or throttle anything yourself.";
   }
   return sev === "r"
     ? "act now. report the fault and propose the fix."
@@ -1956,13 +2517,49 @@ function headroomZonesWith(totalMib, redMib, amberMib) {
 function codeTip(code) {
   const c = code || {};
   // Round 7 item 2: the code row's hover is one line too - the status line.
+  // Round 11: a crash latch's hover is the detail the captain asked to view:
+  // when it fired, the newest evidence line, and how to clear the code.
+  const rows = [
+    { label: "Status:", text: c.status, cls: c.sev === "r" ? "st-r" : "st-a" },
+  ];
+  if (crashSigOf(c) !== null) {
+    const d = (c.alert && c.alert.detail) || {};
+    const seen = crashSeenText(d);
+    if (seen !== null) rows.push({ label: "Seen:", text: seen, cls: "" });
+    const evidence = crashEvidenceLine(d);
+    if (evidence !== null) rows.push({ label: "Evidence:", text: evidence, cls: "" });
+    rows.push({ label: "Clear:", text: "right click clears the code.", cls: "" });
+  }
   return {
     header: c.code,
     sev: c.sev,
-    rows: [
-      { label: "Status:", text: c.status, cls: c.sev === "r" ? "st-r" : "st-a" },
-    ],
+    rows: rows,
   };
+}
+
+// The Seen row: ISO timestamps off the record's epochs, or the wtmp boot ISO
+// for the power latch. Machine data, sanitized.
+function crashSeenText(d) {
+  const dd = d || {};
+  const first = asNumber(dd.firstEpoch);
+  const last = asNumber(dd.lastEpoch);
+  if (first === null && last === null) {
+    const iso = sanitizeText(dd.bootIso, 64);
+    return iso.length > 0 ? "boot " + iso : null;
+  }
+  const parts = [];
+  if (first !== null) parts.push(new Date(first * 1000).toISOString());
+  if (last !== null && (first === null || last !== first)) parts.push("to " + new Date(last * 1000).toISOString());
+  return parts.length === 0 ? null : parts.join(" ");
+}
+
+function crashEvidenceLine(d) {
+  const lines = asList((d || {}).lines) || [];
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const msg = sanitizeText(lines[i] && lines[i].message, 80);
+    if (msg.length > 0) return msg;
+  }
+  return null;
 }
 
 // --- the pre-computed diagnosis (round 2, the engine-code click) -------------
@@ -2042,6 +2639,12 @@ function dispatchToast(code, severe) {
       ? "to firstmate (default agent), processing now"
       : "to firstmate (default agent)",
   };
+}
+
+// The right-click acknowledge confirmation, the dispatch toasts' plain-word
+// register. Clearing the code clears the row, never the journal.
+function crashAckToast(entry) {
+  return "cleared " + String((entry || {}).code || "the code") + ". the journal keeps the evidence.";
 }
 
 // A severe code's click rides the arm, and the arm's gate can refuse it. The
