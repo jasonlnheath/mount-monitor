@@ -321,6 +321,59 @@ test("crashSysUpdate: unreadable scans render the honest unknown row and latch n
   same(inFlight.entries, [], "a scan that has not answered yet says nothing");
 });
 
+test("crashSysUpdate: an unreadable once-per-session answer is unknown now and retried, never latched done", () => {
+  // A watchdog kill or a transient journalctl failure answers unreadable and
+  // not done: the honest unknown row this cycle, the reader again next cycle,
+  // the evidence latching when a scan finally answers readably.
+  const poisoned = Quattro.crashSysUpdate(
+    { text: "", exit: 15, done: false },
+    { text: "", exit: 15, done: false },
+    { text: "", exit: 1 },
+    null,
+    {},
+  );
+  assert.equal(poisoned.changed, false, "an unreadable answer latches nothing");
+  assert.equal(poisoned.entries.length, 1, "the unreadable lanes render one unknown row");
+  assert.equal(poisoned.entries[0].status, Quattro.SYS_STATUS.unknown);
+
+  const recovered = Quattro.crashSysUpdate(
+    { text: fixture("crash-journal-prev.txt"), exit: 0, done: true },
+    { text: fixture("crash-last-unclean.txt"), exit: 0, done: true },
+    { text: "-- No entries --", exit: 1 },
+    null,
+    poisoned.latched,
+  );
+  same(recovered.entries.filter(e => e.status === Quattro.SYS_STATUS.unknown), [], "a readable retry clears the unknown row");
+  assert.equal(recovered.latched.lockup.count, 2, "the retried prev-boot evidence latches");
+  assert.equal(recovered.latched.power.bootIso, "2026-11-16T09:52:54-05:00", "the retried wtmp boundary latches");
+});
+
+test("crashSysUpdate: an acknowledged signature cannot rebuild from the session's retired scans", () => {
+  const first = prevFixtureUpdate();
+  const acked = Quattro.ackCrashRecord(first.latched, "lockup");
+  // ackCrashCode retires the cached prev-boot and wtmp text with the record,
+  // so the next cycle's once-per-session feeds are empty and readable.
+  const next = Quattro.crashSysUpdate(
+    { text: "", exit: 0, done: true },
+    { text: "", exit: 0, done: true },
+    { text: "-- No entries --", exit: 1 },
+    first.cursor,
+    acked,
+  );
+  assert.equal(next.changed, false, "no crash-codes.json rewrite off retired evidence");
+  assert.equal(next.latched.lockup, undefined, "the acknowledge holds to the next cycle");
+  assert.equal(next.latched.oom.count, first.latched.oom.count, "the unacked signatures keep their latch");
+
+  const fresh = Quattro.crashSysUpdate(
+    { text: "", exit: 0, done: true },
+    { text: "", exit: 0, done: true },
+    { text: fixture("crash-journal-boot.txt"), exit: 0 },
+    next.cursor,
+    next.latched,
+  );
+  assert.equal(fresh.latched.nvrm.count, 1, "genuinely new evidence past the cursor still latches");
+});
+
 test("crashSysUpdate: a clean boundary never clears a power latch, a new one refreshes it", () => {
   const first = prevFixtureUpdate();
   const later = Quattro.crashSysUpdate(
@@ -523,6 +576,10 @@ test("MemoryMonitor.qml runs the three crash readers through quattro argvs", () 
   assert.equal(QML.includes("Memory.crashPath("), true, "the latch path comes from memory.js");
   assert.equal(QML.includes("Quattro.normalizeCrashLatched("), true);
   assert.equal(QML.includes("Quattro.crashMergeLatched("), true);
+  assert.equal(QML.includes('crashPrevText = ""'), true, "the acknowledge retires the cached prev-boot scan");
+  assert.equal(QML.includes('crashLastText = ""'), true, "and the cached wtmp read, so neither can rebuild a cleared record");
+  assert.equal(QML.includes("crashPrevDone = exitCode === 0 || exitCode === 1"), true, "the prev lane satisfies only on a readable exit");
+  assert.equal(QML.includes("crashLastDone = exitCode === 0 || exitCode === 1"), true, "so does the wtmp lane");
 });
 
 test("QuattroDash.qml acknowledges through the monitor, never the latch map", () => {

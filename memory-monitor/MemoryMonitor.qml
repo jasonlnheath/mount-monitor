@@ -1120,13 +1120,18 @@ BarWidget {
   }
 
   // The dash's right-click acknowledge: quattro decides ackability, the map
-  // loses exactly the acknowledged signature, the file is rewritten. Return
-  // shape mirrors dispatchCriticalCode's decision object.
+  // loses exactly the acknowledged signature, and the once-per-session scans
+  // that carried it are retired with it - their cached text would rebuild the
+  // record on the next cycle, and only a scan that runs after the ack may
+  // latch the signature again. Return shape mirrors dispatchCriticalCode's
+  // decision object.
   function ackCrashCode(entry): var {
     if (!Quattro.codeAckable(entry)) return { cleared: false, why: "not-crash" };
     if (!isWriter) return { cleared: false, why: "not-writer" };
     var sig = Quattro.crashSigOf(entry);
     crashLatched = Quattro.ackCrashRecord(root.crashLatched, sig);
+    crashPrevText = "";
+    crashLastText = "";
     root.writeCrashState();
     return { cleared: true };
   }
@@ -1933,7 +1938,9 @@ BarWidget {
   // is a clean scan (no matches), anything past it is an unreadable journal
   // and renders the honest unknown row. The boot-0 scan rebuilds its command
   // from the cursor like kernelProc does; the prev-boot scan and the wtmp read
-  // run once per session and are marked satisfied after their first exit.
+  // run once per session and are marked satisfied only by a readable exit -
+  // an unreadable one (a watchdog kill, a failed journalctl) stays unsatisfied
+  // and the reader runs again next cycle.
   Process {
     id: crashbootProc
     command: Quattro.crashWedgeArgs(root.sysCrashCursor)
@@ -1957,7 +1964,7 @@ BarWidget {
     stderr: StdioCollector { onStreamFinished: void this.text }
     onExited: function(exitCode, exitStatus) {
       root.crashPrevExit = exitCode;
-      root.crashPrevDone = true;
+      root.crashPrevDone = exitCode === 0 || exitCode === 1;
       if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: journalctl prev-boot crash grep unreadable, exit", exitCode)
       root.markDone("crashprev");
     }
@@ -1972,8 +1979,8 @@ BarWidget {
     stderr: StdioCollector { onStreamFinished: void this.text }
     onExited: function(exitCode, exitStatus) {
       root.crashLastExit = exitCode;
-      root.crashLastDone = true;
-      if (exitCode !== 0) console.warn("memory-monitor: last unreadable, exit", exitCode)
+      root.crashLastDone = exitCode === 0 || exitCode === 1;
+      if (exitCode !== 0 && exitCode !== 1) console.warn("memory-monitor: last unreadable, exit", exitCode)
       root.markDone("crashlast");
     }
   }

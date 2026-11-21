@@ -2030,8 +2030,10 @@ function crashMergePower(latched, boundary) {
 }
 
 // The per-cycle decode. prev and last are { text, exit, done } (once per
-// session); boot is { text, exit } (every cycle). Exit past 1 is an unreadable
-// scan: the honest unknown row for the cycle, never a confident clean zero.
+// session, done only once they have answered readably); boot is { text, exit }
+// (every cycle). Exit past 1 is an unreadable scan: the honest unknown row
+// for the cycle, never a confident clean zero - and for prev/last, a lane
+// that is not done and runs again.
 function crashSysUpdate(prev, last, boot, cursor, latched) {
   let next = latched && typeof latched === "object" ? latched : {};
   let changed = false;
@@ -2039,27 +2041,23 @@ function crashSysUpdate(prev, last, boot, cursor, latched) {
   let maxEpoch = asNumber(cursor);
 
   const p = prev && typeof prev === "object" ? prev : {};
-  if (p.done === true) {
-    const exit = asNumber(p.exit);
-    if (exit === null || (exit !== 0 && exit !== 1)) unknown = true;
-    else {
-      const lines = parseJournalLines(p.text);
-      const m = crashMergeScan(next, crashScanBySig(lines), -1, lines.length >= CRASH_MAX_LINES);
-      if (m.changed) { next = m.next; changed = true; }
-      for (const line of lines) {
-        const e = asNumber(line.epoch);
-        if (e !== null && (maxEpoch === null || e > maxEpoch)) maxEpoch = e;
-      }
+  const pExit = asNumber(p.exit);
+  if (pExit === null || (pExit !== 0 && pExit !== 1)) unknown = true;
+  else if (p.done === true) {
+    const lines = parseJournalLines(p.text);
+    const m = crashMergeScan(next, crashScanBySig(lines), -1, lines.length >= CRASH_MAX_LINES);
+    if (m.changed) { next = m.next; changed = true; }
+    for (const line of lines) {
+      const e = asNumber(line.epoch);
+      if (e !== null && (maxEpoch === null || e > maxEpoch)) maxEpoch = e;
     }
   }
   const l = last && typeof last === "object" ? last : {};
-  if (l.done === true) {
-    const exit = asNumber(l.exit);
-    if (exit === null || (exit !== 0 && exit !== 1)) unknown = true;
-    else {
-      const m = crashMergePower(next, uncleanShutdown(parseLastBoots(l.text)));
-      if (m.changed) { next = m.next; changed = true; }
-    }
+  const lExit = asNumber(l.exit);
+  if (lExit === null || (lExit !== 0 && lExit !== 1)) unknown = true;
+  else if (l.done === true) {
+    const m = crashMergePower(next, uncleanShutdown(parseLastBoots(l.text)));
+    if (m.changed) { next = m.next; changed = true; }
   }
   const b = boot && typeof boot === "object" ? boot : {};
   const bExit = asNumber(b.exit);
