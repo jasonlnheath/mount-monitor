@@ -1450,6 +1450,36 @@ test("the language rule holds over every string the popup copy can produce", () 
     texts.push(prompt);
     texts.push(Quattro.systemDiagnosisRecommendation(sys, "r"), Quattro.systemDiagnosisRecommendation(sys, "a"));
   }
+  // Round 11: the crash-forensics and sustained-pressure copy. Evidence
+  // lines are machine data (the detail.lines exemption), so the codeTip scan
+  // here skips the Evidence row; theSeen rows and every derived sentence ride
+  // the scan.
+  const langCrash = Quattro.crashSysUpdate(
+    { text: fixture("crash-journal-prev.txt"), exit: 0, done: true },
+    { text: fixture("crash-last-unclean.txt"), exit: 0, done: true },
+    { text: "-- No entries --", exit: 1 },
+    null, {});
+  for (const entry of langCrash.entries) {
+    texts.push(entry.issue, entry.status, entry.fix);
+    const tip = Quattro.codeTip(entry);
+    for (const row of tip.rows) if (row.label !== "Evidence:") texts.push(row.text);
+    pushDiagnosis(entry);
+  }
+  texts.push(Quattro.crashSysUpdate(
+    { text: "", exit: 2, done: true }, { text: "", exit: 0, done: true },
+    { text: "", exit: 1 }, null, {}).entries[0].issue);
+  texts.push(Quattro.crashAckToast({ code: "C0001" }), Quattro.crashAckToast(null));
+  const langPsiState = { aboveSinceMs: 1000, belowSinceMs: null, latched: true, atMs: 61000 };
+  const langPsi = Quattro.psiPressureSysCode(31.4, { amber: 15, red: 28 }, langPsiState, 63000, -1, false).entry;
+  texts.push(langPsi.issue, langPsi.status, langPsi.fix,
+    Quattro.psiPressureSysCode(null, { amber: 15, red: 28 }, langPsiState, 63000, -1, false).entry.issue);
+  pushDiagnosis(langPsi);
+  for (const sys of ["crash", "ram"]) {
+    const prompt = Memory.systemAgentPrompt({ sys: sys, band: 1, id: Quattro.memIdSys("sys|ram"), code: "C0001" });
+    texts.push(prompt);
+    texts.push(Quattro.systemDiagnosisRecommendation(sys, "r"), Quattro.systemDiagnosisRecommendation(sys, "a"));
+  }
+  texts.push(Memory.sysKindWords("crash"), Memory.sysKindWords("ram"));
   texts.push(Quattro.codesEmptyText());
 
   const bad = texts.filter(t => /[\u2014\u2013;]/.test(t));

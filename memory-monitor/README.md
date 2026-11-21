@@ -254,7 +254,9 @@ codes area: ONE column under one check-engine head, always most critical at
 the top, rows stretched across the full card so each code carries its reading
 and its status. The doctrine is round 2's: RAM monitoring is PRESSURE + SWAP
 RESERVE, never amount used, so a high System RAM reading is the pressure gauge
-and the reserve battery and NO code; VRAM high lights the coolant light only.
+and the reserve battery and NO code (revised round 11: PRESSURE HELD over your
+red line for minutes IS a code, see RAM below - a spike and a cache-resident
+machine still stay gauge-only); VRAM high lights the coolant light only.
 A drive code is a watched DRIVE sitting over your amber or red ceiling,
 wearing an OBD-style name (C plus four stable digits) and a one-line hover
 status (round 7: the severity line only). Round 9 extends the codes family to
@@ -289,6 +291,34 @@ calibrated curves, codes watch discrete faults):
   revisited when calibration exists. Swap stays the predictive gauge tripwire
   it is; DISK is the present-tense stall code and reads the pressure file
   only.
+
+Round 11 adds two families. The first answers the night the machine wedged and
+a hard cycle was the only way out: the round-9 codes all die with the bar, so
+after a crash the dash showed nothing. **CRASH** reads the system journal for
+the wedge signatures across the current boot AND the previous one - soft
+lockup, RCU stall, hung task, watchdog BUG, NVRM Xid, oom-kill - and latches
+one code per signature with the evidence: the hit count, the culprit or victim
+name, and the exact journal lines, visible on the code's hover and in the
+click payload's diagnosis. Each code is seeded from the signatures' own
+kernel text (kernel messages only, so userspace chatter cannot forge one),
+scanned as bounded deltas (a journal cursor, plus one bounded grep of the
+previous boot per session) so the sample cycle never blocks. The latches live
+in their own file beside the settings (`~/.local/state/memory-monitor/crash-codes.json`),
+so they survive the restart that follows the crash: opening the dash after a
+hard cycle throws the code for what happened. A reboot never clears them; the
+journal's read of the shutdown boundary (via `last -x`, wtmp, no root) also
+latches a **POWER** code when the previous boot did not end cleanly. The
+second family is **RAM** - the round-2 revision: RAM pressure held at or over
+your red PSI ceiling for a sustained window (three minutes by default, the
+`psiPressureSustainSec` setting tunes it) lights a severe code; falling back
+under your amber line for five minutes clears it. Pressure is stall time, not
+footprint: a single spike and a cache-resident machine reading PSI 0 can
+never light it. A crash latch clears by acknowledge - right-click the code's
+row, which says "cleared, the journal keeps the evidence" - or by the same
+condition-clear rules as every other code; nothing is deleted from the
+journal. A calibration run induces the pressure it measures, so a run holds
+the RAM code (and the KERNEL and DISK codes, as before) and freezes its
+windows; crash latches pass through, a lockup during a run is genuine.
 
 A system read that cannot be taken (the journal unreadable, systemd
 unreadable, no pressure file) renders the honest unknown row, never a fake
