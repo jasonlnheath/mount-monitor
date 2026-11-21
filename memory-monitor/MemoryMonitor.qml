@@ -190,6 +190,16 @@ BarWidget {
     return Memory.vramFloorMib(setting("vramFloorMib", null));
   }
 
+  // Round 12: the firstmate home the dash's code click delivers its note to.
+  // The resolution order is memory.js's decision; this widget only supplies
+  // the setting, HOME, and the startup probe's cached verdict. null means
+  // neither resolved, and the dash's click refuses instead of queueing a note
+  // nothing can deliver.
+  function firstmateHome(): var {
+    return Memory.resolveFirstmateHome(setting("firstmateHome", null),
+      Memory.firstmateFallbackPath(home), firstmateSeatExists);
+  }
+
   // ---------------------------------------------------------------------------
   // Polling. The lax nominal intervals are for normal passive use with every
   // resource green and no window open: a red or critical band drops to the
@@ -309,6 +319,11 @@ BarWidget {
   readonly property string crashStatePath: Memory.crashPath(home)
   // The merged system code entries the dashboard reads.
   property var sysCodes: []
+  // Round 12: whether HOME/Work/firstmate exists, answered once by a typed
+  // test -d probe at startup and cached for the session. The seat is a fact
+  // about the machine, not a live question; a firstmate checkout that appears
+  // later is found at the next shell start, along with a fresh settings read.
+  property bool firstmateSeatExists: false
   // Round 10: the io PSI some avg60 the last cycle decoded, so the quiet
   // predicate can judge the aftermath without re-reading the file.
   property real lastIoSomeAvg60: -1
@@ -2222,6 +2237,18 @@ BarWidget {
     }
   }
 
+  // The firstmate seat probe (round 12): one typed test -d at startup, its
+  // verdict cached in firstmateSeatExists. The command is assigned at start
+  // time, because a missing HOME means there is no seat to ask about.
+  Process {
+    id: firstmateProbeProc
+    stdout: StdioCollector { onStreamFinished: void this.text }
+    stderr: StdioCollector { onStreamFinished: void this.text }
+    onExited: function(exitCode, exitStatus) {
+      root.firstmateSeatExists = exitCode === 0;
+    }
+  }
+
   FileView {
     id: stateFile
     path: root.settingsPath
@@ -2396,6 +2423,11 @@ BarWidget {
   Component.onCompleted: {
     if (!stateDirProc.running) stateDirProc.running = true;
     if (!dndFile.loaded) dndFile.reload();
+    var firstmateSeat = Memory.firstmateFallbackPath(home);
+    if (firstmateSeat !== null && !firstmateProbeProc.running) {
+      firstmateProbeProc.command = ["test", "-d", firstmateSeat];
+      firstmateProbeProc.running = true;
+    }
   }
 
   // ---------------------------------------------------------------------------

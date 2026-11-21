@@ -2728,13 +2728,16 @@ function crashAckToast(entry) {
 }
 
 // A severe code's click rides the arm, and the arm's gate can refuse it. The
-// refusal is said in words, the way every other declined dispatch here is, and
-// the keys are shouldStartArm's own why tokens from memory.js.
+// refusal is said in words, the way every other declined dispatch here is; the
+// arm keys are shouldStartArm's own why tokens from memory.js, and
+// no-firstmate-home is the note click's own gate - no firstmate home resolved,
+// so no note exists to queue.
 var REFUSALS = {
   "guard-off": "not sent. the guard is off.",
   "arm-live": "not sent. an agent is already on it.",
   "no-headroom": "not sent. no memory headroom.",
   "not-writer": "not sent. another screen owns the guard.",
+  "no-firstmate-home": "not sent. no firstmate home found.",
 };
 
 function dispatchRefused(code, why) {

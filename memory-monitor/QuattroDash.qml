@@ -207,9 +207,12 @@ Panel {
   // (memory.js), with the dash's own pre-computed payload (quattro.js: one
   // line, the issue and the summarized diagnosis) as the body. The old
   // default-agent spawn died silently on a rig with no agent configured; the
-  // note is the send that actually arrives, and the toast says so. No shell,
-  // no sentence built here. A critical-band code is a critical dispatch, so
-  // it never becomes a note of its own: it asks the monitor to put it through
+  // note is the send that actually arrives, and the toast says so. The home is
+  // the monitor's resolution (the firstmateHome setting, else the Work seat
+  // the startup probe found); unresolved, the click refuses and the code
+  // stays lit - no note, no gray, no success toast that lies. No shell, no
+  // sentence built here. A critical-band code is a critical dispatch, so it
+  // never becomes a note of its own: it asks the monitor to put it through
   // the arm's gate and launch, and a refused click says so.
   function dispatchCode(code) {
     if (Memory.isArmNotice(code.alert)) {
@@ -225,7 +228,12 @@ Panel {
       showToast(Quattro.dispatchToast(code.code, true))
       return
     }
-    Quickshell.execDetached(Memory.codeNoteArgv(Quattro.codeNotePayload(code, hdRows)))
+    var fmHome = callMonitor("firstmateHome", [], null)
+    if (fmHome === null || fmHome === undefined) {
+      showToast(Quattro.dispatchRefused(code.code, "no-firstmate-home"), true)
+      return
+    }
+    Quickshell.execDetached(Memory.codeNoteArgv(Quattro.codeNotePayload(code, hdRows), fmHome))
     markSent(code.code)
     showToast(Quattro.dispatchToast(code.code, code.sev === "r"))
   }

@@ -1924,11 +1924,33 @@ function defaultAgentArgv(prompt) {
 // the way the dash's toast says. The old default-agent spawn hid the break:
 // omarchy's default agent is not configured on the rig, so it exited silently
 // while the toast claimed a send. The note queues and wakes firstmate with
-// the diagnosis. Typed argv, no shell; FM_HOME pins the supervisor home
-// whatever the desktop environment carries.
-function codeNoteArgv(payload) {
-  return ["env", "FM_HOME=/home/jason/Work/firstmate",
-    "/home/jason/Work/firstmate/bin/fm-inbox.sh", "note", "--",
+// the diagnosis. The home it delivers to is resolved here, never hardcoded -
+// a published plugin runs on machines that are not the captain's.
+
+// The Work seat the resolution falls back to: HOME/Work/firstmate, the
+// fleet's convention, built from the home the widget supplies. null when
+// there is no HOME to build from.
+function firstmateFallbackPath(home) {
+  const base = sanitizePath(home);
+  return base.length === 0 ? null : base + "/Work/firstmate";
+}
+
+// The resolution order: the firstmateHome setting the captain set, else the
+// Work seat when the machine actually has it (the cached test -d verdict the
+// widget supplies), else null. null is the honest answer - the click that
+// refuses rather than queueing a note nothing can deliver, which is the
+// silent loop this path was rewritten to end.
+function resolveFirstmateHome(settingValue, fallbackPath, fallbackExists) {
+  const chosen = sanitizePath(settingValue);
+  if (chosen.length > 0) return chosen;
+  if (fallbackExists !== true) return null;
+  const fallback = sanitizePath(fallbackPath);
+  return fallback.length > 0 ? fallback : null;
+}
+
+function codeNoteArgv(payload, home) {
+  const fm = sanitizePath(home);
+  return ["env", "FM_HOME=" + fm, fm + "/bin/fm-inbox.sh", "note", "--",
     asString(payload)];
 }
 
