@@ -329,7 +329,8 @@ genuine.
 A system read that cannot be taken (the journal unreadable, systemd
 unreadable, no pressure file) renders the honest unknown row, never a fake
 clean zero. The visible rows stay terse - subject, count, culprit name, never
-a raw PID - while the click payload carries the full detail. An empty column reads "ENGINE CLEAR" under
+a raw PID - while the code's hover carries its evidence line and the
+critical-band dispatch's prompt carries the full detail. An empty column reads "ENGINE CLEAR" under
 the unlit head; no severity ever gets an empty section of its own. Clicking a
 code queues an inbox note to firstmate: the note is the send that actually
 arrives (the old default-agent spawn exited silently on a machine with no
