@@ -23,6 +23,7 @@ test("quattro.js declares the crash forensics and pressure-code decisions", () =
     "ackCrashRecord", "codeAckable", "crashSigOf", "crashSubject",
     "normalizeCrashLatched", "crashMergeLatched",
     "psiPressureSysCode", "crashAckToast",
+    "crashBarEntry", "barBadgeWithCrash", "codeNotePayload",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -416,6 +417,114 @@ test("codeAckable refuses drive and round-9 entries and accepts crash entries", 
   const kernelEntry = { alert: { type: "sys", sys: "kernel", key: Quattro.SYS_SUBJECTS.kernel } };
   assert.equal(Quattro.codeAckable(kernelEntry), false, "the live round-9 codes clear by condition only");
   assert.equal(Quattro.codeAckable(null), false);
+});
+
+// ---------------------------------------------------------------------------
+// The bar emblem tells the truth about the latch (round 12): a latched crash
+// code lights the icon at its own band until the acknowledge clears it.
+// ---------------------------------------------------------------------------
+
+test("crashBarEntry: the latched codes light the icon at their own bands", () => {
+  same(Quattro.crashBarEntry([]), null, "no codes, no light");
+  same(Quattro.crashBarEntry(null), null);
+  same(Quattro.crashBarEntry([null, 7, "junk"]), null, "junk entries are not latches");
+
+  const first = prevFixtureUpdate();
+  const lit = Quattro.crashBarEntry(first.entries);
+  assert.notEqual(lit, null, "latched wedge evidence lights the icon");
+  assert.equal(lit.band, 2, "lockup and rcu are band 2, the worst latch wins");
+  assert.equal(lit.type, "crash");
+  assert.equal(lit.latched, true);
+
+  const moderate = first.entries.filter(e => {
+    const sig = Quattro.crashSigOf(e);
+    return sig === "oom" || sig === "power";
+  });
+  const amber = Quattro.crashBarEntry(moderate);
+  assert.notEqual(amber, null, "oom and power alone still light the icon");
+  assert.equal(amber.band, 1, "the moderate latches stay amber");
+
+  const unknown = Quattro.crashSysUpdate(
+    { text: "", exit: 2, done: true },
+    { text: "", exit: 0, done: true },
+    { text: "", exit: 1 },
+    null, {});
+  same(Quattro.crashBarEntry(unknown.entries), null, "an unreadable scan is not a latch and never lights the icon");
+
+  const kernelEntry = { alert: { type: "sys", sys: "kernel", key: Quattro.SYS_SUBJECTS.kernel } };
+  const driveEntry = { alert: { type: "hd", key: "partuuid:aabb" } };
+  same(Quattro.crashBarEntry([kernelEntry, driveEntry]), null,
+    "live round-9 codes and drive entries are not latches");
+});
+
+test("barBadgeWithCrash: live faults keep the badge, the history only raises the band", () => {
+  const live1 = { type: "ram", band: 1 };
+  assert.equal(Quattro.barBadgeWithCrash(live1, []), live1, "no history, the live entry rides unchanged");
+  assert.equal(Quattro.barBadgeWithCrash(live1, [null, "junk"]), live1, "junk history too");
+
+  const liveEntry = { type: "hd", band: 1, pct: 91 };
+  const tie = Quattro.barBadgeWithCrash(liveEntry,
+    [{ alert: { type: "sys", sys: "crash", key: Quattro.crashSubject("oom") } }]);
+  assert.equal(tie, liveEntry, "an equal band keeps the live entry, the icon looks as it always did");
+
+  const raised = Quattro.barBadgeWithCrash(liveEntry,
+    [{ alert: { type: "sys", sys: "crash", key: Quattro.crashSubject("lockup") } }]);
+  assert.notEqual(raised, liveEntry, "a history that outranks the live fault replaces the entry");
+  same(raised, { type: "crash", band: 2, latched: true });
+
+  const liveRed = { type: "ram", band: 2 };
+  assert.equal(Quattro.barBadgeWithCrash(liveRed,
+    [{ alert: { type: "sys", sys: "crash", key: Quattro.crashSubject("oom") } }]), liveRed,
+    "live red plus a latched amber stays live red, never a downgrade");
+
+  assert.equal(Quattro.barBadgeWithCrash(null, []), null, "all clear is white");
+  const amberAlone = Quattro.barBadgeWithCrash(null,
+    [{ alert: { type: "sys", sys: "crash", key: Quattro.crashSubject("oom") } }]);
+  same(amberAlone, { type: "crash", band: 1, latched: true }, "a moderate latch alone lights amber");
+  const redAlone = Quattro.barBadgeWithCrash(null,
+    [{ alert: { type: "sys", sys: "crash", key: Quattro.crashSubject("nvrm") } }]);
+  same(redAlone, { type: "crash", band: 2, latched: true }, "a severe latch alone lights red");
+});
+
+test("acknowledged codes stop lighting the icon", () => {
+  const first = prevFixtureUpdate();
+
+  const acked = Quattro.ackCrashRecord(first.latched, "lockup");
+  const stillUp = Quattro.crashSysUpdate(
+    { text: "", exit: 1, done: true },
+    { text: "", exit: 0, done: true },
+    { text: "-- No entries --", exit: 1 },
+    first.cursor, acked);
+  assert.equal(Quattro.crashBarEntry(stillUp.entries).band, 2, "rcu keeps the red until its own acknowledge");
+
+  let latched = Quattro.ackCrashRecord(acked, "rcu");
+  latched = Quattro.ackCrashRecord(latched, "oom");
+  latched = Quattro.ackCrashRecord(latched, "power");
+  const cleared = Quattro.crashSysUpdate(
+    { text: "", exit: 1, done: true },
+    { text: "", exit: 0, done: true },
+    { text: "-- No entries --", exit: 1 },
+    first.cursor, latched);
+  assert.equal(cleared.changed, false, "no scan can rebuild an acknowledged signature");
+  same(Quattro.crashBarEntry(cleared.entries), null, "every acknowledged code leaves the icon white");
+});
+
+test("the crash Fix line carries the acknowledge instruction plainly", () => {
+  const first = prevFixtureUpdate();
+  for (const e of first.entries) {
+    const sig = Quattro.crashSigOf(e);
+    assert.match(e.fix, /right-click/, sig + " names the right-click clear");
+    assert.match(e.fix, /this boot/, sig + " promises the clear holds for this boot");
+  }
+  // The shared SYS_FIX words stay on the codes that clear by condition: a
+  // right-click on a kernel or drive code does nothing, so they never say it.
+  const bar = Quattro.barSysCode(Quattro.parseBarProbe("5000.9\n300"), 0);
+  assert.equal(bar.fix, Quattro.SYS_FIX.moderate);
+});
+
+test("MemoryMonitor.qml builds the bar badge through quattro's aggregation", () => {
+  assert.equal(QML.includes("Quattro.barBadgeWithCrash("), true, "the widget delegates the aggregation");
+  assert.equal(QML.includes("Memory.mostSevereForBar("), true, "the live side stays memory.js's decision");
 });
 
 // ---------------------------------------------------------------------------

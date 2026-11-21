@@ -1920,6 +1920,18 @@ function defaultAgentArgv(prompt) {
   return ["omarchy", "agent", "prompt", asString(prompt)];
 }
 
+// The engine-code click's real send (round 12): an inbox note to firstmate,
+// the way the dash's toast says. The old default-agent spawn hid the break:
+// omarchy's default agent is not configured on the rig, so it exited silently
+// while the toast claimed a send. The note queues and wakes firstmate with
+// the diagnosis. Typed argv, no shell; FM_HOME pins the supervisor home
+// whatever the desktop environment carries.
+function codeNoteArgv(payload) {
+  return ["env", "FM_HOME=/home/jason/Work/firstmate",
+    "/home/jason/Work/firstmate/bin/fm-inbox.sh", "note", "--",
+    asString(payload)];
+}
+
 function agentArgv(prompt, agentCommand) {
   const override = normalizeAgentCommand(agentCommand);
   if (override === null) return defaultAgentArgv(prompt);

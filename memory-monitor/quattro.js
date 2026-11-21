@@ -1612,6 +1612,13 @@ var SYS_FIX = {
   severe: "agent has the crash pattern and is processing now.",
 };
 
+// The crash code's own Fix line (round 12): the acknowledge path the captain
+// had to ask for, stated plainly on the row. Right-click clears the code and
+// it stays cleared for this boot. The other families keep SYS_FIX, because
+// their codes clear by condition and a right-click on them does nothing.
+var CRASH_FIX =
+  "click sends the pattern to the agent. right-click clears it, and it stays cleared for this boot.";
+
 // --- BAR: the bar shell process --------------------------------------------
 //
 // Dead is severe; a restart inside the window that did not land with the
@@ -2106,8 +2113,7 @@ function crashRecordEntry(record) {
   const countText = count === null ? "some" : (r.saturated === true ? count + "+" : String(count));
   const issue = crashIssue(sig, countText, r);
   const status = band >= 2 ? SYS_STATUS.crashSevere : SYS_STATUS.crashModerate;
-  const fix = band >= 2 ? SYS_FIX.severe : SYS_FIX.moderate;
-  return sysCode("crash", crashSubject(sig), band, issue, status, fix,
+  return sysCode("crash", crashSubject(sig), band, issue, status, CRASH_FIX,
     {
       sig: sig,
       boot: asNumber(r.boot),
@@ -2213,6 +2219,44 @@ function crashSigOf(entry) {
 
 function codeAckable(entry) {
   return crashSigOf(entry) !== null;
+}
+
+// --- the bar emblem's truth (round 12) --------------------------------------
+//
+// The captain clicked the white engine icon and found the wedged boot's
+// latched codes sitting underneath it. The latch is the machine's history,
+// so the history lights the icon: amber at band 1 (oom, power), red at band
+// 2 (lockup, rcu, hung, watchdog, nvrm) - CRASH_BANDS, no new thresholds -
+// until the acknowledge clears the last one. The unknown row is not a latch
+// and never lights anything; nor do the live round-9 codes or the drive
+// entries, which are not latches. The live fault keeps the badge exactly as
+// it always was: the history only ever RAISES the band, never downgrades it.
+function crashBarEntry(sysEntries) {
+  const list = asList(sysEntries) || [];
+  let band = 0;
+  for (const e of list) {
+    if (!e || typeof e !== "object") continue;
+    const sig = crashSigOf(e);
+    if (sig === null) continue;
+    const b = CRASH_BANDS[sig] === undefined ? 1 : CRASH_BANDS[sig];
+    if (b > band) band = b;
+  }
+  return band === 0 ? null : { type: "crash", band: band, latched: true };
+}
+
+// The badge pick the widget renders: the live readings' most-severe entry
+// (memory.js mostSevereForBar, passed through untouched) unless the latch
+// outranks it, in which case the crash entry stands in the live one's place
+// and RingKit's badgeParams turns the band into the same severity language.
+function barBadgeWithCrash(liveEntry, sysEntries) {
+  const crash = crashBarEntry(sysEntries);
+  const live = liveEntry && typeof liveEntry === "object" ? liveEntry : null;
+  let liveBand = 0;
+  if (live !== null) {
+    const b = asNumber(live.band);
+    if (b !== null && b > liveBand) liveBand = Math.min(3, Math.floor(b));
+  }
+  return crash !== null && crash.band > liveBand ? crash : live;
 }
 
 // The latch file's shape, sanitized: unknown signatures and junk records drop,
@@ -2383,19 +2427,52 @@ function allCodes(driveCodes, systemCodes) {
 // Same trust law as the drive diagnosis: one line, every backtick and angle
 // bracket scrubbed, so a kernel or unit string can never forge or close the
 // fence.
-function systemDiagnosisJson(entry) {
+function systemDiagnosisDoc(entry, detail) {
   const e = entry || {};
   const a = e.alert || {};
-  const d = a.detail || {};
-  const doc = {
+  return {
     code: e.code,
     severity: diagnosisSeverity(e),
     system: a.sys,
     cause: e.issue,
-    detail: d,
+    detail: detail === undefined || detail === null ? {} : detail,
     recommendation: systemDiagnosisRecommendation(a.sys, e.sev),
   };
-  return JSON.stringify(doc).replace(/[`<>]/g, " ");
+}
+
+function systemDiagnosisJson(entry) {
+  const a = (entry || {}).alert || {};
+  return JSON.stringify(systemDiagnosisDoc(entry, a.detail || {})).replace(/[`<>]/g, " ");
+}
+
+// The note payload's diagnosis: the dash's own system diagnosis with every
+// evidence-line array summarized to a count, so a note stays one bounded
+// line - the full lines live in the journal and the latch, not in the wake.
+function systemNoteDiagnosisJson(entry) {
+  const d = ((entry || {}).alert || {}).detail || {};
+  const detail = {};
+  for (const k in d) {
+    if (k === "lines") continue;
+    detail[k] = d[k];
+  }
+  const lines = asList(d.lines);
+  detail.evidenceLines = lines === null ? 0 : lines.length;
+  return JSON.stringify(systemDiagnosisDoc(entry, detail)).replace(/[`<>]/g, " ");
+}
+
+// The engine-code click's note body (round 12): the fixed frame, the row's
+// own issue line, then the dash's diagnosis as the data payload. One line,
+// scrubbed exactly like the diagnosis JSON: control characters, bidi
+// overrides and angle brackets cannot forge the frame or break the note.
+function codeNotePayload(entry, rows) {
+  const e = entry || {};
+  const code = sanitizeText(e.code, 16);
+  const issue = sanitizeText(e.issue, 160);
+  const diagnosis = e.alert !== undefined && e.alert !== null && e.alert.type === "sys"
+    ? systemNoteDiagnosisJson(e)
+    : diagnosisJson(e, rows);
+  return ("quattro engine code " + code + ": " + issue +
+    " - diagnosis: " + diagnosis).replace(/[`<>]/g, " ");
 }
 
 // The fixed advice, in the dash's own words. The GPU wedge's words are law:
@@ -2528,7 +2605,7 @@ function codeTip(code) {
     if (seen !== null) rows.push({ label: "Seen:", text: seen, cls: "" });
     const evidence = crashEvidenceLine(d);
     if (evidence !== null) rows.push({ label: "Evidence:", text: evidence, cls: "" });
-    rows.push({ label: "Clear:", text: "right click clears the code.", cls: "" });
+    rows.push({ label: "Clear:", text: "right click clears the code. it stays cleared for this boot.", cls: "" });
   }
   return {
     header: c.code,
@@ -2629,15 +2706,18 @@ function diagnosisJson(entry, rows) {
   return JSON.stringify(doc).replace(/[`<>]/g, " ");
 }
 
-// --- dispatch toast (the approved copy, verbatim) ----------------------------
+// --- dispatch toast (the truthful copy, round 12) ---------------------------
 
+// The plain click queues an inbox note to firstmate: it arrives on firstmate's
+// next wake, so the toast says queued and wake, not processing now. The arm's
+// started dispatch really is on its way, so its severe toast stays short.
 function dispatchToast(code, severe) {
   return {
     mark: "\u2713",
     code: code,
     text: severe
-      ? "to firstmate (default agent), processing now"
-      : "to firstmate (default agent)",
+      ? "to firstmate"
+      : "queued to firstmate, processing on next wake",
   };
 }
 

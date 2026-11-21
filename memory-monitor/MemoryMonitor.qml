@@ -2436,7 +2436,10 @@ BarWidget {
       }
       entries = forced;
     }
-    return Memory.mostSevereForBar(entries);
+    // Round 12: the latched crash codes light the emblem with the live
+    // faults - the history only ever raises the band, never downgrades a
+    // live one. testPct keeps forcing the readings only.
+    return Quattro.barBadgeWithCrash(Memory.mostSevereForBar(entries), sysCodes);
   }
 
   readonly property var badgeList: barEntries()
