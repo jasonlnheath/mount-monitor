@@ -313,12 +313,12 @@ your red PSI ceiling for a sustained window (three minutes by default, the
 `psiPressureSustainSec` setting tunes it) lights a severe code; falling back
 under your amber line for five minutes clears it. Pressure is stall time, not
 footprint: a single spike and a cache-resident machine reading PSI 0 can
-never light it. A crash latch clears by acknowledge - right-click the code's
-row, which says "cleared, the journal keeps the evidence" - or by the same
-condition-clear rules as every other code; nothing is deleted from the
-journal. A calibration run induces the pressure it measures, so a run holds
-the RAM code (and the KERNEL and DISK codes, as before) and freezes its
-windows; crash latches pass through, a lockup during a run is genuine.
+never light it. A crash latch clears only by acknowledge - right-click the
+code's row, which says "cleared, the journal keeps the evidence"; nothing is
+deleted from the journal. A calibration run induces the pressure it measures,
+so a run holds the RAM code (and the KERNEL and DISK codes, as before) and
+freezes its windows; crash latches pass through, a lockup during a run is
+genuine.
 
 A system read that cannot be taken (the journal unreadable, systemd
 unreadable, no pressure file) renders the honest unknown row, never a fake
@@ -423,7 +423,12 @@ wedge grep, the unit show, the IO pressure file) ride this same sample cycle —
 no second timer system, no poll cadence of their own. They are cheap reads:
 process liveness, unit properties, a journaled delta and a pressure file. Their
 decision state is session-only — the kernel log cursor, the layer climb memory
-and the disk amber run — and a shell restart re-baselines all of it.
+and the disk amber run — and a shell restart re-baselines all of it. Round
+11's three crash readers (the boot-0 wedge grep every cycle; the previous-boot
+grep and the wtmp boundary read once per session) ride this same cycle, and
+the sustained-pressure code reads the same PSI sample — but the crash latch is
+the one decision state a restart does not re-baseline: it persists in
+`crash-codes.json`.
 
 ## Stress calibration (round 10)
 
@@ -530,6 +535,7 @@ On the widget's entry in `shell.json`:
 | `pollMs` | per resource (60000 HD / 30000 RAM / 60000 VRAM) | One override for all three resources. A positive value pins the interval and replaces the escalator — a resource at red or critical, and round 8's 2-second watch lane, poll at it too. |
 | `onboarding` | `true` | `false` skips the ceiling question and the guard ask. |
 | `vramFloorMib` | `500` | The QuattroDash coolant light's floor, in MiB. Red sits below it; the amber approach zone is 1000 MiB above the floor (amber at 1500 MiB free when unset). A display floor only; it sets no alert ceiling. The light follows it until the dash's gauge settings row sets the coolant thresholds. |
+| `psiPressureSustainSec` | `180` | How long RAM PSI (`some avg10`) must hold at or over your red ceiling before the sustained-pressure engine code latches, in seconds. Unset or non-positive uses the three-minute default; the clear window (five minutes back under amber) is fixed, not a setting. |
 | `testPct` | unset | The manual hook: force every badge to one percentage, alerts included. |
 
 Thresholds and the guard answer are not `shell.json` settings — they live in
@@ -565,7 +571,11 @@ and systemd itself accepts every property that argv builds (the live checks
 skip where `python3` or `systemd-run` is absent). `tests/vram-grid.test.mjs`
 pins the VRAM hover grid (the top-three/Other/Total rows, the shortened
 process names, the no-list fallback to the plain free-percent tip) and guards
-that the popover stays hover-only. There is no CI in
+that the popover stays hover-only. `tests/crash.test.mjs` pins round 11: the
+crash argvs, the journal signature classifier and its precedence, the wtmp
+unclean-boundary rule, the latch round trip across a simulated restart, the
+acknowledge rule, and the sustained-pressure latch/clear matrix, against the
+rig's own wedge lines and wtmp shapes. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 
