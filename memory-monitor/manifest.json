@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Quattro Dash",
-    "description": "One badge for the most severe of System RAM, VRAM and your watched drives. Amber, red and critical are ceilings you set - critical ships unset, so no critical alert can fire until you set it. Click a red toast to open your agent with the reading; click a critical toast to open the detail window. Keeps a baseline log of every reading so a later report can say what this machine rests at.",
+    "description": "One badge for the most severe of System RAM, VRAM and your watched drives, plus any unacknowledged latched crash code, which lights the badge amber or red at its own band until you acknowledge it. Amber, red and critical are ceilings you set - critical ships unset, so no critical alert can fire until you set it. Click a red toast to open your agent with the reading; click a critical toast to open the detail window. Keeps a baseline log of every reading so a later report can say what this machine rests at.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"
