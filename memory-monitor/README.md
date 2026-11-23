@@ -352,7 +352,9 @@ lines summarized to a count) - and the green toast says what really happens:
 for the rest. The firstmate home is resolved, never hardcoded: the
 `firstmateHome` setting first, then `~/Work/firstmate` when that directory
 exists; when neither resolves, the click refuses - the red "not sent. no
-firstmate home found." toast, nothing grayed, the code stays lit.
+firstmate home found." toast, nothing grayed, the code stays lit. A click of
+an occurrence that was already sent refuses the same way (round 13's once
+guard) - the red "not sent. this code was already sent." toast.
 Only a code at the critical band goes through the guard's arm gate first - the
 same single-flight, budget-gated check that owns every critical-band agent
 launch; its prompt carries the diagnosis too. Armed, the agent starts;
