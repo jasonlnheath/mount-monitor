@@ -684,6 +684,32 @@ test("psiPressureSysCode: the entry copy is pressure words over the ram subject"
   assert.match(r.entry.fix, /right-click/, "the pressure code is clearable like every fault code");
 });
 
+test("psiPressureSysCode: the latched row promises the clear only while its window is live", () => {
+  const samples = [];
+  for (let i = 0; i < 95; i++) samples.push([30, STEP]);
+  const latched = runPressure(samples);
+  assert.equal(latched.prev.latched, true);
+  assert.notEqual(latched.prev.aboveSinceMs, null);
+
+  // A dip between the lines holds the latch but restarts the window: the row
+  // carries no occurrence there, so its Fix line must not promise a clear.
+  const dipped = Quattro.psiPressureSysCode(20, T, latched.prev, latched.prev.atMs + STEP, -1, false);
+  assert.equal(dipped.next.latched, true, "the latch holds between the lines");
+  assert.equal(dipped.next.aboveSinceMs, null, "the sustain window restarted");
+  assert.equal(dipped.entry.fix, Quattro.SYS_FIX.severe, "no live window, no clear promise");
+  assert.equal(Quattro.codeOccurrenceOf(dipped.entry), null, "and no occurrence for the clear to act on");
+
+  const lost = Quattro.psiPressureSysCode(null, T, dipped.next, dipped.next.atMs + STEP, -1, false);
+  assert.equal(lost.entry.fix, Quattro.SYS_FIX.severe, "the PSI-unknown latched row says the same");
+
+  // Back over red the window reopens, the occurrence returns, and the promise
+  // returns with it.
+  const relit = Quattro.psiPressureSysCode(31.4, T, dipped.next, dipped.next.atMs + STEP, -1, false);
+  assert.equal(relit.entry.fix, Quattro.SYS_FIX.severe + Quattro.CODE_ACK_FIX_SUFFIX,
+    "a live window is clearable and says so");
+  assert.notEqual(Quattro.codeOccurrenceOf(relit.entry), null);
+});
+
 // ---------------------------------------------------------------------------
 // Wiring pins: the widget runs the scans, the dash asks before it clears
 // ---------------------------------------------------------------------------

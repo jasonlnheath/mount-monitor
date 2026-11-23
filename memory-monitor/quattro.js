@@ -2630,7 +2630,7 @@ function psiPressureEntry(value, state, nowMs) {
     : "RAM pressure sustained: " + v.toFixed(1) + " PSI held " +
       Math.max(1, held) + (held === 1 ? " minute." : " minutes.");
   return sysCode("ram", SYS_SUBJECTS.ram, 2, issue,
-    SYS_STATUS.severe, ackFix(SYS_FIX.severe),
+    SYS_STATUS.severe, above !== null ? ackFix(SYS_FIX.severe) : SYS_FIX.severe,
     { psiSomeAvg10: v, aboveSinceMs: above, atMs: asNumber(state.atMs) });
 }
 

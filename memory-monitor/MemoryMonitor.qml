@@ -1207,10 +1207,8 @@ BarWidget {
       console.log("memory-monitor: engine code " + String(entry && entry.code) + " note suppressed, already seen");
       return { ok: false, why: "already-seen" };
     }
-    if (isWriter) {
-      codeSeen = Quattro.seenMerge(root.codeSeen, occ);
-      root.writeCrashState();
-    }
+    codeSeen = Quattro.seenMerge(root.codeSeen, occ);
+    if (isWriter) root.writeCrashState();
     return { ok: true };
   }
 
