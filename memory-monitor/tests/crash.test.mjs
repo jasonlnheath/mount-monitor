@@ -22,7 +22,7 @@ test("quattro.js declares the crash forensics and pressure-code decisions", () =
     "crashSysUpdate", "crashRecordEntry", "crashSysCodes",
     "ackCrashRecord", "codeAckable", "crashSigOf", "crashSubject",
     "normalizeCrashLatched", "crashMergeLatched",
-    "psiPressureSysCode", "crashAckToast",
+    "psiPressureSysCode", "codeAckToast",
     "crashBarEntry", "barBadgeWithCrash", "codeNotePayload",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
@@ -408,14 +408,23 @@ test("ackCrashRecord removes exactly the acknowledged signature", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(absent)), JSON.parse(JSON.stringify(latched)), "acking an absent signature changes nothing");
 });
 
-test("codeAckable refuses drive and round-9 entries and accepts crash entries", () => {
+test("codeAckable accepts every fault code and refuses states, drives and junk", () => {
   const first = prevFixtureUpdate();
   const crashEntry = first.entries.find(e => Quattro.crashSigOf(e) === "lockup");
   assert.equal(Quattro.codeAckable(crashEntry), true);
   const driveEntry = { alert: { type: "hd", key: "x" } };
   assert.equal(Quattro.codeAckable(driveEntry), false);
-  const kernelEntry = { alert: { type: "sys", sys: "kernel", key: Quattro.SYS_SUBJECTS.kernel } };
-  assert.equal(Quattro.codeAckable(kernelEntry), false, "the live round-9 codes clear by condition only");
+  // Round 13: the live fault codes are clearable too - the captain's C2192
+  // right-click was a silent no-op before this. The honest unknown rows and
+  // the dead-shell state stay unclearable: they are sensor states, not
+  // occurrences, and hiding a broken sensor would lie.
+  const barEntry = Quattro.barSysCode(Quattro.parseBarProbe("196167\n144"), 0);
+  assert.equal(Quattro.codeAckable(barEntry), true, "the bar restart code clears by right-click like every fault code");
+  const kernelEntry = { alert: { type: "sys", sys: "kernel", key: Quattro.SYS_SUBJECTS.kernel,
+    detail: { newLines: 2, culprit: "igc", lines: [], untilEpoch: 1795300100 } } };
+  assert.equal(Quattro.codeAckable(kernelEntry), true);
+  const unknownEntry = { alert: { type: "sys", sys: "kernel", key: Quattro.SYS_SUBJECTS.kernel } };
+  assert.equal(Quattro.codeAckable(unknownEntry), false, "an unknown row is a state, never an occurrence");
   assert.equal(Quattro.codeAckable(null), false);
 });
 
@@ -514,12 +523,16 @@ test("the crash Fix line carries the acknowledge instruction plainly", () => {
   for (const e of first.entries) {
     const sig = Quattro.crashSigOf(e);
     assert.match(e.fix, /right-click/, sig + " names the right-click clear");
-    assert.match(e.fix, /this boot/, sig + " promises the clear holds for this boot");
+    assert.match(e.fix, /until new evidence arrives/, sig + " promises the clear holds until new evidence");
   }
-  // The shared SYS_FIX words stay on the codes that clear by condition: a
-  // right-click on a kernel or drive code does nothing, so they never say it.
-  const bar = Quattro.barSysCode(Quattro.parseBarProbe("5000.9\n300"), 0);
-  assert.equal(bar.fix, Quattro.SYS_FIX.moderate);
+  // Every clearable fault code names the clear the same way: the bar restart
+  // code the captain could not dismiss now says how it dismisses. The honest
+  // unknown rows keep the shared SYS_FIX words: a right-click on a sensor
+  // state does nothing, so they never say it.
+  const bar = Quattro.barSysCode(Quattro.parseBarProbe("196167\n144"), 0);
+  assert.match(bar.fix, /right-click/);
+  const unknown = Quattro.barSysCode(Quattro.parseBarProbe(""), 0);
+  assert.equal(unknown.fix, Quattro.SYS_FIX.moderate);
 });
 
 test("MemoryMonitor.qml builds the bar badge through quattro's aggregation", () => {
@@ -668,7 +681,7 @@ test("psiPressureSysCode: the entry copy is pressure words over the ram subject"
   assert.equal(Memory.isMemId(r.entry.alert.id), true);
   assert.match(r.entry.issue, /RAM pressure sustained: 31\.4 PSI held \d+ minutes?\./);
   assert.equal(r.entry.status, Quattro.SYS_STATUS.severe, "the locked severe status line");
-  assert.equal(r.entry.fix, Quattro.SYS_FIX.severe, "the locked severe fix line");
+  assert.match(r.entry.fix, /right-click/, "the pressure code is clearable like every fault code");
 });
 
 // ---------------------------------------------------------------------------
@@ -692,9 +705,8 @@ test("MemoryMonitor.qml runs the three crash readers through quattro argvs", () 
 });
 
 test("QuattroDash.qml acknowledges through the monitor, never the latch map", () => {
-  assert.equal(PANEL.includes('callMonitor("ackCrashCode"'), true, "the clear rides the monitor");
-  assert.equal(PANEL.includes("Quattro.codeAckable("), true, "ackability is quattro's decision");
-  assert.equal(PANEL.includes("Quattro.crashAckToast("), true);
+  assert.equal(PANEL.includes('callMonitor("ackCode"'), true, "the clear rides the monitor");
+  assert.equal(PANEL.includes("Quattro.codeAckToast("), true);
   assert.equal(PANEL.includes("crashLatched"), false, "the dash never touches the latch map");
 });
 

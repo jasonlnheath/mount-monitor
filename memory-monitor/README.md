@@ -320,8 +320,17 @@ your red PSI ceiling for a sustained window (three minutes by default, the
 under your amber line for five minutes clears it. Pressure is stall time, not
 footprint: a single spike and a cache-resident machine reading PSI 0 can
 never light it. A crash latch clears only by acknowledge - right-click the
-code's row, which says "cleared, the journal keeps the evidence"; nothing is
-deleted from the journal. A calibration run induces the pressure it measures,
+code's row, which says "cleared, it stays cleared until new evidence
+arrives"; nothing is deleted from the journal. Every fault code clears that
+way (round 13): the clear, and a click that sends the code's note, record
+the code's occurrence in a seen ledger persisted beside the latch, so a bar
+restart cannot un-see it. An occurrence is identified by its stable evidence
+- the journal epochs and count for a crash signature, the unclean boot for
+POWER, the restart event itself for BAR (never the age the row prints),
+systemd's own restart counter for LAYER, the batch's newest fault epoch for
+KERNEL and GPU, the sustained window's start for DISK and RAM - so the same
+event never notifies twice, and only genuinely new evidence (a later epoch,
+a higher count, a new unclean boot) re-raises a code. A calibration run induces the pressure it measures,
 so a run holds the RAM code (and the KERNEL and DISK codes, as before) and
 freezes its windows; crash latches pass through, a lockup during a run is
 genuine.
@@ -437,9 +446,9 @@ decision state is session-only — the kernel log cursor, the layer climb memory
 and the disk amber run — and a shell restart re-baselines all of it. Round
 11's three crash readers (the boot-0 wedge grep every cycle; the previous-boot
 grep and the wtmp boundary read once per session) ride this same cycle, and
-the sustained-pressure code reads the same PSI sample — but the crash latch is
-the one decision state a restart does not re-baseline: it persists in
-`crash-codes.json`.
+the sustained-pressure code reads the same PSI sample — but the crash latch
+and the once-per-occurrence seen ledger are the two decision states a restart
+does not re-baseline: they persist in `crash-codes.json`.
 
 ## Stress calibration (round 10)
 
@@ -587,7 +596,11 @@ that the popover stays hover-only. `tests/crash.test.mjs` pins round 11: the
 crash argvs, the journal signature classifier and its precedence, the wtmp
 unclean-boundary rule, the latch round trip across a simulated restart, the
 acknowledge rule, and the sustained-pressure latch/clear matrix, against the
-rig's own wedge lines and wtmp shapes. There is no CI in
+rig's own wedge lines and wtmp shapes. `tests/codes-once.test.mjs` pins
+round 13: the once-per-occurrence ledger - the occurrence identity rule per
+family, the send-and-clear once guard, the C2192 right-click repro, the
+survival of a clear across a simulated restart, and the new-evidence
+re-raise rule. There is no CI in
 this repository: `bash tests/run.sh` and `bash memory-monitor/tests/run.sh` are
 the gates.
 

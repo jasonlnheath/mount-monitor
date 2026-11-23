@@ -1612,12 +1612,24 @@ var SYS_FIX = {
   severe: "agent has the crash pattern and is processing now.",
 };
 
-// The crash code's own Fix line (round 12): the acknowledge path the captain
-// had to ask for, stated plainly on the row. Right-click clears the code and
-// it stays cleared for this boot. The other families keep SYS_FIX, because
-// their codes clear by condition and a right-click on them does nothing.
+// Round 13: the sentence every clearable fault code appends to its Fix line.
+// Clearing is durable now - the seen ledger persists beside the latch - so
+// the promise the row makes is "until new evidence arrives", never "for this
+// boot" (the old promise was the bug: the boot outlived it every restart).
+var CODE_ACK_FIX_SUFFIX =
+  " right-click clears the code, and it stays cleared until new evidence arrives.";
+
+function ackFix(base) {
+  return String(base) + CODE_ACK_FIX_SUFFIX;
+}
+
+// The crash code's own Fix line (round 12, reworded round 13): the acknowledge
+// path the captain had to ask for, stated plainly on the row. Right-click
+// clears the code and the clear is durable. The honest unknown rows keep
+// SYS_FIX, because they are sensor states, not occurrences: a right-click on
+// one does nothing and it must never say otherwise.
 var CRASH_FIX =
-  "click sends the pattern to the agent. right-click clears it, and it stays cleared for this boot.";
+  "click sends the pattern to the agent. right-click clears it, and it stays cleared until new evidence arrives.";
 
 // --- BAR: the bar shell process --------------------------------------------
 //
@@ -1649,7 +1661,7 @@ function barSysCode(probe, exitCode) {
   const minutes = Math.max(1, Math.round(age / 60));
   return sysCode("bar", SYS_SUBJECTS.bar, 1,
     "Bar shell restarted " + minutes + (minutes === 1 ? " minute" : " minutes") + " ago.",
-    SYS_STATUS.moderate, SYS_FIX.moderate,
+    SYS_STATUS.moderate, ackFix(SYS_FIX.moderate),
     { alive: true, ageSec: Math.round(age), uptimeSec: Math.round(p.uptimeSec) });
 }
 
@@ -1697,8 +1709,8 @@ function kernelSysCode(lines, readable, prevCursor) {
     cursor: maxEpoch,
     entry: sysCode("kernel", SYS_SUBJECTS.kernel, 1,
       "Kernel faults: " + fresh.length + " new. Culprit: " + culprit + ".",
-      SYS_STATUS.moderate, SYS_FIX.moderate,
-      { newLines: fresh.length, culprit: culprit, lines: recent }),
+      SYS_STATUS.moderate, ackFix(SYS_FIX.moderate),
+      { newLines: fresh.length, culprit: culprit, lines: recent, untilEpoch: maxEpoch }),
   };
 }
 
@@ -1725,11 +1737,16 @@ function gpuSysCode(journalText, exitCode) {
   if (wedge.length === 0) return null;
   const saturated = wedge.length >= GPU_WEDGE_MAX_LINES;
   const count = saturated ? GPU_WEDGE_MAX_LINES + "+" : String(wedge.length);
+  let untilEpoch = null;
+  for (const line of wedge) {
+    const e = asNumber(line.epoch);
+    if (e !== null && (untilEpoch === null || e > untilEpoch)) untilEpoch = e;
+  }
   return sysCode("gpu", SYS_SUBJECTS.gpu, 2,
     "GPU driver wedged: " + count + " NVRM faults in the log.",
     "severe, the driver is wedged. only a reboot clears it.",
-    SYS_FIX.severe + " a reboot clears it.",
-    { wedgeLines: wedge.length, saturated: saturated,
+    ackFix(SYS_FIX.severe + " a reboot clears it."),
+    { wedgeLines: wedge.length, saturated: saturated, untilEpoch: untilEpoch,
       lines: wedge.slice(-SYS_DETAIL_MAX_LINES).map(l => l.message) });
 }
 
@@ -1765,7 +1782,7 @@ function layerSysCode(units, readable, prev) {
     if (!climbing) continue;
     entries.push(sysCode("layer", layerSubject(u.id), 1,
       "Layer unit " + u.id + " keeps restarting.",
-      SYS_STATUS.moderate, SYS_FIX.moderate,
+      SYS_STATUS.moderate, ackFix(SYS_FIX.moderate),
       {
         unit: u.id,
         restarts: u.restarts,
@@ -1778,14 +1795,21 @@ function layerSysCode(units, readable, prev) {
 
 // --- DISK: IO pressure sustained past a bar ---------------------------------
 //
-// prev is { amberRuns: int }, the consecutive-poll run at or over the amber
-// bar. Red fires on one poll (avg60 is already a sustained window); amber
-// needs DISK_SUSTAIN_POLLS consecutive polls. Swap stays the predictive
-// gauge tripwire it is: this code reads /proc/pressure/io and nothing else,
-// and it never touches the round-8 swap doctrine.
-function diskSysCode(psi, readable, prev) {
+// prev is { amberRuns: int, runStartMs: number|null }, the consecutive-poll
+// run at or over the amber bar and the epoch the run started. Red fires on
+// one poll (avg60 is already a sustained window); amber needs
+// DISK_SUSTAIN_POLLS consecutive polls. Swap stays the predictive gauge
+// tripwire it is: this code reads /proc/pressure/io and nothing else, and it
+// never touches the round-8 swap doctrine. runStartMs is the code's
+// occurrence identity (round 13): one sustained stall is one occurrence
+// however long it holds, and a stall that releases and re-sustains is a new
+// one. A missing clock (nowMs null) degrades to no identity, never to a
+// false one.
+function diskSysCode(psi, readable, prev, nowMs) {
   const memory = prev && typeof prev === "object" && prev.amberRuns !== undefined
-    ? prev : { amberRuns: 0 };
+    ? { amberRuns: prev.amberRuns, runStartMs: asNumber(prev.runStartMs) }
+    : { amberRuns: 0, runStartMs: null };
+  const now = asNumber(nowMs);
   if (!readable) {
     return {
       next: memory,
@@ -1803,26 +1827,28 @@ function diskSysCode(psi, readable, prev) {
     };
   }
   if (v >= DISK_RED_AT) {
+    const runStartMs = memory.runStartMs !== null ? memory.runStartMs : now;
     return {
-      next: { amberRuns: 0 },
+      next: { amberRuns: 0, runStartMs: runStartMs },
       entry: sysCode("disk", SYS_SUBJECTS.disk, 2,
         "Disk stalls: IO pressure " + v.toFixed(1) + " over the red bar.",
-        SYS_STATUS.severe, SYS_FIX.severe,
-        { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: memory.amberRuns }),
+        SYS_STATUS.severe, ackFix(SYS_FIX.severe),
+        { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: memory.amberRuns, runStartMs: runStartMs }),
     };
   }
   if (v >= DISK_AMBER_AT) {
     const runs = memory.amberRuns + 1;
-    if (runs < DISK_SUSTAIN_POLLS) return { next: { amberRuns: runs }, entry: null };
+    const runStartMs = memory.runStartMs !== null ? memory.runStartMs : now;
+    if (runs < DISK_SUSTAIN_POLLS) return { next: { amberRuns: runs, runStartMs: runStartMs }, entry: null };
     return {
-      next: { amberRuns: runs },
+      next: { amberRuns: runs, runStartMs: runStartMs },
       entry: sysCode("disk", SYS_SUBJECTS.disk, 1,
         "Disk stalls: IO pressure " + v.toFixed(1) + " held " + runs + " polls.",
-        SYS_STATUS.moderate, SYS_FIX.moderate,
-        { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: runs }),
+        SYS_STATUS.moderate, ackFix(SYS_FIX.moderate),
+        { someAvg60: v, amberAt: DISK_AMBER_AT, redAt: DISK_RED_AT, amberRuns: runs, runStartMs: runStartMs }),
     };
   }
-  return { next: { amberRuns: 0 }, entry: null };
+  return { next: { amberRuns: 0, runStartMs: null }, entry: null };
 }
 
 // --- round 11: crash forensics ----------------------------------------------
@@ -2217,8 +2243,212 @@ function crashSigOf(entry) {
   return CRASH_BANDS[sig] === undefined ? null : sig;
 }
 
+// Round 13: what may be acknowledged. Every fault code is - the captain's
+// C2192 right-click was a silent no-op before this rule, because the bar
+// restart code is not a crash latch. What never is: the honest unknown rows
+// and the dead-shell state (sensor states, not occurrences - hiding a broken
+// sensor would lie), drive codes (they ride the band system, released by the
+// condition itself), and junk.
 function codeAckable(entry) {
-  return crashSigOf(entry) !== null;
+  return codeOccurrenceOf(entry) !== null;
+}
+
+// --- round 13: the once-per-occurrence seen ledger ---------------------------
+//
+// The captain's 2026-11-23 ruling: "it keeps throwing the same engine codes
+// even though I've already seen them. I'll click them and they will come to
+// you. we need to make sure that the user is only notified once per engine
+// code." The evidence had two roots. First, the crash latch survived bar
+// restarts but the acknowledge did not: ackCrashRecord removes the signature
+// and leaves no durable record of the removal, so the next session's
+// once-per-session boot -1 scan re-merged the same journal lines over an
+// empty base and re-raised every code the captain had already cleared - which
+// is why the codes came back after every shell restart. Second, the live
+// bar-restart code C2192 could not be cleared at all: codeAckable accepted
+// crash entries only, and the row's issue text carries a changing age ("2
+// minutes ago", then "3"), so a dismiss keyed on anything the row prints
+// could never match twice - and a dismiss keyed on nothing never happened.
+//
+// The rule: an occurrence is identified by a STABLE signature, never by human
+// text or an age. Per family:
+//   crash:<sig>  the latch record's own evidence - firstEpoch/lastEpoch/count,
+//                and the unclean boot's ISO for the power code
+//   bar          the restart event itself: uptimeSec - ageSec, the moment the
+//                restart landed counted from the system boot. Uptime and
+//                process age grow one for one, so the value is constant
+//                across polls (probe jitter is seconds), and a bar restart
+//                does not move the system uptime, so the identity survives
+//                the restarts that re-derive the code. A NEW restart is a
+//                later moment, so it is new evidence.
+//   kernel/gpu   the batch's newest journal epoch (detail.untilEpoch)
+//   layer:<unit> systemd's own NRestarts counter
+//   disk         the sustained run's start epoch (runStartMs)
+//   ram          the pressure window's start (aboveSinceMs)
+// A seen occurrence is suppressed from the codes column and refused a second
+// note. It re-raises only on genuinely new evidence: a later epoch, a
+// different count (higher OR reset-and-climbing), or a new unclean boot.
+
+// Epoch tolerance per family, in seconds: the probe jitter these identities
+// legitimately carry. The bar probe rounds to whole seconds and lands on
+// different poll clocks (measured: the same restart probed 2 s apart); the
+// sustained windows restart from a poll clock of their own.
+var CODE_SEEN_TOL_SEC = { bar: 30, ram: 60, disk: 60 };
+
+// The occurrence an entry names, or null when the entry is not an occurrence
+// (a sensor state, a drive code, junk). Everything the record carries is
+// machine-measured, never text the row prints.
+function codeOccurrenceOf(entry) {
+  const e = entry && typeof entry === "object" ? entry : null;
+  if (e === null) return null;
+  const a = e.alert && typeof e.alert === "object" ? e.alert : {};
+  if (a.type !== "sys") return null;
+  const sys = sanitizeText(a.sys, 16);
+  const key = sanitizeText(a.key, 96);
+  if (key.length === 0) return null;
+  const d = a.detail && typeof a.detail === "object" ? a.detail : {};
+  if (sys === "crash") {
+    if (crashSigOf(e) === null) return null;
+    const iso = sanitizeText(d.bootIso, 64);
+    return {
+      key: key,
+      epoch: asNumber(d.firstEpoch),
+      count: asNumber(d.count),
+      lastEpoch: asNumber(d.lastEpoch),
+      bootIso: iso.length > 0 ? iso : null,
+      tolSec: 0,
+    };
+  }
+  if (sys === "bar") {
+    const age = asNumber(d.ageSec);
+    const up = asNumber(d.uptimeSec);
+    if (age === null || up === null) return null;
+    return { key: key, epoch: up - age, count: null, lastEpoch: null, bootIso: null,
+      tolSec: CODE_SEEN_TOL_SEC.bar };
+  }
+  if (sys === "kernel" || sys === "gpu") {
+    const until = asNumber(d.untilEpoch);
+    if (until === null) return null;
+    return { key: key, epoch: until, count: null, lastEpoch: null, bootIso: null, tolSec: 0 };
+  }
+  if (sys === "layer") {
+    const restarts = asNumber(d.restarts);
+    if (restarts === null) return null;
+    return { key: key, epoch: null, count: restarts, lastEpoch: null, bootIso: null, tolSec: 0 };
+  }
+  if (sys === "disk") {
+    const runStart = asNumber(d.runStartMs);
+    if (runStart === null) return null;
+    return { key: key, epoch: runStart / 1000, count: null, lastEpoch: null, bootIso: null,
+      tolSec: CODE_SEEN_TOL_SEC.disk };
+  }
+  if (sys === "ram") {
+    const above = asNumber(d.aboveSinceMs);
+    if (above === null) return null;
+    return { key: key, epoch: above / 1000, count: null, lastEpoch: null, bootIso: null,
+      tolSec: CODE_SEEN_TOL_SEC.ram };
+  }
+  return null;
+}
+
+// Is this live occurrence the one the record says was seen? Same subject, no
+// new evidence: the count is the same (a counter that reset and is climbing
+// again is NOT the seen occurrence), the last epoch is not later, the epoch
+// is not past the record's by more than the family tolerance, and the unclean
+// boot is the same boundary.
+function seenSuppressed(live, record) {
+  const l = live && typeof live === "object" ? live : null;
+  const r = record && typeof record === "object" ? record : null;
+  if (l === null || r === null) return false;
+  if (String(l.key) !== String(r.key)) return false;
+  const lIso = l.bootIso === undefined || l.bootIso === null ? null : String(l.bootIso);
+  const rIso = r.bootIso === undefined || r.bootIso === null ? null : String(r.bootIso);
+  if (lIso !== rIso) return false;
+  const lCount = asNumber(l.count);
+  const rCount = asNumber(r.count);
+  if (lCount !== null && rCount !== null && lCount !== rCount) return false;
+  const lLast = asNumber(l.lastEpoch);
+  const rLast = asNumber(r.lastEpoch);
+  if (lLast !== null && rLast !== null && lLast > rLast) return false;
+  const lEpoch = asNumber(l.epoch);
+  const rEpoch = asNumber(r.epoch);
+  const tol = asNumber(l.tolSec);
+  if (lEpoch !== null && rEpoch !== null && lEpoch > rEpoch + (tol === null ? 0 : tol)) return false;
+  return true;
+}
+
+// The codes column against the ledger: kept entries surface, suppressed ones
+// were already seen and must not surface (nor light the emblem - the caller
+// filters before anything renders). Entries with no occurrence always ride
+// through: an unknown row is a sensor state, not a code to dismiss.
+function seenFilter(entries, seen) {
+  const map = seen && typeof seen === "object" ? seen : {};
+  const kept = [];
+  const suppressed = [];
+  for (const entry of asList(entries) || []) {
+    const occ = codeOccurrenceOf(entry);
+    if (occ !== null && seenSuppressed(occ, map[occ.key])) {
+      suppressed.push(entry);
+      continue;
+    }
+    kept.push(entry);
+  }
+  return { kept: kept, suppressed: suppressed };
+}
+
+// Recording one occurrence: the ledger holds, per subject, the occurrence
+// last seen - REPLACE, not max, because a counter that reset or an earlier
+// epoch after a re-derivation is a different occurrence and must not be
+// buried under a bigger old number.
+function seenMerge(seen, occurrence) {
+  const map = seen && typeof seen === "object" ? seen : {};
+  const occ = occurrence && typeof occurrence === "object" ? occurrence : null;
+  if (occ === null) return map;
+  const key = sanitizeText(occ.key, 96);
+  if (key.length === 0) return map;
+  const next = {};
+  for (const k in map) next[k] = map[k];
+  next[key] = {
+    key: key,
+    epoch: asNumber(occ.epoch),
+    count: asNumber(occ.count),
+    lastEpoch: asNumber(occ.lastEpoch),
+    bootIso: occ.bootIso === undefined || occ.bootIso === null ? null : sanitizeText(occ.bootIso, 64),
+  };
+  return next;
+}
+
+// Overlaying a whole map (the file over the session at load): per key the
+// overlay wins, because the session's record is the fresher seeing.
+function seenMergeMap(base, overlay) {
+  const b = base && typeof base === "object" ? base : {};
+  const o = overlay && typeof overlay === "object" ? overlay : {};
+  const next = {};
+  for (const k in b) next[k] = b[k];
+  for (const k in o) next[k] = o[k];
+  return next;
+}
+
+// The ledger's file shape, sanitized: junk keys and records drop, every
+// number reads through asNumber, the boot ISO through sanitizeText. An old
+// crash-codes.json with no seen map reads as empty - the migration is the
+// load itself, and it is idempotent.
+function normalizeSeenCodes(raw) {
+  const map = raw && typeof raw === "object" ? raw : {};
+  const out = {};
+  for (const k in map) {
+    const key = sanitizeText(k, 96);
+    if (key.length === 0) continue;
+    const r = map[k];
+    if (!r || typeof r !== "object") continue;
+    const epoch = asNumber(r.epoch);
+    const count = asNumber(r.count);
+    const lastEpoch = asNumber(r.lastEpoch);
+    const iso = sanitizeText(r.bootIso, 64);
+    if (epoch === null && count === null && lastEpoch === null && iso.length === 0) continue;
+    out[key] = { key: key, epoch: epoch, count: count, lastEpoch: lastEpoch,
+      bootIso: iso.length > 0 ? iso : null };
+  }
+  return out;
 }
 
 // --- the bar emblem's truth (round 12) --------------------------------------
@@ -2400,7 +2630,7 @@ function psiPressureEntry(value, state, nowMs) {
     : "RAM pressure sustained: " + v.toFixed(1) + " PSI held " +
       Math.max(1, held) + (held === 1 ? " minute." : " minutes.");
   return sysCode("ram", SYS_SUBJECTS.ram, 2, issue,
-    SYS_STATUS.severe, SYS_FIX.severe,
+    SYS_STATUS.severe, ackFix(SYS_FIX.severe),
     { psiSomeAvg10: v, aboveSinceMs: above, atMs: asNumber(state.atMs) });
 }
 
@@ -2596,6 +2826,7 @@ function codeTip(code) {
   // Round 7 item 2: the code row's hover is one line too - the status line.
   // Round 11: a crash latch's hover is the detail the captain asked to view:
   // when it fired, the newest evidence line, and how to clear the code.
+  // Round 13: every clearable fault code says how it clears.
   const rows = [
     { label: "Status:", text: c.status, cls: c.sev === "r" ? "st-r" : "st-a" },
   ];
@@ -2605,7 +2836,9 @@ function codeTip(code) {
     if (seen !== null) rows.push({ label: "Seen:", text: seen, cls: "" });
     const evidence = crashEvidenceLine(d);
     if (evidence !== null) rows.push({ label: "Evidence:", text: evidence, cls: "" });
-    rows.push({ label: "Clear:", text: "right click clears the code. it stays cleared for this boot.", cls: "" });
+  }
+  if (codeAckable(c)) {
+    rows.push({ label: "Clear:", text: "right click clears the code. it stays cleared until new evidence arrives.", cls: "" });
   }
   return {
     header: c.code,
@@ -2722,9 +2955,12 @@ function dispatchToast(code, severe) {
 }
 
 // The right-click acknowledge confirmation, the dispatch toasts' plain-word
-// register. Clearing the code clears the row, never the journal.
-function crashAckToast(entry) {
-  return "cleared " + String((entry || {}).code || "the code") + ". the journal keeps the evidence.";
+// register. Clearing the code clears the row and records the occurrence as
+// seen, durably; the journal and the machine keep their own evidence. The
+// copy promises exactly what round 13 made true: the clear holds until new
+// evidence arrives, not merely for the boot.
+function codeAckToast(entry) {
+  return "cleared " + String((entry || {}).code || "the code") + ". it stays cleared until new evidence arrives.";
 }
 
 // A severe code's click rides the arm, and the arm's gate can refuse it. The
@@ -2738,6 +2974,9 @@ var REFUSALS = {
   "no-headroom": "not sent. no memory headroom.",
   "not-writer": "not sent. another screen owns the guard.",
   "no-firstmate-home": "not sent. no firstmate home found.",
+  // Round 13: the once guard's refusal. A code whose occurrence was already
+  // sent never queues a second note - the captain asked to be notified once.
+  "already-seen": "not sent. this code was already sent.",
 };
 
 function dispatchRefused(code, why) {

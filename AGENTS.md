@@ -51,7 +51,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the system fault codes - round 9's bar/kernel/GPU/layer/disk and round 11's
   crash forensics (journal wedge signatures latched with evidence, persisted
   to `crash-codes.json`, cleared by acknowledge) and the sustained RAM
-  pressure code, the VRAM
+  pressure code, plus round 13's once-per-occurrence seen ledger (the durable
+  record that an engine code was already sent or cleared, riding the same
+  `crash-codes.json`). the VRAM
   per-process hover grid, cluster copy, the ISO symbol artwork) in
   `memory-monitor/quattro.js`,
   rendered by `QuattroDash.qml` / `QuattroSymbol.qml` under the same
@@ -134,6 +136,10 @@ latch round trip across a simulated restart, the acknowledge rule, the
 sustained-PSI latch/no-latch/clear matrix against the rig's own fixture
 lines, and round 12's emblem truth — the latched codes lighting the bar icon
 at their own bands until the acknowledge ends the light.
+`tests/codes-once.test.mjs` is round 13's contract: the occurrence identity
+rule per family, the once-per-occurrence surfacing and send guard, the C2192
+right-click repro, a clear surviving a simulated bar restart through the
+state file, and the new-evidence re-raise rule.
 
 ## Contracts worth not breaking
 
@@ -382,6 +388,30 @@ at their own bands until the acknowledge ends the light.
   latched crash code lights the bar emblem at its own band
   (`quattro.js barBadgeWithCrash`); the history only ever raises the tint,
   never downgrading a live fault.
+- **Round 13: an engine code notifies once per occurrence, and the occurrence
+  is machine evidence, never the row's text.** Root cause of the captain's
+  2026-11-23 report: the crash acknowledge removed the latch signature but
+  left no durable record, so every bar restart's once-per-session boot -1 scan
+  re-latched the same codes the captain had cleared, and the live BAR restart
+  code (C2192) was not clearable at all — `codeAckable` accepted crash entries
+  only, its right-click was a silent no-op, and its issue text carries a
+  changing age anything keyed on text could never match. The fix is the seen
+  ledger in `crash-codes.json` (`{ codes, seen }`, an old file migrating
+  idempotently as an empty ledger): a code occurrence is identified by
+  `quattro.js codeOccurrenceOf` — crash `firstEpoch`/`lastEpoch`/`count` (and
+  the unclean `bootIso` for power), the BAR restart moment
+  `uptimeSec - ageSec` (constant across polls, unmoved by bar restarts), the
+  KERNEL/GPU batch's newest epoch (`detail.untilEpoch`), LAYER's NRestarts
+  counter, DISK's `runStartMs` and RAM's `aboveSinceMs` (tolerances in
+  `CODE_SEEN_TOL_SEC`) — and a seen occurrence is filtered from the codes
+  column by `seenFilter` in `buildSystemCodes` (so the emblem follows) and
+  refused a second note by `codeSendOnce`, with a console log line naming what
+  was suppressed. Right-click clear (`ackCode`) and a sent note both record
+  the occurrence; only genuinely new evidence — a later epoch, a different
+  count (higher or reset-and-climbing), a new unclean boot — re-raises. Never
+  key seen/cleared state on issue text, an age, or anything a clock rewrites.
+  Unknown rows and drive codes are not occurrences and stay unclearable: a
+  sensor state must not be dismissable into a lie.
 
 ## Release
 
