@@ -332,7 +332,7 @@ restart in the next (never the age the row prints),
 systemd's own restart counter for LAYER, the batch's newest fault epoch for
 KERNEL and GPU, the sustained window's start for DISK and RAM - so the same
 event never notifies twice, and only genuinely new evidence (a later epoch,
-a higher count, a new unclean boot) re-raises a code. A calibration run induces the pressure it measures,
+a changed count, a new unclean boot) re-raises a code. A calibration run induces the pressure it measures,
 so a run holds the RAM code (and the KERNEL and DISK codes, as before) and
 freezes its windows; crash latches pass through, a lockup during a run is
 genuine.
