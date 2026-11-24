@@ -326,7 +326,9 @@ way (round 13): the clear, and a click that sends the code's note, record
 the code's occurrence in a seen ledger persisted beside the latch, so a bar
 restart cannot un-see it. An occurrence is identified by its stable evidence
 - the journal epochs and count for a crash signature, the unclean boot for
-POWER, the restart event itself for BAR (never the age the row prints),
+POWER, the restart event itself for BAR - its boot-relative moment paired
+with the boot it happened in, so a clear from one boot never suppresses a
+restart in the next (never the age the row prints),
 systemd's own restart counter for LAYER, the batch's newest fault epoch for
 KERNEL and GPU, the sustained window's start for DISK and RAM - so the same
 event never notifies twice, and only genuinely new evidence (a later epoch,

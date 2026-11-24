@@ -30,7 +30,7 @@ test("quattro.js declares the once-per-occurrence decisions", () => {
   const source = repoFile("memory-monitor/quattro.js");
   for (const fn of [
     "codeOccurrenceOf", "seenSuppressed", "seenFilter", "seenMerge",
-    "seenMergeMap", "normalizeSeenCodes", "codeAckToast",
+    "seenMergeMap", "normalizeSeenCodes", "codeAckToast", "bootIsoFromLast",
   ]) {
     assert.match(source, new RegExp(`\\bfunction\\s+${fn}\\s*\\(`), `quattro.js must declare ${fn}`);
   }
@@ -71,6 +71,43 @@ test("the bar code's identity is the restart event, not the age text", () => {
   const fresh = Quattro.codeOccurrenceOf(barEntry(30, 400000));
   assert.equal(Quattro.seenSuppressed(fresh, seen), false,
     "a genuinely new restart is new evidence and re-raises the code");
+});
+
+test("the bar occurrence carries the boot, so a reboot releases the record", () => {
+  // Round 13.1, the second look's defect: the epoch uptimeSec - ageSec is
+  // BOOT-RELATIVE and the ledger crosses reboots, so a record cleared at
+  // long uptime would otherwise suppress every early-boot restart of the
+  // next boot - a real crash 10 minutes after boot included.
+  const bootA = "2026-11-21T11:31:13-05:00";
+  const bootB = "2026-11-23T10:00:00-05:00";
+  const barAt = (ageSec, uptimeSec, bootIso) => Quattro.barSysCode(
+    Quattro.parseBarProbe(String(uptimeSec) + "\n" + String(ageSec)), 0, bootIso);
+
+  // Cleared at 4 h of uptime in boot A.
+  const clearedAt = barAt(144, 14400, bootA);
+  const seen = Quattro.seenMerge({}, Quattro.codeOccurrenceOf(clearedAt));
+  const record = seen[Quattro.SYS_SUBJECTS.bar];
+  assert.equal(record.bootIso, bootA, "the record names the boot it was cleared in");
+
+  // A later probe in the SAME boot is still the same occurrence.
+  const sameBoot = Quattro.codeOccurrenceOf(barAt(146, 14402, bootA));
+  assert.equal(Quattro.seenSuppressed(sameBoot, record), true,
+    "same boot, same restart event: suppressed");
+
+  // The reboot: the uptime clock restarts, so the new boot's restart reads a
+  // SMALLER epoch than the 4 h record - the exact false suppression shape.
+  const crashAfterReboot = Quattro.codeOccurrenceOf(barAt(660, 1200, bootB));
+  assert.equal(crashAfterReboot.epoch < record.epoch, true,
+    "the new boot's epoch is smaller than the record's");
+  assert.equal(Quattro.seenSuppressed(crashAfterReboot, record), false,
+    "a bar restart in a new boot re-raises, whatever the uptime was when the old one was cleared");
+
+  // The boot ISO comes from the wtmp read the crash lane already owns.
+  assert.equal(Quattro.bootIsoFromLast(fixture("crash-last-unclean.txt")), bootA,
+    "the newest reboot row is the boot the machine is on");
+  assert.notEqual(Quattro.bootIsoFromLast(fixture("crash-last-clean.txt")), null);
+  assert.equal(Quattro.bootIsoFromLast(""), null);
+  assert.equal(Quattro.bootIsoFromLast("junk without rows"), null);
 });
 
 test("the bar code's states are not occurrences: dead and unknown rows stay unclearable", () => {
@@ -306,6 +343,8 @@ test("MemoryMonitor.qml runs the dedupe guard and logs what it suppresses", () =
   assert.equal(QML.includes("Quattro.codeOccurrenceOf("), true, "the occurrence derivation is quattro's");
   assert.equal(QML.includes("Quattro.seenMerge("), true, "the ack and the send record through quattro's merge");
   assert.equal(QML.includes("Quattro.normalizeSeenCodes("), true, "the load recovers the ledger from the file");
+  assert.equal(QML.includes("Quattro.bootIsoFromLast("), true, "the bar occurrence's boot comes from the wtmp read");
+  assert.equal(QML.includes("sysBootIso"), true, "the widget stashes the boot for the session");
   assert.match(QML, /console\.log\("memory-monitor: engine code/,
     "a suppressed duplicate leaves a log line, so a regression is visible");
   assert.equal(QML.includes("seen: root.codeSeen"), true, "the crash state file carries the ledger beside the latch");

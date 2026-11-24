@@ -1636,7 +1636,7 @@ var CRASH_FIX =
 // Dead is severe; a restart inside the window that did not land with the
 // session is moderate; a boot start is clear; an unreadable probe is the
 // unknown row, never a confident healthy zero.
-function barSysCode(probe, exitCode) {
+function barSysCode(probe, exitCode, bootIso) {
   const p = probe || { readable: false, uptimeSec: null, ages: [] };
   if (!p.readable) {
     return sysCode("bar", SYS_SUBJECTS.bar, 1, "Bar shell state unknown.", SYS_STATUS.unknown, SYS_FIX.moderate,
@@ -1662,7 +1662,8 @@ function barSysCode(probe, exitCode) {
   return sysCode("bar", SYS_SUBJECTS.bar, 1,
     "Bar shell restarted " + minutes + (minutes === 1 ? " minute" : " minutes") + " ago.",
     SYS_STATUS.moderate, ackFix(SYS_FIX.moderate),
-    { alive: true, ageSec: Math.round(age), uptimeSec: Math.round(p.uptimeSec) });
+    { alive: true, ageSec: Math.round(age), uptimeSec: Math.round(p.uptimeSec),
+      bootIso: sanitizeText(bootIso, 64) || null });
 }
 
 // --- KERNEL: new kernel fault lines since the last look ---------------------
@@ -1971,6 +1972,18 @@ function parseLastBoots(text) {
 // clean boundary; reboot follows reboot when the previous boot never ended
 // cleanly (the hard cycle: no shutdown row, the reboot row still says "still
 // running"). No date parsing: the ISO timestamp stays text evidence.
+// The current boot's start ISO, off the same wtmp rows the unclean-boundary
+// rule reads: the newest row, which is the reboot this machine is running on.
+// Round 13.1: the BAR occurrence carries this so a seen record from one boot
+// can never suppress a restart in another - the epoch uptimeSec - ageSec is
+// boot-relative, and the ledger crosses reboots.
+function bootIsoFromLast(text) {
+  const rows = parseLastBoots(text);
+  if (rows.length === 0 || rows[0].kind !== "reboot") return null;
+  const iso = sanitizeText(rows[0].iso, 64);
+  return iso.length > 0 ? iso : null;
+}
+
 function uncleanShutdown(rows) {
   const list = rows === null || rows === undefined ? [] : rows;
   if (list.length < 2 || !list[0] || list[0].kind !== "reboot") return null;
@@ -2274,12 +2287,16 @@ function codeAckable(entry) {
 //   crash:<sig>  the latch record's own evidence - firstEpoch/lastEpoch/count,
 //                and the unclean boot's ISO for the power code
 //   bar          the restart event itself: uptimeSec - ageSec, the moment the
-//                restart landed counted from the system boot. Uptime and
-//                process age grow one for one, so the value is constant
-//                across polls (probe jitter is seconds), and a bar restart
-//                does not move the system uptime, so the identity survives
-//                the restarts that re-derive the code. A NEW restart is a
-//                later moment, so it is new evidence.
+//                restart landed counted from the system boot, PAIRED WITH the
+//                current boot's ISO (bootIsoFromLast, off the wtmp read the
+//                crash lane owns) - the moment is boot-relative and the
+//                ledger crosses reboots, so a record from one boot must
+//                never suppress a restart in another. Uptime and process age
+//                grow one for one, so the value is constant across polls
+//                (probe jitter is seconds), and a bar restart does not move
+//                the system uptime, so the identity survives the restarts
+//                that re-derive the code. A NEW restart is a later moment
+//                within the same boot, so it is new evidence.
 //   kernel/gpu   the batch's newest journal epoch (detail.untilEpoch)
 //   layer:<unit> systemd's own NRestarts counter
 //   disk         the sustained run's start epoch (runStartMs)
@@ -2322,8 +2339,9 @@ function codeOccurrenceOf(entry) {
     const age = asNumber(d.ageSec);
     const up = asNumber(d.uptimeSec);
     if (age === null || up === null) return null;
-    return { key: key, epoch: up - age, count: null, lastEpoch: null, bootIso: null,
-      tolSec: CODE_SEEN_TOL_SEC.bar };
+    const iso = sanitizeText(d.bootIso, 64);
+    return { key: key, epoch: up - age, count: null, lastEpoch: null,
+      bootIso: iso.length > 0 ? iso : null, tolSec: CODE_SEEN_TOL_SEC.bar };
   }
   if (sys === "kernel" || sys === "gpu") {
     const until = asNumber(d.untilEpoch);

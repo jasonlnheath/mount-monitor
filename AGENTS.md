@@ -397,10 +397,15 @@ state file, and the new-evidence re-raise rule.
   only, its right-click was a silent no-op, and its issue text carries a
   changing age anything keyed on text could never match. The fix is the seen
   ledger in `crash-codes.json` (`{ codes, seen }`, an old file migrating
-  idempotently as an empty ledger): a code occurrence is identified by
+  idempotently as an empty ledger; a file holding literal JSON `null` also
+  reads as empty): a code occurrence is identified by
   `quattro.js codeOccurrenceOf` — crash `firstEpoch`/`lastEpoch`/`count` (and
   the unclean `bootIso` for power), the BAR restart moment
-  `uptimeSec - ageSec` (constant across polls, unmoved by bar restarts), the
+  `uptimeSec - ageSec` **paired with the current boot's ISO** (`bootIsoFromLast`
+  off the wtmp read, stashed as `sysBootIso` for the session — the moment is
+  boot-relative and the ledger crosses reboots, so without the boot a record
+  cleared at long uptime would suppress every early-boot restart of the next
+  boot), the
   KERNEL/GPU batch's newest epoch (`detail.untilEpoch`), LAYER's NRestarts
   counter, DISK's `runStartMs` and RAM's `aboveSinceMs` (tolerances in
   `CODE_SEEN_TOL_SEC`) — and a seen occurrence is filtered from the codes

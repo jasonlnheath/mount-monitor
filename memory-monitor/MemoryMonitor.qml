@@ -314,6 +314,13 @@ BarWidget {
   property int crashBootExit: 0
   property var sysCrashCursor: null
   property var sysPsiPrev: null
+  // Round 13.1: the current boot's start ISO, captured from the wtmp read the
+  // crash lane already owns. Stashed as a property because the crash
+  // acknowledge retires that read's cached text mid-session, and a boot does
+  // not change while the bar is running - the bar occurrence's identity is
+  // boot-relative, so without the boot a record from one boot would suppress
+  // every early-boot restart of the next.
+  property string sysBootIso: ""
   property var crashLatched: ({})
   // Round 13: the once-per-occurrence ledger, the durable memory of every
   // engine-code occurrence the captain has already seen (a click that sent
@@ -457,7 +464,9 @@ BarWidget {
     var ioPsi = Quattro.parseIoPsi(ioPsiText);
     hasLastIoSomeAvg60 = ioPsi !== null && ioPsi.someAvg60 !== null && ioPsi.someAvg60 !== undefined;
     lastIoSomeAvg60 = hasLastIoSomeAvg60 ? ioPsi.someAvg60 : -1;
-    var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit);
+    var bootIso = Quattro.bootIsoFromLast(root.crashLastText);
+    if (bootIso !== null) root.sysBootIso = bootIso;
+    var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit, root.sysBootIso);
     var kernel = Quattro.kernelSysCode(Quattro.parseJournalLines(kernelJournalText), kernelJournalOk, sysKernelCursor);
     var gpu = Quattro.gpuSysCode(wedgeJournalText, wedgeJournalExit);
     var layer = Quattro.layerSysCode(Quattro.parseUnitShow(unitShowText), unitShowOk, sysLayerPrev);
@@ -1158,6 +1167,10 @@ BarWidget {
         parsed = {};
       }
     }
+    // Round 13.1: a file holding literally `null` (or any non-object JSON)
+    // parses without throwing but would break the seen-map read below; it
+    // reads as an empty state, the same as an absent one.
+    if (parsed === null || typeof parsed !== "object") parsed = {};
     var normalized = Quattro.normalizeCrashLatched(parsed);
     crashLatched = Quattro.crashMergeLatched(normalized.codes, root.crashLatched);
     // Round 13: the seen ledger rides the same file. An old file with no seen
