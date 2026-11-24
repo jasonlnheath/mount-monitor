@@ -233,6 +233,15 @@ Panel {
       showToast(Quattro.dispatchRefused(code.code, "no-firstmate-home"), true)
       return
     }
+    // Round 13: the once guard. The captain is notified once per engine-code
+    // occurrence: the monitor refuses a click whose occurrence was already
+    // sent, so a re-click after a restart never queues a second note. The
+    // refusal is said in words like every other declined dispatch.
+    var once = callMonitor("codeSendOnce", [code], null)
+    if (once === null || once.ok !== true) {
+      showToast(Quattro.dispatchRefused(code.code, once === null ? "" : once.why), true)
+      return
+    }
     Quickshell.execDetached(Memory.codeNoteArgv(Quattro.codeNotePayload(code, hdRows), fmHome))
     markSent(code.code)
     showToast(Quattro.dispatchToast(code.code, code.sev === "r"))
@@ -1880,18 +1889,20 @@ Panel {
       acceptedButtons: Qt.LeftButton | Qt.RightButton
       onClicked: function(mouse) {
         if (codeRow.entry === null) return
-        // Round 11: a crash latch clears by acknowledge, not by condition
-        // (a reboot never clears it). Left click still dispatches the
-        // diagnosis to the agent; right click asks the monitor to clear, and
-        // quattro decides which entries are clearable at all.
+        // Round 11 opened the clear for crash latches; round 13 made it true
+        // for every fault code: the clear records the occurrence in the
+        // persisted seen ledger, so it survives restarts and only genuinely
+        // new evidence re-raises the code. Left click still dispatches the
+        // diagnosis as a firstmate note. A code that cannot be cleared (the
+        // honest unknown rows, drive codes) says so in words instead of
+        // silently doing nothing.
         if (mouse.button === Qt.RightButton) {
-          if (!Quattro.codeAckable(codeRow.entry)) return
-          var decision = callMonitor("ackCrashCode", [codeRow.entry], null)
+          var decision = callMonitor("ackCode", [codeRow.entry], null)
           if (decision === null || decision.cleared !== true) {
             showToast("not cleared here.", true)
             return
           }
-          showToast(Quattro.crashAckToast(codeRow.entry), false)
+          showToast(Quattro.codeAckToast(codeRow.entry), false)
           return
         }
         root.dispatchCode(codeRow.entry)

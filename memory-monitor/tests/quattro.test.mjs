@@ -527,7 +527,7 @@ test("BAR: a restart inside the window that did not land with the session is mod
   assert.equal(code.band, 1);
   assert.equal(code.issue, "Bar shell restarted 5 minutes ago.");
   assert.equal(code.status, "moderate, system fault showing.");
-  assert.equal(code.fix, "click to send crash pattern to agent.");
+  assert.equal(code.fix, "click to send crash pattern to agent. right-click clears the code, and it stays cleared until new evidence arrives.");
   assert.equal(Quattro.barSysCode(Quattro.parseBarProbe("5000.9\n61"), 0).issue, "Bar shell restarted 1 minute ago.", "singular minute");
 });
 
@@ -589,7 +589,7 @@ test("KERNEL: lines strictly after the cursor are the count and the culprit", ()
   assert.equal(result.entry.alert.detail.newLines, fresh.length);
   assert.equal(result.entry.alert.detail.culprit, "Out of memory");
   assert.equal(result.entry.issue, "Kernel faults: " + fresh.length + " new. Culprit: Out of memory.");
-  assert.equal(result.entry.fix, "click to send crash pattern to agent.");
+  assert.equal(result.entry.fix, "click to send crash pattern to agent. right-click clears the code, and it stays cleared until new evidence arrives.");
   // The exact journal lines ride the detail for the agent, capped at the tail.
   assert.equal(result.entry.alert.detail.lines.length, Math.min(fresh.length, Quattro.SYS_DETAIL_MAX_LINES));
   assert.ok(result.entry.alert.detail.lines[0].includes("usb"), "the exact lines ride the payload");
@@ -663,7 +663,7 @@ test("GPU: the real wedge signature from this rig lights the big red one", () =>
 
 test("GPU: the severe fix copy says a reboot clears it and never promises an in-place reset", () => {
   const code = Quattro.gpuSysCode(fixture("gpu-wedge-journal.txt"), 0);
-  assert.equal(code.fix, "agent has the crash pattern and is processing now. a reboot clears it.");
+  assert.equal(code.fix, "agent has the crash pattern and is processing now. a reboot clears it. right-click clears the code, and it stays cleared until new evidence arrives.");
   assert.equal(code.status, "severe, the driver is wedged. only a reboot clears it.");
   assert.equal(/reset in place|reload the module|re-initialize/.test(code.fix + code.status + Quattro.systemDiagnosisRecommendation("gpu", "r")), false,
     "the copy must not pretend an in-place reset exists");
@@ -820,7 +820,7 @@ test("DISK: over the red bar is severe on one poll", () => {
   assert.equal(step.entry.sev, "r");
   assert.equal(step.entry.band, 2);
   assert.equal(step.entry.issue, "Disk stalls: IO pressure 31.4 over the red bar.");
-  assert.equal(step.entry.fix, "agent has the crash pattern and is processing now.");
+  assert.equal(step.entry.fix, "agent has the crash pattern and is processing now. right-click clears the code, and it stays cleared until new evidence arrives.");
   assert.equal(step.entry.alert.detail.someAvg60, 31.4);
 });
 
@@ -834,7 +834,7 @@ test("DISK: the amber bar needs the sustain, one poll alone lights nothing", () 
   assert.equal(step.entry.sev, "a");
   assert.equal(step.entry.band, 1);
   assert.equal(step.entry.issue, "Disk stalls: IO pressure 12.6 held 2 polls.");
-  assert.equal(step.entry.fix, "click to send crash pattern to agent.");
+  assert.equal(step.entry.fix, "click to send crash pattern to agent. right-click clears the code, and it stays cleared until new evidence arrives.");
 });
 
 test("DISK: a poll under the bar resets the run", () => {
@@ -1556,7 +1556,7 @@ test("the language rule holds over every string the popup copy can produce", () 
   texts.push(Quattro.crashSysUpdate(
     { text: "", exit: 2, done: true }, { text: "", exit: 0, done: true },
     { text: "", exit: 1 }, null, {}).entries[0].issue);
-  texts.push(Quattro.crashAckToast({ code: "C0001" }), Quattro.crashAckToast(null));
+  texts.push(Quattro.codeAckToast({ code: "C0001" }), Quattro.codeAckToast(null));
   // The engine-code click's note payload: the same language law over the
   // fixed frame and the diagnosis the note carries.
   for (const entry of langCrash.entries) {

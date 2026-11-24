@@ -314,7 +314,22 @@ BarWidget {
   property int crashBootExit: 0
   property var sysCrashCursor: null
   property var sysPsiPrev: null
+  // Round 13.1: the current boot's start ISO, captured from the wtmp read the
+  // crash lane already owns. Stashed as a property because the crash
+  // acknowledge retires that read's cached text mid-session, and a boot does
+  // not change while the bar is running - the bar occurrence's identity is
+  // boot-relative, so without the boot a record from one boot would suppress
+  // every early-boot restart of the next.
+  property string sysBootIso: ""
   property var crashLatched: ({})
+  // Round 13: the once-per-occurrence ledger, the durable memory of every
+  // engine-code occurrence the captain has already seen (a click that sent
+  // the note, or a right-click clear). It persists beside the latch in the
+  // same crash state file, so a bar restart cannot un-see what was seen.
+  property var codeSeen: ({})
+  // The dedupe guard's own log limiter: the suppressed-code stamp of the last
+  // cycle, so a suppressed duplicate logs when it appears, not every poll.
+  property string lastSuppressedCodes: ""
   property bool crashStateLoaded: false
   readonly property string crashStatePath: Memory.crashPath(home)
   // The merged system code entries the dashboard reads.
@@ -449,11 +464,13 @@ BarWidget {
     var ioPsi = Quattro.parseIoPsi(ioPsiText);
     hasLastIoSomeAvg60 = ioPsi !== null && ioPsi.someAvg60 !== null && ioPsi.someAvg60 !== undefined;
     lastIoSomeAvg60 = hasLastIoSomeAvg60 ? ioPsi.someAvg60 : -1;
-    var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit);
+    var bootIso = Quattro.bootIsoFromLast(root.crashLastText);
+    if (bootIso !== null) root.sysBootIso = bootIso;
+    var bar = Quattro.barSysCode(Quattro.parseBarProbe(barProbeText), barProbeExit, root.sysBootIso);
     var kernel = Quattro.kernelSysCode(Quattro.parseJournalLines(kernelJournalText), kernelJournalOk, sysKernelCursor);
     var gpu = Quattro.gpuSysCode(wedgeJournalText, wedgeJournalExit);
     var layer = Quattro.layerSysCode(Quattro.parseUnitShow(unitShowText), unitShowOk, sysLayerPrev);
-    var disk = Quattro.diskSysCode(ioPsi, ioPsiOk, sysDiskPrev);
+    var disk = Quattro.diskSysCode(ioPsi, ioPsiOk, sysDiskPrev, new Date().getTime());
     var merged = Quattro.sysCodesQuiet(bar, kernel, gpu, layer, disk, root.calibQuiet());
     sysKernelCursor = merged.cursor;
     sysLayerPrev = merged.layerNext;
@@ -483,7 +500,32 @@ BarWidget {
       Memory.normalizeNumber(setting("psiPressureSustainSec", -1), -1),
       root.calibQuiet());
     sysPsiPrev = psiCode.next;
-    sysCodes = merged.entries.concat(crash.entries).concat(psiCode.entry === null ? [] : [psiCode.entry]);
+    // Round 13: the once-per-occurrence guard. What the captain already saw
+    // (sent or cleared) does not surface again - not in the column, and not
+    // on the emblem, which reads this same list. The suppressed names log
+    // once per change, so a future regression that re-raises seen codes is
+    // visible in the shell log instead of only in the captain's inbox.
+    var rawCodes = merged.entries.concat(crash.entries).concat(psiCode.entry === null ? [] : [psiCode.entry]);
+    var seenState = Quattro.seenFilter(rawCodes, root.codeSeen);
+    logSuppressedCodes(seenState.suppressed);
+    sysCodes = seenState.kept;
+  }
+
+  // The dedupe guard's log line: every newly suppressed duplicate is named,
+  // a steady state is named once. This is the tripwire the captain asked for
+  // - if the same code ever starts re-raising, the log says so.
+  function logSuppressedCodes(suppressed): void {
+    var names = [];
+    var list = suppressed === null || suppressed === undefined ? [] : suppressed;
+    for (var i = 0; i < list.length; i++) {
+      names.push(String(list[i] && list[i].code));
+    }
+    var stamp = names.join(",");
+    if (stamp === root.lastSuppressedCodes) return;
+    root.lastSuppressedCodes = stamp;
+    if (names.length === 0) return;
+    console.log("memory-monitor: engine code" + (names.length === 1 ? " " : "s ") +
+      names.join(", ") + " already seen, not surfacing again");
   }
 
   function buildReadings(): void {
@@ -1125,30 +1167,62 @@ BarWidget {
         parsed = {};
       }
     }
+    // Round 13.1: a file holding literally `null` (or any non-object JSON)
+    // parses without throwing but would break the seen-map read below; it
+    // reads as an empty state, the same as an absent one.
+    if (parsed === null || typeof parsed !== "object") parsed = {};
     var normalized = Quattro.normalizeCrashLatched(parsed);
     crashLatched = Quattro.crashMergeLatched(normalized.codes, root.crashLatched);
+    // Round 13: the seen ledger rides the same file. An old file with no seen
+    // map reads as empty, which is the whole migration: the codes the captain
+    // never saw under the old rule surface once under the new one, and never
+    // again after that.
+    codeSeen = Quattro.seenMergeMap(Quattro.normalizeSeenCodes(parsed.seen), root.codeSeen);
     crashStateLoaded = true;
   }
 
   function writeCrashState(): void {
-    crashFile.setText(JSON.stringify({ codes: root.crashLatched }));
+    crashFile.setText(JSON.stringify({ codes: root.crashLatched, seen: root.codeSeen }));
   }
 
-  // The dash's right-click acknowledge: quattro decides ackability, the map
-  // loses exactly the acknowledged signature, and the once-per-session scans
-  // that carried it are retired with it - their cached text would rebuild the
-  // record on the next cycle, and only a scan that runs after the ack may
-  // latch the signature again. Return shape mirrors dispatchCriticalCode's
-  // decision object.
-  function ackCrashCode(entry): var {
-    if (!Quattro.codeAckable(entry)) return { cleared: false, why: "not-crash" };
+  // Round 13: the right-click clear, generalized past the crash latch. The
+  // occurrence is recorded in the seen ledger first - that record is what a
+  // restart cannot lose - and a crash signature additionally loses its latch
+  // the way it always did, with the session's once-per-session scans retired
+  // so their cached text cannot rebuild the record this cycle. Every fault
+  // code clears this way now, C2192 included; the honest unknown rows and
+  // drive codes answer not-clearable, and the dash says so in words.
+  function ackCode(entry): var {
+    var occ = Quattro.codeOccurrenceOf(entry);
+    if (occ === null) return { cleared: false, why: "not-clearable" };
     if (!isWriter) return { cleared: false, why: "not-writer" };
+    codeSeen = Quattro.seenMerge(root.codeSeen, occ);
     var sig = Quattro.crashSigOf(entry);
-    crashLatched = Quattro.ackCrashRecord(root.crashLatched, sig);
-    crashPrevText = "";
-    crashLastText = "";
+    if (sig !== null) {
+      crashLatched = Quattro.ackCrashRecord(root.crashLatched, sig);
+      crashPrevText = "";
+      crashLastText = "";
+    }
     root.writeCrashState();
     return { cleared: true };
+  }
+
+  // Round 13: the send-side once guard. The captain is notified once per
+  // engine-code occurrence: a click whose occurrence is already in the ledger
+  // refuses in words and queues no second note, and a click that passes
+  // records the occurrence before the note leaves, so a double click and a
+  // re-click after a restart are the same one send. A code with no occurrence
+  // identity (a drive code) is not this guard's to hold back.
+  function codeSendOnce(entry): var {
+    var occ = Quattro.codeOccurrenceOf(entry);
+    if (occ === null) return { ok: true };
+    if (Quattro.seenSuppressed(occ, root.codeSeen[occ.key])) {
+      console.log("memory-monitor: engine code " + String(entry && entry.code) + " note suppressed, already seen");
+      return { ok: false, why: "already-seen" };
+    }
+    codeSeen = Quattro.seenMerge(root.codeSeen, occ);
+    if (isWriter) root.writeCrashState();
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------------------
